@@ -44,7 +44,7 @@ function createWindow() {
     mainWindow = new BrowserWindow({
         width: 1200,
         height: 800,
-        title: "LibroGenie (OFFLINE)",
+        title: "InstantTraducer (OFFLINE)",
         ...(process.platform === 'darwin'
             ? {
                 titleBarStyle: 'hidden',

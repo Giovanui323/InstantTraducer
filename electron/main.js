@@ -56,7 +56,7 @@ ipcMain.handle('export-project-package', async (_event, { fileId }) => {
         const { canceled, filePath } = await dialog.showSaveDialog(mainWindow || undefined, {
             title: 'Esporta Pacchetto Progetto',
             defaultPath: `Project_${cleanId}.gpt`,
-            filters: [{ name: 'LibroGenie Project (.gpt)', extensions: ['gpt'] }]
+            filters: [{ name: 'InstantTraducer Project (.gpt)', extensions: ['gpt'] }]
         });
 
         if (canceled || !filePath) return { success: false, cancelled: true };
@@ -78,7 +78,7 @@ ipcMain.handle('import-project-package', async (_event) => {
         const { canceled, filePaths } = await dialog.showOpenDialog(mainWindow, {
             title: 'Importa Pacchetto Progetto',
             properties: ['openFile'],
-            filters: [{ name: 'LibroGenie Project (.gpt)', extensions: ['gpt'] }]
+            filters: [{ name: 'InstantTraducer Project (.gpt)', extensions: ['gpt'] }]
         });
 
         if (canceled || filePaths.length === 0) return null;

@@ -129,7 +129,7 @@ export const Header: React.FC<HeaderProps> = ({
             </>
           ) : (
             <>
-              <span>LibroGenie</span>
+              <span>InstantTraducer</span>
             </>
           )}
         </h1>

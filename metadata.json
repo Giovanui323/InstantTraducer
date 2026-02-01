@@ -1,5 +1,5 @@
 {
-  "name": "LibroGenie",
-  "description": "Your personal book translator genie. Transforms complex PDFs into smooth readings in your language, maintaining context and the soul of the original work.",
+  "name": "InstantTraducer",
+  "description": "Fast and reliable PDF book translator. Powered by Gemini and OpenAI to provide instant, high-quality translations while maintaining context.",
   "requestFramePermissions": []
 }
