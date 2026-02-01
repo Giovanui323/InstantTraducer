@@ -122,9 +122,9 @@ export const translateWithGemini = async (
   if (onProgress) onProgress(`Preparazione richiesta Gemini (${model}) - Immagine: ${Math.round(imageBytesApprox / 1024)}KB`);
   const ai = getGeminiInstance(apiKey);
   const safePreviousContext = looksLikeItalian(previousContext, sourceLanguage) ? previousContext : "";
-  const requestStartedAt = Date.now();
+  const requestStartedAt = performance.now();
   let firstChunkAt: number | null = null;
-  let lastChunkAt = Date.now();
+  let lastChunkAt = requestStartedAt;
   let heartbeatId: any = null;
   let streamingActive = false;
   const abortListener = () => {
@@ -156,7 +156,7 @@ export const translateWithGemini = async (
           if (heartbeatId) { clearInterval(heartbeatId); heartbeatId = null; }
           return;
         }
-        const now = Date.now();
+        const now = performance.now();
         const elapsedS = Math.round((now - requestStartedAt) / 1000);
         
         if (!streamingActive) {
@@ -271,18 +271,22 @@ export const translateWithGemini = async (
             
             // Check aggiuntivo per timeout primo chunk all'interno del loop
             if (firstChunkAt === null) {
-              const now = Date.now();
+              const now = performance.now();
               if (now - requestStartedAt > 120000) {
                 throw new Error("Timeout: Gemini non ha inviato il primo chunk entro 120 secondi.");
               }
             }
 
             chunkCount += 1;
-            lastChunkAt = Date.now();
+            lastChunkAt = performance.now();
             lastChunk = chunk;
             if (firstChunkAt === null) {
               firstChunkAt = lastChunkAt;
-              if (onProgress) onProgress(`Prima risposta ricevuta dopo ${Math.round((firstChunkAt - requestStartedAt) / 1000)}s`);
+              if (onProgress) {
+                const ttftMs = Math.round(firstChunkAt - requestStartedAt);
+                const ttftS = Math.round((ttftMs / 1000) * 10) / 10;
+                onProgress(`Prima risposta ricevuta dopo ${ttftS}s (${ttftMs}ms) [${model}]`);
+              }
             }
             
             const chunkText = chunk.text;
@@ -295,7 +299,7 @@ export const translateWithGemini = async (
                 break; 
               }
 
-              const now = Date.now();
+              const now = performance.now();
               const deltaChars = fullText.length - lastNotifiedLength;
               if (onProgress && (deltaChars >= 600 || now - lastProgressAt >= 900)) {
                 lastProgressAt = now;
@@ -575,14 +579,15 @@ export const extractPdfMetadata = async (
   apiKey: string,
   model: GeminiModel,
   imagesBase64: string[],
-  signal?: AbortSignal
+  signal?: AbortSignal,
+  targetLanguage?: string
 ): Promise<PdfMetadataResult> => {
   if (!apiKey) throw new Error("API Key mancante");
   const ai = getGeminiInstance(apiKey);
 
   const parts: any[] = [
     {
-      text: getMetadataExtractionPrompt()
+      text: getMetadataExtractionPrompt(targetLanguage)
     }
   ];
 
@@ -616,7 +621,7 @@ export const extractPdfMetadata = async (
   } catch (e) {
     if (isQuotaError(e) && model === GEMINI_TRANSLATION_MODEL) {
       log.warning(`Quota/Crediti esauriti per ${model} durante estrazione metadati. Tentativo con fallback...`);
-      return extractPdfMetadata(apiKey, GEMINI_TRANSLATION_FALLBACK_MODEL, imagesBase64, signal);
+      return extractPdfMetadata(apiKey, GEMINI_TRANSLATION_FALLBACK_MODEL, imagesBase64, signal, targetLanguage);
     }
     log.error("Errore estrazione metadati PDF", e);
     return {};

@@ -13,7 +13,7 @@ import { ReaderView } from './components/ReaderView';
 import {
   PAGE_RENDER_TIMEOUT_MS,
 } from './constants';
-import { ImageCropModal } from './components/ImageCropModal';
+import { ImageCropModal } from './components/ImageCropModal.tsx';
 import { SettingsModal } from './components/SettingsModal';
 import { RenameModal } from './components/RenameModal';
 import { PageSelectionModal } from './components/PageSelectionModal';
@@ -246,7 +246,7 @@ const AppOffline: React.FC = () => {
     setAnnotationMap,
     originalImagesRef, pageRotationsRef, pageReplacementsRef, pageImagesIndexRef,
     pageTraceRef, geminiLogs, setGeminiLogs,
-    setOriginalImages, setCroppedImages, croppedImagesRef,
+    setOriginalImages,
     setPageDims,
     readProjectImageBase64: async (args: any) => window.electronAPI.readProjectImageBase64(args).then((r: any) => r.base64),
     readProjectImageDataUrl: async (args: any) => window.electronAPI.readProjectImage(args).then((r: any) => r.dataUrl),

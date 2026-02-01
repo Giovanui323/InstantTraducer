@@ -59,6 +59,7 @@ export interface PageVerification {
   retryHint?: string;
   changed?: boolean;
   checkedAt?: number;
+  autoRetryActive?: boolean;
   postRetryFailed?: boolean;
   runId?: number;
   startedAt?: number;

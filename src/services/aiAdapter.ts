@@ -43,17 +43,18 @@ export const verifyQualityAdapter = async (params: {
   }
 };
 
-export const extractMetadataAdapter = async (
-  base64Images: string[],
+export const extractPdfMetadata = async (
   settings: AISettings,
-  options?: { signal?: AbortSignal }
+  base64Images: string[],
+  options?: { signal?: AbortSignal, targetLanguage?: string }
 ): Promise<PDFMetadata> => {
   if (settings.provider === "gemini") {
     const meta = await extractWithGemini(
       settings.gemini.apiKey,
       settings.gemini.model,
       base64Images,
-      options?.signal
+      options?.signal,
+      options?.targetLanguage
     );
     return {
       ...meta,
@@ -66,7 +67,8 @@ export const extractMetadataAdapter = async (
       settings.openai.apiKey,
       settings.openai.model,
       base64Images,
-      options?.signal
+      options?.signal,
+      options?.targetLanguage
     );
     return {
       ...meta,

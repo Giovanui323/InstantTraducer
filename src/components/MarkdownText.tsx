@@ -369,8 +369,8 @@ export const MarkdownText: React.FC<MarkdownTextProps> = ({
           <div className="block w-full mb-2">
             <div className={`block h-px w-full ${dark ? 'bg-gray-600' : 'bg-stone-400'}`} />
           </div>
-          <div className={`w-full text-[10px] leading-tight ${dark ? 'text-gray-300' : 'text-stone-800'}`} style={{ fontSize: '10px' }}>
-            {parsedFootnotes.length >= 2 ? (
+          <div className={`w-full leading-tight ${dark ? 'text-gray-300' : 'text-stone-800'}`} style={{ fontSize: '0.9em' }}>
+            {parsedFootnotes.length >= 1 ? (
               parsedFootnotes.map((note, idx) => (
                 <div key={note.n} className="flex gap-1 mb-2 items-start">
                   <span className={`font-semibold shrink-0 ${dark ? 'text-gray-300' : 'text-stone-800'}`}>{note.n}</span>
@@ -380,9 +380,9 @@ export const MarkdownText: React.FC<MarkdownTextProps> = ({
                 </div>
               ))
             ) : (
-              <span className="block">
+              <span className="block whitespace-pre-wrap">
                 {renderInlineMarkdown(
-                  footnotesRaw.replace(/\n+/g, ' ').replace(/\s{2,}/g, ' ').trim(),
+                  footnotesRaw.replace(/\s{2,}/g, ' ').trim(),
                   'raw-',
                   inlineSplitRegex
                 )}
@@ -397,7 +397,7 @@ export const MarkdownText: React.FC<MarkdownTextProps> = ({
           <div className="block w-full mb-2">
             <div className={`block h-px w-full ${dark ? 'bg-gray-600' : 'bg-stone-400'}`} />
           </div>
-          <div className={`w-full text-[10px] leading-tight ${dark ? 'text-gray-300' : 'text-stone-800'}`} style={{ fontSize: '10px' }}>
+          <div className={`w-full leading-tight ${dark ? 'text-gray-300' : 'text-stone-800'}`} style={{ fontSize: '0.9em' }}>
             {notes.map((note, idx) => (
               <span key={note.n} className="block mb-1">
                 <span className={`font-semibold ${dark ? 'text-gray-300' : 'text-stone-800'}`}>{note.n}</span>
@@ -412,7 +412,7 @@ export const MarkdownText: React.FC<MarkdownTextProps> = ({
       )}
       {userNotes && userNotes.length > 0 && (
         <div className="mt-2 flex flex-col items-start w-full">
-          <div className={`w-full text-[10px] leading-tight ${dark ? 'text-gray-300' : 'text-stone-800'}`} style={{ fontSize: '10px' }}>
+          <div className={`w-full leading-tight ${dark ? 'text-gray-300' : 'text-stone-800'}`} style={{ fontSize: '0.9em' }}>
             {userNotes.map((n, idx) => (
               <span key={n.id} className="block mb-1">
                 <span className={`font-semibold ${dark ? 'text-gray-300' : 'text-stone-800'}`}>{idx + 1}</span>
@@ -481,15 +481,21 @@ function parseFootnotes(text: string): Array<{ n: string; text: string }> {
   const compact = text.replace(/\n+/g, ' ').replace(/\s{2,}/g, ' ').trim();
   if (!compact) return [];
 
-  // Regex to find footnote numbers: "123 " or "123. "
-  // We match digits followed by space, or digits followed by dot then space.
-  const candidateRe = /(?:^|\s)(\d{1,4})(?:\.|\s)/g;
+  const superscripts: Record<string, string> = {
+    '⁰': '0', '¹': '1', '²': '2', '³': '3', '⁴': '4',
+    '⁵': '5', '⁶': '6', '⁷': '7', '⁸': '8', '⁹': '9'
+  };
+  const normalizeNum = (s: string) => s.split('').map(c => superscripts[c] || c).join('');
 
-  const candidates: Array<{ n: number; start: number; end: number }> = [];
+  // Regex to find footnote numbers: "123 " or "123. " or "²⁷ "
+  // We match digits or superscript digits followed by space, or followed by dot then space.
+  const candidateRe = /(?:^|\s)(\d{1,4}|[⁰¹²³⁴⁵⁶⁷⁸⁹]{1,4})(?:\.|\s)/g;
+
+  const candidates: Array<{ n: number; raw: string; start: number; end: number }> = [];
   let m: RegExpExecArray | null;
   while ((m = candidateRe.exec(compact)) !== null) {
-    // m[1] is the number
-    const n = Number(m[1]);
+    // m[1] is the number (could be superscript)
+    const n = Number(normalizeNum(m[1]));
     const start = m.index + (m[0].startsWith(' ') ? 1 : 0);
     // Be careful with end, m[0] includes the separator
     const end = start + m[1].length;
@@ -497,7 +503,7 @@ function parseFootnotes(text: string): Array<{ n: string; text: string }> {
     if (!Number.isFinite(n)) continue;
     // Context check
     if (!isFootnoteMarkerContext(compact, start)) continue;
-    candidates.push({ n, start, end });
+    candidates.push({ n, raw: m[1], start, end });
   }
 
   if (candidates.length === 0) return [{ n: '', text: compact }];
@@ -519,7 +525,7 @@ function parseFootnotes(text: string): Array<{ n: string; text: string }> {
     const chunkText = compact.slice(textStart, textEnd).trim();
 
     if (chunkText.length === 0 && !next) continue; // Skip empty last
-    out.push({ n: String(curr.n), text: chunkText });
+    out.push({ n: curr.raw, text: chunkText });
   }
 
   return out.length > 0 ? out : [{ n: '', text: compact }];
@@ -542,10 +548,10 @@ function isFootnoteMarkerContext(text: string, start: number) {
   return true;
 }
 
-function pickBestSequentialRun(candidates: Array<{ n: number; start: number; end: number }>) {
+function pickBestSequentialRun<T extends { n: number; start: number; end: number }>(candidates: T[]): T[] | null {
   const sorted = [...candidates].sort((a, b) => a.start - b.start);
 
-  let best: Array<{ n: number; start: number; end: number }> | null = null;
+  let best: T[] | null = null;
   let bestScore = -1;
 
   for (let i = 0; i < sorted.length; i++) {

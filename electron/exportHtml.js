@@ -144,7 +144,9 @@ export const buildExportHtml = ({ bookName, pages, options = {}, pageDims = {} }
     };
 
     if (String(text).includes(PAGE_SPLIT)) {
-      const [leftRaw, rightRaw] = String(text).split(PAGE_SPLIT);
+      const parts = String(text).split(PAGE_SPLIT);
+      const leftRaw = parts[0] ?? '';
+      const rightRaw = parts.slice(1).join(PAGE_SPLIT);
       if (makeSinglePage) {
         const shared = [];
         const left = renderExportBlocksHtml(applyHtmlHighlights(leftRaw || '', highlights), shared);

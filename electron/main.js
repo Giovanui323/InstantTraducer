@@ -56,7 +56,7 @@ ipcMain.handle('export-project-package', async (_event, { fileId }) => {
         const { canceled, filePath } = await dialog.showSaveDialog(mainWindow || undefined, {
             title: 'Esporta Pacchetto Progetto',
             defaultPath: `Project_${cleanId}.gpt`,
-            filters: [{ name: 'Gemini Project Translator (.gpt)', extensions: ['gpt'] }]
+            filters: [{ name: 'LibroGenie Project (.gpt)', extensions: ['gpt'] }]
         });
 
         if (canceled || !filePath) return { success: false, cancelled: true };
@@ -78,7 +78,7 @@ ipcMain.handle('import-project-package', async (_event) => {
         const { canceled, filePaths } = await dialog.showOpenDialog(mainWindow, {
             title: 'Importa Pacchetto Progetto',
             properties: ['openFile'],
-            filters: [{ name: 'Gemini Project Translator (.gpt)', extensions: ['gpt'] }]
+            filters: [{ name: 'LibroGenie Project (.gpt)', extensions: ['gpt'] }]
         });
 
         if (canceled || filePaths.length === 0) return null;
@@ -102,13 +102,21 @@ ipcMain.handle('import-project-package', async (_event) => {
         }
 
         // 2. Generate new safe File ID
-        const fileName = projectData.fileName || 'Imported Project';
-        const safeId = fileName.replace(/[^a-z0-9]/gi, '_').toLowerCase();
+        const originalFileName = projectData.fileName || 'Imported Project';
+        const toFileStem = (name) => (String(name || '').replace(/[^a-z0-9]/gi, '_').toLowerCase() || 'imported_project');
 
         // 3. Prepare target paths
         const translationsDir = getTranslationsDir();
-        const targetJsonPath = path.join(translationsDir, `${safeId}.json`);
-        const targetAssetsDir = projectAssetsDirFromFileId(safeId);
+        let finalFileName = String(originalFileName);
+        let fileId = `${toFileStem(finalFileName)}.json`;
+        let targetJsonPath = path.join(translationsDir, fileId);
+        let targetAssetsDir = projectAssetsDirFromFileId(fileId);
+        for (let i = 2; fs.existsSync(targetJsonPath) && i < 1000; i++) {
+            finalFileName = `${originalFileName} (${i})`;
+            fileId = `${toFileStem(finalFileName)}.json`;
+            targetJsonPath = path.join(translationsDir, fileId);
+            targetAssetsDir = projectAssetsDirFromFileId(fileId);
+        }
 
         // 4. Extract PDF if present
         const pdfEntry = zipEntries.find(entry => entry.entryName === 'original.pdf');
@@ -120,11 +128,13 @@ ipcMain.handle('import-project-package', async (_event) => {
         const newOriginalPdfPath = path.join(targetAssetsDir, 'original.pdf');
         projectData.originalFilePath = newOriginalPdfPath;
         projectData.timestamp = Date.now();
+        projectData.fileName = finalFileName;
+        projectData.fileId = fileId;
 
-        await fs.promises.writeFile(targetJsonPath, JSON.stringify(projectData, null, 2), 'utf-8');
+        await safeWriteFile(targetJsonPath, JSON.stringify(projectData, null, 2), 'utf-8');
 
-        logMain('Pacchetto importato con successo:', safeId);
-        return safeId;
+        logMain('Pacchetto importato con successo:', fileId);
+        return fileId;
 
     } catch (error) {
         logError('Errore import package', error);

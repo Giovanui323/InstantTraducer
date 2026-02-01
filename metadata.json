@@ -1,5 +1,5 @@
 {
-  "name": "Gemini PDF Translator di libri",
-  "description": "A sophisticated PDF reader that uses Gemini to translate German text into Italian, maintaining context across page boundaries and remembering your reading progress.",
+  "name": "LibroGenie",
+  "description": "Your personal book translator genie. Transforms complex PDFs into smooth readings in your language, maintaining context and the soul of the original work.",
   "requestFramePermissions": []
 }

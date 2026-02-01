@@ -14,7 +14,7 @@ import { ReaderView } from './components/ReaderView';
 import {
   PAGE_RENDER_TIMEOUT_MS,
 } from './constants';
-import { ImageCropModal } from './components/ImageCropModal';
+import { ImageCropModal } from './components/ImageCropModal.tsx';
 import { SettingsModal } from './components/SettingsModal';
 import { UploadLanguagePrompt } from './components/UploadLanguagePrompt';
 import { RenameModal } from './components/RenameModal';
@@ -51,6 +51,7 @@ import {
   rotateJpegBase64,
   cropBase64
 } from './utils/imageUtils';
+import { sanitizeMetadataField } from './utils/textUtils';
 import { projectFileIdFromName, computeFileId } from './utils/fileUtils';
 
 // Configuriamo il worker localmente (copiato in public/pdfjs durante il build/dev)
@@ -482,7 +483,7 @@ const App: React.FC = () => {
     setAnnotationMap,
     originalImagesRef, pageRotationsRef, pageReplacementsRef, pageImagesIndexRef,
     pageTraceRef, geminiLogs, setGeminiLogs,
-    setOriginalImages, setCroppedImages, croppedImagesRef,
+    setOriginalImages,
     setPageDims,
     readProjectImageBase64: async (args: any) => window.electronAPI.readProjectImageBase64(args).then((r: any) => r.base64),
     readProjectImageDataUrl: async (args: any) => window.electronAPI.readProjectImage(args).then((r: any) => r.dataUrl),
@@ -520,6 +521,7 @@ const App: React.FC = () => {
     setTranslationMap: translation.setTranslationMap,
     setAnnotationMap,
     setTranslationsMeta: translation.setTranslationsMeta,
+    updatePageStatus: translation.updatePageStatus,
     updateLibrary: library.updateLibrary,
     appendPageConsole,
     loadReplacementPdfDoc: getCachedReplacementPdfDoc,
@@ -760,11 +762,48 @@ const App: React.FC = () => {
   }, [library, defaultLang, translation, annotations, quality]);
 
   const continueUploadWithLanguage = useCallback(async (file: File, lang: string, groups?: string[]) => {
-    const fileName = file.name;
+    const normalizeProjectName = (name: string) => {
+      const trimmed = String(name || '').trim().replace(/\s+/g, ' ');
+      const withoutExt = trimmed.replace(/\.pdf$/i, '');
+      return withoutExt.toLowerCase();
+    };
 
-    try {
-      log.step(`Avvio elaborazione PDF: ${fileName} (Lingua: ${lang})...`);
-      const buffer = await file.arrayBuffer();
+    const makeUniqueProjectName = (desiredName: string, sourcePath: string) => {
+      const existingNameKeys = new Set(
+        Object.values(library.recentBooks)
+          .map(b => normalizeProjectName(b.fileName))
+          .filter(Boolean)
+      );
+      const existingIds = new Set(Object.keys(library.recentBooks));
+
+      const trimmed = String(desiredName || '').trim().replace(/\s+/g, ' ');
+      const hasPdfExt = /\.pdf$/i.test(trimmed);
+      const baseName = hasPdfExt ? trimmed.replace(/\.pdf$/i, '') : trimmed;
+
+      for (let i = 1; i < 1000; i++) {
+        const candidate = i === 1 ? trimmed : `${baseName} (${i})${hasPdfExt ? '.pdf' : ''}`;
+        const nameKey = normalizeProjectName(candidate);
+        const fileId = computeFileId(candidate, sourcePath);
+        if (!existingNameKeys.has(nameKey) && !existingIds.has(fileId)) return candidate;
+      }
+
+      return `${baseName} (${Date.now()})${hasPdfExt ? '.pdf' : ''}`;
+    };
+
+    const sourcePath = (file as any).path || '';
+    const originalFileName = file.name;
+    const desiredFileId = computeFileId(originalFileName, sourcePath);
+    const isDuplicateName = Object.values(library.recentBooks).some(b => normalizeProjectName(b.fileName) === normalizeProjectName(originalFileName));
+    const isDuplicateId = Boolean(library.recentBooks[desiredFileId]);
+
+    const doUpload = async (projectName: string) => {
+      try {
+        log.step(`Avvio elaborazione PDF: ${projectName} (Lingua: ${lang})...`);
+        const sessionFileId = window.electronAPI ? computeFileId(projectName, sourcePath) : null;
+        if (sessionFileId) {
+          library.setCurrentProjectFileId(sessionFileId);
+        }
+        const buffer = await file.arrayBuffer();
       const pdfParseBuffer = buffer.slice(0);
       const safeSaveBuffer = buffer.slice(0);
       const pdf = await pdfjsLib.getDocument({
@@ -775,7 +814,7 @@ const App: React.FC = () => {
       }).promise;
 
       setPdfDoc(pdf);
-      setMetadata({ name: fileName, size: buffer.byteLength, totalPages: pdf.numPages });
+      setMetadata({ name: projectName, size: buffer.byteLength, totalPages: pdf.numPages });
       setDocInputLanguage(lang);
       setIsHomeView(false);
       const canTranslate = Boolean(isApiConfigured);
@@ -800,16 +839,15 @@ const App: React.FC = () => {
 
       // Copy PDF and create project
       if (window.electronAPI) {
-        const fileId = computeFileId(fileName, (file as any).path || '');
+        const fileId = sessionFileId || computeFileId(projectName, sourcePath);
         let finalPath: string | undefined = undefined;
         let hasSafePdf = false;
-        const sourcePath = (file as any).path;
         try {
           window.electronAPI.logToMain?.({
             level: 'info',
             message: 'Upload PDF: avvio salvataggio copia safe',
             meta: {
-              fileName,
+              fileName: projectName,
               fileId,
               sourcePathPresent: Boolean(sourcePath),
               saveOriginalPdfBufferType: typeof (window.electronAPI as any)?.saveOriginalPdfBuffer,
@@ -892,7 +930,7 @@ const App: React.FC = () => {
           } catch { }
         }
 
-        await library.updateLibrary(fileName, {
+        await library.updateLibrary(projectName, {
           fileId,
           originalFilePath: finalPath,
           hasSafePdf,
@@ -934,15 +972,19 @@ const App: React.FC = () => {
 
           if (images.length > 0 && aiSettings.gemini.apiKey.trim()) {
             try {
-              const meta = await extractPdfMetadata(aiSettings.gemini.apiKey, aiSettings.gemini.model, images);
-              const sanitize = (s: string) => s.replace(/[^a-zA-Z0-9\s]/g, '').trim();
-              if (meta.author && meta.title && meta.author !== 'Unknown' && meta.title !== 'Untitled') {
-                const y = meta.year && meta.year !== '0000' && meta.year !== 'Unknown' ? sanitize(meta.year) : "";
-                const a = sanitize(meta.author);
-                const t = sanitize(meta.title);
-                const newName = y ? `${y}_${a}_${t}` : `${a}_${t}`;
+              log.step("Autodetect metadati in corso...");
+              const meta = await extractPdfMetadata(aiSettings.gemini.apiKey, aiSettings.gemini.model, images, undefined, lang);
+              
+              const y = sanitizeMetadataField(meta.year || "");
+              const a = sanitizeMetadataField(meta.author || "");
+              const t = sanitizeMetadataField(meta.title || "");
 
-                if (newName.length > 5 && newName !== fileName) {
+              if (t && t !== 'Untitled' && t.length > 2) {
+                const yearPart = y && y !== '0000' && y !== 'Unknown' ? `${y}_` : "";
+                const authorPart = a && a !== 'Unknown' ? `${a}_` : "";
+                const newName = `${yearPart}${authorPart}${t}`;
+
+                if (newName.length > 5 && newName !== projectName) {
                   const res = await window.electronAPI.renameTranslation({ fileId, newFileName: newName });
                   if (res?.success) {
                     log.success(`Rinomina automatica: ${newName}`);
@@ -950,17 +992,38 @@ const App: React.FC = () => {
                     const newId = computeFileId(newName, finalPath);
                     library.setCurrentProjectFileId(newId);
                     library.refreshLibrary();
+                  } else {
+                    log.warning(`Rinomina fallita: ${res?.error || 'Errore sconosciuto'}`);
                   }
+                } else {
+                  log.info(`Salto rinomina: nome identico o troppo corto (${newName})`);
                 }
+              } else {
+                log.warning("Salto rinomina: titolo non trovato o non valido nell'estrazione AI", { meta });
               }
             } catch (e) { log.error("Errore autodetect metadati", e); }
           }
         } catch (e) { log.error("Errore generazione anteprima/metadati", e); }
 
       }
-    } catch (e) {
-      log.error("Errore caricamento PDF", e);
+      } catch (e) {
+        log.error("Errore caricamento PDF", e);
+      }
+    };
+
+    if (isDuplicateName || isDuplicateId) {
+      const uniqueName = makeUniqueProjectName(originalFileName, sourcePath);
+      const reason = isDuplicateId ? 'Un progetto con lo stesso identificatore esiste già.' : 'Un progetto con lo stesso nome esiste già.';
+      showConfirm(
+        "Nome già presente",
+        `${reason}\n\nIl nuovo progetto verrà salvato come:\n"${uniqueName}"`,
+        () => { void doUpload(uniqueName); },
+        'alert'
+      );
+      return;
     }
+
+    await doUpload(originalFileName);
   }, [aiSettings, library, translation, annotations, quality, isApiConfigured, showConfirm, setIsSettingsOpen]);
 
   const renderPage = useCallback(async (pageNum: number, cRef: React.RefObject<HTMLCanvasElement | null>) => {
@@ -1327,7 +1390,7 @@ const App: React.FC = () => {
 
   const getPageStatus = useCallback((p: number) => {
     if (translation.pageStatus[p]?.error) return 'error';
-    if (translation.pageStatus[p]?.processing === 'Elaborazione' || translation.pageStatus[p]?.loading) return 'in_progress';
+    if (translation.pageStatus[p]?.processing || translation.pageStatus[p]?.loading) return 'in_progress';
     if (translation.translationMap[p]) return 'done';
     return 'pending';
   }, [translation]);
@@ -1668,6 +1731,7 @@ const App: React.FC = () => {
             onReanalyzePage={(p: number) => quality.verifySingleTranslatedPage(p, { reanalyze: true })}
             onFixPage={quality.fixTranslation}
             onRetryAllCritical={handleRetryAllCritical}
+            onToggleTranslatedMode={() => setIsTranslatedMode(!isTranslatedMode)}
             onScaleChange={setScale}
             showConfirm={showConfirm}
             bottomPadding={bottomBarHeight + 24}

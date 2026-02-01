@@ -1,5 +1,5 @@
 import React, { useState, useCallback, useMemo, useRef } from 'react';
-import { AISettings, PDFMetadata, PageVerification, PageAnnotation } from '../types';
+import { AISettings, PDFMetadata, PageVerification, PageAnnotation, PageStatus } from '../types';
 import { log } from '../services/logger';
 import { verifyTranslationQuality, checkApiConfiguration } from '../services/aiService';
 import { translatePage } from '../services/aiService';
@@ -20,6 +20,7 @@ interface UseAppQualityProps {
   setTranslationMap: React.Dispatch<React.SetStateAction<Record<number, string>>>;
   setAnnotationMap: React.Dispatch<React.SetStateAction<Record<number, PageAnnotation[]>>>;
   setTranslationsMeta: React.Dispatch<React.SetStateAction<Record<number, { model: string; savedAt: number }>>>;
+  updatePageStatus: (page: number, delta: PageStatus | null) => void;
   updateLibrary: (name: string, data: any) => void;
   appendPageConsole: (page: number, msg: string, data?: any) => void;
   loadReplacementPdfDoc: (path: string) => Promise<any>;
@@ -39,6 +40,7 @@ export const useAppQuality = ({
   setTranslationMap,
   setAnnotationMap,
   setTranslationsMeta,
+  updatePageStatus,
   updateLibrary,
   appendPageConsole,
   loadReplacementPdfDoc,
@@ -58,6 +60,7 @@ export const useAppQuality = ({
   // Use refs for stable props to minimize re-creations
   const propsRef = useRef({
     updateLibrary,
+    updatePageStatus,
     appendPageConsole,
     loadReplacementPdfDoc,
     getContextImageBase64
@@ -66,15 +69,16 @@ export const useAppQuality = ({
   React.useEffect(() => {
     propsRef.current = {
       updateLibrary,
+      updatePageStatus,
       appendPageConsole,
       loadReplacementPdfDoc,
       getContextImageBase64
     };
-  }, [updateLibrary, appendPageConsole, loadReplacementPdfDoc, getContextImageBase64]);
+  }, [updateLibrary, updatePageStatus, appendPageConsole, loadReplacementPdfDoc, getContextImageBase64]);
 
   React.useEffect(() => { verificationMapRef.current = verificationMap; }, [verificationMap]);
 
-  const buildRetryInstruction = useCallback((report: any) => {
+  const buildRetryInstruction = useCallback((report: any, opts?: { preservePageSplit?: boolean }) => {
     const compact = (x: any) => String(x ?? '').replace(/\s+/g, ' ').trim();
     const clip = (s: string, maxLen: number) => (s.length > maxLen ? `${s.slice(0, Math.max(0, maxLen - 1))}…` : s);
 
@@ -106,12 +110,17 @@ export const useAppQuality = ({
     const issuesText = issuesBlocks.length > 0 ? `\n\nPROBLEMI DA CORREGGERE (dal report di verifica):\n${issuesBlocks.join('\n')}` : '';
 
     const retryHint = compact(report.retryHint);
+    const preservePageSplit = Boolean(opts?.preservePageSplit);
+    const preservePageSplitLine = preservePageSplit
+      ? '\n- Se la pagina è impaginata in due colonne, conserva il marker [[PAGE_SPLIT]] esattamente una volta, su una riga separata, tra la colonna sinistra e la colonna destra.'
+      : '';
     return `${retryHint ? `${retryHint}\n\n` : ''}RITRADUCI IN MODO PIÙ ACCURATO QUESTA PAGINA, TENENDO CONTO DEI PROBLEMI SEGNALATI QUI SOTTO.
 - Correggi nello specifico i problemi elencati (senza introdurre nuovi errori).
 - Non omettere titoli, sottosezioni, elenchi, formule, tabelle, didascalie o paragrafi.
 - Mantieni numerazione di sezioni e intestazioni così come nella pagina.
 - Non riassumere e non comprimere: includi TUTTO il contenuto visibile.
 - Se una parola/porzione è illeggibile, usa [ILLEGIBILE] invece di saltarla.
+${preservePageSplitLine}
 - Output SOLO in italiano, senza meta-testo.${issuesText}`.trim();
   }, []);
 
@@ -121,14 +130,35 @@ export const useAppQuality = ({
 
     propsRef.current.appendPageConsole(page, `Ritraduzione manuale migliorata: messa in coda.`);
     
-    const retryInstruction = buildRetryInstruction(report);
+    const currentText = translationMapRef.current[page] || '';
+    const retryInstruction = buildRetryInstruction(report, { preservePageSplit: currentText.includes('[[PAGE_SPLIT]]') });
+
+    // Feedback immediato: pulizia stato e segnalazione coda
+    setVerificationMap(prev => {
+      const next = { ...prev };
+      delete next[page];
+      return next;
+    });
+
+    propsRef.current.updatePageStatus(page, { 
+      error: false, 
+      loading: undefined, 
+      processing: "In coda per ritraduzione migliorata…" 
+    });
+
+    // Opzionale: puliamo anche la traduzione locale per forzare il refresh visivo
+    setTranslationMap(prev => {
+      const next = { ...prev };
+      delete next[page];
+      return next;
+    });
 
     enqueueTranslation(page, { 
       priority: 'front', 
       force: true, 
       extraInstruction: retryInstruction
     });
-  }, [enqueueTranslation, buildRetryInstruction]);
+  }, [enqueueTranslation, buildRetryInstruction, setTranslationMap, setVerificationMap]);
 
   const verifyAndMaybeFixTranslation = useCallback(async (args: {
     page: number;
@@ -155,6 +185,16 @@ export const useAppQuality = ({
       if (retriesSoFar < (settings.qualityCheck?.maxAutoRetries || 1)) {
         qualityAutoRetryCountRef.current[page] = retriesSoFar + 1;
         propsRef.current.appendPageConsole(page, `Verifica lingua: rilevato testo non italiano. Messa in coda per ritraduzione forzata.`);
+        setVerificationMap(prev => ({
+          ...prev,
+          [page]: {
+            ...(prev[page] || { state: 'verified' as const }),
+            autoRetryActive: true,
+            postRetryFailed: false,
+            checkedAt: Date.now(),
+            summary: (prev[page]?.summary || 'Ritraduzione automatica in coda (testo non italiano).')
+          }
+        }));
         enqueueTranslation(page, { 
           priority: 'front', 
           force: true, 
@@ -268,7 +308,7 @@ export const useAppQuality = ({
           qualityAutoRetryCountRef.current[page] = retriesSoFar + 1;
           propsRef.current.appendPageConsole(page, `Ritraduzione automatica: messa in coda (tentativo ${retriesSoFar + 1}/${configuredMaxRetries})`);
 
-          const retryInstruction = buildRetryInstruction(report);
+          const retryInstruction = buildRetryInstruction(report, { preservePageSplit: translatedText.includes('[[PAGE_SPLIT]]') });
 
           const queuedCheckedAt = Date.now();
           const queuedSummary = `${report.summary ? `${report.summary} — ` : ''}Ritraduzione automatica in coda (tentativo ${retriesSoFar + 1}/${configuredMaxRetries}).`;
@@ -278,6 +318,7 @@ export const useAppQuality = ({
             state: 'verified',
             checkedAt: queuedCheckedAt,
             summary: queuedSummary,
+            autoRetryActive: true,
             postRetryFailed: false
           };
           setVerificationMap(prev => ({ ...prev, [page]: queuedUpdate }));
@@ -304,12 +345,14 @@ export const useAppQuality = ({
         }
       }
 
+      const needsManualAfterRetry = report.severity === 'severe';
       const vUpdate: PageVerification = {
         ...report,
         severity: report.severity || 'ok',
         state: 'verified',
         checkedAt: Date.now(),
-        postRetryFailed: false
+        autoRetryActive: false,
+        postRetryFailed: needsManualAfterRetry
       };
       setVerificationMap(prev => ({
         ...prev,
@@ -332,12 +375,12 @@ export const useAppQuality = ({
       if (verificationRunIdRef.current[page] !== nextRunId) return;
       if (controller.signal.aborted || err?.name === 'AbortError') {
         propsRef.current.appendPageConsole(page, `Verifica qualità: annullata (run=${nextRunId})`);
-        setVerificationMap(prev => ({ ...prev, [page]: { state: 'idle' } }));
+        setVerificationMap(prev => ({ ...prev, [page]: { state: 'idle', autoRetryActive: false, postRetryFailed: false } }));
         return;
       }
       const msg = err?.message || 'Errore sconosciuto';
       propsRef.current.appendPageConsole(page, `Verifica qualità: errore (run=${nextRunId}) — ${msg}`);
-      setVerificationMap(prev => ({ ...prev, [page]: { state: 'failed', summary: msg } }));
+      setVerificationMap(prev => ({ ...prev, [page]: { state: 'failed', summary: msg, autoRetryActive: false, postRetryFailed: false } }));
     } finally {
       if (verificationRunIdRef.current[page] === nextRunId) delete inFlightVerificationRef.current[page];
     }

@@ -1,6 +1,6 @@
 
 import React, { useState, useEffect } from 'react';
-import { X, Check, Key, Zap, BrainCircuit, Activity, Folder, Trash2, RotateCcw, Trash } from 'lucide-react';
+import { X, Check, Key, Zap, BrainCircuit, Activity, Folder, Trash2, RotateCcw, Trash, FileDown } from 'lucide-react';
 import { AISettings, GeminiModel, ReasoningEffort, VerbosityLevel, OpenAIModel, TrashItem } from '../types';
 import { testGeminiConnection } from '../services/geminiService';
 import { testOpenAIConnection } from '../services/openaiService';
@@ -19,6 +19,18 @@ interface SettingsModalProps {
     isLibraryView?: boolean;
     showConfirm?: (title: string, message: string, onConfirm: () => void, type?: 'danger' | 'info' | 'alert') => void;
 }
+
+type SettingsSection =
+    | 'provider'
+    | 'input-language'
+    | 'translation'
+    | 'gemini'
+    | 'openai'
+    | 'projects'
+    | 'trash'
+    | 'export'
+    | 'diagnostics'
+    | 'advanced';
 
 const areSettingsEqual = (a: AISettings, b: AISettings) => {
     const aQuality = a.qualityCheck;
@@ -70,6 +82,7 @@ export const SettingsModal = React.memo(({
     showConfirm
 }: SettingsModalProps) => {
     const [provider, setProvider] = useState<AISettings['provider']>(currentSettings.provider);
+    const [activeSection, setActiveSection] = useState<SettingsSection>('provider');
 
     const [geminiKey, setGeminiKey] = useState(currentSettings.gemini.apiKey);
     const [geminiModel, setGeminiModel] = useState<GeminiModel>(currentSettings.gemini.model);
@@ -240,6 +253,15 @@ export const SettingsModal = React.memo(({
     }, [isOpen]);
 
     useEffect(() => {
+        if (isOpen) setActiveSection('provider');
+    }, [isOpen]);
+
+    useEffect(() => {
+        if (provider === 'gemini' && activeSection === 'openai') setActiveSection('provider');
+        if (provider === 'openai' && activeSection === 'gemini') setActiveSection('provider');
+    }, [provider, activeSection]);
+
+    useEffect(() => {
         setProvider(currentSettings.provider);
         setGeminiKey(currentSettings.gemini.apiKey);
         setGeminiModel(currentSettings.gemini.model);
@@ -323,7 +345,7 @@ export const SettingsModal = React.memo(({
 
     return (
         <div className="fixed inset-0 z-[300] flex items-center justify-center bg-black/80 backdrop-blur-sm p-4 animate-in fade-in duration-200">
-            <div className="bg-[#1a1a1a] w-full max-w-md max-h-[calc(100vh-2rem)] rounded-2xl border border-white/10 shadow-2xl overflow-hidden animate-in zoom-in-95 duration-200 flex flex-col">
+            <div className="bg-[#1a1a1a] w-full max-w-5xl max-h-[calc(100vh-2rem)] rounded-2xl border border-white/10 shadow-2xl overflow-hidden animate-in zoom-in-95 duration-200 flex flex-col">
                 <div className="p-6 border-b border-white/5 flex items-center justify-between shrink-0">
                     <div className="flex items-center gap-3">
                         <div className="w-10 h-10 rounded-xl bg-blue-500/10 flex items-center justify-center text-blue-500">
@@ -339,84 +361,127 @@ export const SettingsModal = React.memo(({
                     </button>
                 </div>
 
-                <div className="p-6 space-y-6 flex-1 min-h-0 overflow-y-auto pr-2 custom-scrollbar">
-                    <div className="space-y-2">
-                        <label className="text-xs font-bold text-gray-400 uppercase tracking-wider">Provider AI</label>
-                        <div className="grid grid-cols-2 gap-3">
-                            <button
-                                onClick={() => setProvider('gemini')}
-                                className={`relative p-3 rounded-xl border flex flex-col items-center gap-2 transition-all ${provider === 'gemini' ? 'bg-blue-500/10 border-blue-500 text-blue-400' : 'bg-black/30 border-white/10 text-gray-400 hover:border-white/20'}`}
-                            >
-                                <Zap size={20} />
-                                <div className="text-center">
-                                    <div className="text-xs font-bold">Gemini</div>
-                                    <div className="text-[9px] opacity-70">Streaming & Veloce</div>
-                                </div>
-                            </button>
-                            <button
-                                onClick={() => setProvider('openai')}
-                                className={`relative p-3 rounded-xl border flex flex-col items-center gap-2 transition-all ${provider === 'openai' ? 'bg-purple-500/10 border-purple-500 text-purple-400' : 'bg-black/30 border-white/10 text-gray-400 hover:border-white/20'}`}
-                            >
-                                <BrainCircuit size={20} />
-                                <div className="text-center">
-                                    <div className="text-xs font-bold">ChatGPT</div>
-                                    <div className="text-[9px] opacity-70">OpenAI API</div>
-                                </div>
-                            </button>
-                        </div>
-                    </div>
-
-                    <div className="space-y-2">
-                        <InputLanguageSelector
-                            value={defaultInputLang}
-                            onChange={setDefaultInputLang}
-                            label="Lingua di input (default)"
-                        />
-                        <p className="text-[10px] text-gray-500 leading-relaxed">
-                            Questa lingua sarà proposta quando carichi un PDF. Puoi modificarla al volo.
-                        </p>
-                    </div>
-
-                    <div className="space-y-2">
-                        <label className="text-xs font-bold text-gray-400 uppercase tracking-wider">Opzioni Traduzione</label>
-                        <div className="bg-black/30 border border-white/10 rounded-xl p-3 space-y-3">
-                            <label className="flex items-center justify-between gap-3 text-sm text-white/80">
-                                <div className="space-y-0.5">
-                                    <span className="text-xs font-semibold text-white/80">Contesto Giuridico/Legale</span>
-                                    <p className="text-[10px] text-gray-500 leading-tight">
-                                        Ottimizza la terminologia per testi di diritto e giurisprudenza.
-                                    </p>
-                                </div>
-                                <input
-                                    type="checkbox"
-                                    checked={legalContext}
-                                    onChange={(e) => setLegalContext(e.target.checked)}
-                                    className="h-4 w-4 accent-blue-500 shrink-0"
-                                />
-                            </label>
-
-                            <div className="flex items-center justify-between gap-3 text-sm text-white/80">
-                                <div className="space-y-0.5">
-                                    <span className="text-xs font-semibold text-white/80">Traduzioni in parallelo</span>
-                                    <p className="text-[10px] text-gray-500 leading-tight">
-                                        Aumenta la velocità ma può ridurre la continuità tra pagine.
-                                    </p>
-                                </div>
-                                <select
-                                    value={String(translationConcurrency)}
-                                    onChange={(e) => setTranslationConcurrency(Math.max(1, Math.min(4, Number(e.target.value) || 2)))}
-                                    className="bg-black/30 border border-white/10 rounded-lg py-2 px-2 text-xs text-white focus:outline-none focus:border-blue-500/50 focus:ring-1 focus:ring-blue-500/20 transition-all"
+                <div className="flex-1 min-h-0 flex flex-row">
+                    <div className="w-64 border-r border-white/5 p-4 shrink-0">
+                        <div className="text-[10px] font-bold text-gray-400 uppercase tracking-wider mb-3">Impostazioni</div>
+                        <nav className="space-y-1">
+                            {([
+                                { id: 'provider', label: 'Provider & API', icon: <Key size={14} /> },
+                                { id: 'input-language', label: 'Lingua input', icon: <Activity size={14} /> },
+                                { id: 'translation', label: 'Traduzione', icon: <Activity size={14} /> },
+                                ...(provider === 'gemini' ? [{ id: 'gemini', label: 'Gemini', icon: <Zap size={14} /> }] : []),
+                                ...(provider === 'openai' ? [{ id: 'openai', label: 'OpenAI', icon: <BrainCircuit size={14} /> }] : []),
+                                { id: 'projects', label: 'Progetti', icon: <Folder size={14} /> },
+                                { id: 'trash', label: 'Cestino', icon: <Trash2 size={14} /> },
+                                { id: 'export', label: 'Export', icon: <FileDown size={14} /> },
+                                { id: 'diagnostics', label: 'Diagnostica', icon: <Activity size={14} /> },
+                                ...((isLibraryView || onRedoAll || onRetroactiveRename || onRetroactiveRenameAll)
+                                    ? [{ id: 'advanced', label: 'Avanzate', icon: <RotateCcw size={14} /> }]
+                                    : [])
+                            ] as Array<{ id: SettingsSection; label: string; icon: React.ReactNode }>).map((s) => (
+                                <button
+                                    key={s.id}
+                                    onClick={() => setActiveSection(s.id)}
+                                    className={`w-full flex items-center gap-2 px-3 py-2 rounded-xl text-left text-xs font-bold transition-colors ${activeSection === s.id
+                                        ? 'bg-white/5 text-white border border-white/10'
+                                        : 'text-gray-400 hover:text-white hover:bg-white/5'
+                                        }`}
                                 >
-                                    <option value="1">1</option>
-                                    <option value="2">2</option>
-                                    <option value="3">3</option>
-                                    <option value="4">4</option>
-                                </select>
-                            </div>
-                        </div>
+                                    <span className={`${activeSection === s.id ? 'text-white' : 'text-gray-500'}`}>{s.icon}</span>
+                                    <span className="truncate">{s.label}</span>
+                                </button>
+                            ))}
+                        </nav>
                     </div>
 
-                    {provider === 'gemini' && (
+                    <div className="flex-1 min-h-0 overflow-y-auto p-6 pr-2 custom-scrollbar">
+                        <div className="space-y-6">
+                            {activeSection === 'provider' && (
+                                <div className="space-y-2">
+                                    <label className="text-xs font-bold text-gray-400 uppercase tracking-wider">Provider AI</label>
+                                    <div className="grid grid-cols-2 gap-3">
+                                        <button
+                                            onClick={() => setProvider('gemini')}
+                                            className={`relative p-3 rounded-xl border flex flex-col items-center gap-2 transition-all ${provider === 'gemini' ? 'bg-blue-500/10 border-blue-500 text-blue-400' : 'bg-black/30 border-white/10 text-gray-400 hover:border-white/20'}`}
+                                        >
+                                            <Zap size={20} />
+                                            <div className="text-center">
+                                                <div className="text-xs font-bold">Gemini</div>
+                                                <div className="text-[9px] opacity-70">Streaming & Veloce</div>
+                                            </div>
+                                        </button>
+                                        <button
+                                            onClick={() => setProvider('openai')}
+                                            className={`relative p-3 rounded-xl border flex flex-col items-center gap-2 transition-all ${provider === 'openai' ? 'bg-purple-500/10 border-purple-500 text-purple-400' : 'bg-black/30 border-white/10 text-gray-400 hover:border-white/20'}`}
+                                        >
+                                            <BrainCircuit size={20} />
+                                            <div className="text-center">
+                                                <div className="text-xs font-bold">ChatGPT</div>
+                                                <div className="text-[9px] opacity-70">OpenAI API</div>
+                                            </div>
+                                        </button>
+                                    </div>
+                                    <div className="bg-black/30 border border-white/10 rounded-xl p-3 text-[10px] text-gray-400 leading-relaxed">
+                                        Scegli il provider e poi apri la sezione dedicata (Gemini/OpenAI) per configurare modello e chiave.
+                                    </div>
+                                </div>
+                            )}
+
+                            {activeSection === 'input-language' && (
+                                <div className="space-y-2">
+                                    <InputLanguageSelector
+                                        value={defaultInputLang}
+                                        onChange={setDefaultInputLang}
+                                        label="Lingua di input (default)"
+                                    />
+                                    <p className="text-[10px] text-gray-500 leading-relaxed">
+                                        Questa lingua sarà proposta quando carichi un PDF. Puoi modificarla al volo.
+                                    </p>
+                                </div>
+                            )}
+
+                            {activeSection === 'translation' && (
+                                <div className="space-y-2">
+                                    <label className="text-xs font-bold text-gray-400 uppercase tracking-wider">Opzioni Traduzione</label>
+                                    <div className="bg-black/30 border border-white/10 rounded-xl p-3 space-y-3">
+                                        <label className="flex items-center justify-between gap-3 text-sm text-white/80">
+                                            <div className="space-y-0.5">
+                                                <span className="text-xs font-semibold text-white/80">Contesto Giuridico/Legale</span>
+                                                <p className="text-[10px] text-gray-500 leading-tight">
+                                                    Ottimizza la terminologia per testi di diritto e giurisprudenza.
+                                                </p>
+                                            </div>
+                                            <input
+                                                type="checkbox"
+                                                checked={legalContext}
+                                                onChange={(e) => setLegalContext(e.target.checked)}
+                                                className="h-4 w-4 accent-blue-500 shrink-0"
+                                            />
+                                        </label>
+
+                                        <div className="flex items-center justify-between gap-3 text-sm text-white/80">
+                                            <div className="space-y-0.5">
+                                                <span className="text-xs font-semibold text-white/80">Traduzioni in parallelo</span>
+                                                <p className="text-[10px] text-gray-500 leading-tight">
+                                                    Aumenta la velocità ma può ridurre la continuità tra pagine.
+                                                </p>
+                                            </div>
+                                            <select
+                                                value={String(translationConcurrency)}
+                                                onChange={(e) => setTranslationConcurrency(Math.max(1, Math.min(4, Number(e.target.value) || 2)))}
+                                                className="bg-black/30 border border-white/10 rounded-lg py-2 px-2 text-xs text-white focus:outline-none focus:border-blue-500/50 focus:ring-1 focus:ring-blue-500/20 transition-all"
+                                            >
+                                                <option value="1">1</option>
+                                                <option value="2">2</option>
+                                                <option value="3">3</option>
+                                                <option value="4">4</option>
+                                            </select>
+                                        </div>
+                                    </div>
+                                </div>
+                            )}
+
+                    {activeSection === 'gemini' && provider === 'gemini' && (
                         <>
                             <div className="space-y-2">
                                 <label className="text-xs font-bold text-gray-400 uppercase tracking-wider">Modello AI</label>
@@ -530,222 +595,230 @@ export const SettingsModal = React.memo(({
                         </>
                     )}
 
-                    <div className="space-y-2">
-                        <label className="text-xs font-bold text-gray-400 uppercase tracking-wider">Archiviazione Progetti</label>
-                        <div className="bg-black/30 border border-white/10 rounded-xl p-3 space-y-3">
-                            <div className="space-y-2">
-                                <div className="text-[10px] font-bold text-gray-400 uppercase tracking-wider">Cartella Progetti</div>
-                                <div className="flex gap-2">
-                                    <div className="flex-1 bg-black/30 border border-white/10 rounded-lg py-2 px-3 text-[10px] text-gray-300 truncate font-mono">
-                                        {customProjectsPath || 'Default (Cartella Dati App)'}
-                                    </div>
-                                    <button
-                                        onClick={handleSelectDirectory}
-                                        className="px-3 py-2 bg-white/5 hover:bg-white/10 text-gray-400 hover:text-white rounded-lg transition-colors"
-                                        title="Cambia cartella"
-                                    >
-                                        <Folder size={14} />
-                                    </button>
-                                    {customProjectsPath && (
+                    {activeSection === 'projects' && (
+                        <div className="space-y-2">
+                            <label className="text-xs font-bold text-gray-400 uppercase tracking-wider">Archiviazione Progetti</label>
+                            <div className="bg-black/30 border border-white/10 rounded-xl p-3 space-y-3">
+                                <div className="space-y-2">
+                                    <div className="text-[10px] font-bold text-gray-400 uppercase tracking-wider">Cartella Progetti</div>
+                                    <div className="flex gap-2">
+                                        <div className="flex-1 bg-black/30 border border-white/10 rounded-lg py-2 px-3 text-[10px] text-gray-300 truncate font-mono">
+                                            {customProjectsPath || 'Default (Cartella Dati App)'}
+                                        </div>
                                         <button
-                                            onClick={() => setCustomProjectsPath('')}
-                                            className="px-3 py-2 bg-red-500/10 hover:bg-red-500/20 text-red-400 rounded-lg transition-colors text-[10px] font-bold"
-                                            title="Ripristina default"
+                                            onClick={handleSelectDirectory}
+                                            className="px-3 py-2 bg-white/5 hover:bg-white/10 text-gray-400 hover:text-white rounded-lg transition-colors"
+                                            title="Cambia cartella"
                                         >
-                                            Ripristina
+                                            <Folder size={14} />
                                         </button>
-                                    )}
+                                        {customProjectsPath && (
+                                            <button
+                                                onClick={() => setCustomProjectsPath('')}
+                                                className="px-3 py-2 bg-red-500/10 hover:bg-red-500/20 text-red-400 rounded-lg transition-colors text-[10px] font-bold"
+                                                title="Ripristina default"
+                                            >
+                                                Ripristina
+                                            </button>
+                                        )}
+                                    </div>
+                                    <p className="text-[10px] text-gray-500 leading-relaxed">
+                                        La cartella dove vengono salvati i file JSON delle traduzioni e gli asset (PDF originali, immagini).
+                                        {customProjectsPath && (
+                                            <span className="text-amber-500/80 block mt-1">
+                                                Nota: Cambiando questa cartella dovrai spostare manualmente i tuoi progetti esistenti se vuoi continuare a vederli.
+                                            </span>
+                                        )}
+                                    </p>
                                 </div>
-                                <p className="text-[10px] text-gray-500 leading-relaxed">
-                                    La cartella dove vengono salvati i file JSON delle traduzioni e gli asset (PDF originali, immagini).
-                                    {customProjectsPath && (
-                                        <span className="text-amber-500/80 block mt-1">
-                                            Nota: Cambiando questa cartella dovrai spostare manualmente i tuoi progetti esistenti se vuoi continuare a vederli.
-                                        </span>
-                                    )}
-                                </p>
                             </div>
                         </div>
-                    </div>
+                    )}
 
-                    <div className="space-y-2">
-                        <div className="flex items-center justify-between">
-                            <label className="text-xs font-bold text-gray-400 uppercase tracking-wider flex items-center gap-2">
-                                <Trash2 size={14} />
-                                Cestino (Auto-eliminazione 30gg)
-                            </label>
-                            {trashItems.length > 0 && (
-                                <div className="flex gap-2">
-                                    <button
-                                        onClick={handleRestoreAll}
-                                        disabled={isActionRunning}
-                                        className="text-[10px] font-bold text-blue-400 hover:text-blue-300 transition-colors flex items-center gap-1 bg-blue-500/10 px-2 py-1 rounded-md"
-                                    >
-                                        <RotateCcw size={10} />
-                                        Ripristina Tutto
-                                    </button>
-                                    <button
-                                        onClick={handleEmptyTrash}
-                                        disabled={isActionRunning}
-                                        className="text-[10px] font-bold text-red-400 hover:text-red-300 transition-colors flex items-center gap-1 bg-red-500/10 px-2 py-1 rounded-md"
-                                    >
-                                        <Trash size={10} />
-                                        Svuota
-                                    </button>
-                                </div>
-                            )}
-                        </div>
-                        <div className="bg-black/30 border border-white/10 rounded-xl overflow-hidden">
-                            {isLoadingTrash ? (
-                                <div className="p-4 text-center text-xs text-gray-500">Caricamento cestino...</div>
-                            ) : trashItems.length === 0 ? (
-                                <div className="p-4 text-center text-xs text-gray-500 italic">Il cestino è vuoto</div>
-                            ) : (
-                                <div className="divide-y divide-white/5 max-h-[300px] overflow-y-auto custom-scrollbar">
-                                    {trashItems.map((item) => {
-                                        const daysLeft = Math.max(0, 30 - Math.floor((Date.now() - item.deletedAt) / (1000 * 60 * 60 * 24)));
-                                        return (
-                                            <div key={item.trashId} className="p-3 flex items-center justify-between gap-3 hover:bg-white/[0.02] transition-colors">
-                                                <div className="min-w-0 flex-1">
-                                                    <div className="text-xs font-bold text-white truncate">{item.fileName}</div>
-                                                    <div className="text-[10px] text-gray-500 mt-0.5">
-                                                        Eliminato il {new Date(item.deletedAt).toLocaleDateString()} • {daysLeft} giorni rimasti
+                    {activeSection === 'trash' && (
+                        <div className="space-y-2">
+                            <div className="flex items-center justify-between">
+                                <label className="text-xs font-bold text-gray-400 uppercase tracking-wider flex items-center gap-2">
+                                    <Trash2 size={14} />
+                                    Cestino (Auto-eliminazione 30gg)
+                                </label>
+                                {trashItems.length > 0 && (
+                                    <div className="flex gap-2">
+                                        <button
+                                            onClick={handleRestoreAll}
+                                            disabled={isActionRunning}
+                                            className="text-[10px] font-bold text-blue-400 hover:text-blue-300 transition-colors flex items-center gap-1 bg-blue-500/10 px-2 py-1 rounded-md"
+                                        >
+                                            <RotateCcw size={10} />
+                                            Ripristina Tutto
+                                        </button>
+                                        <button
+                                            onClick={handleEmptyTrash}
+                                            disabled={isActionRunning}
+                                            className="text-[10px] font-bold text-red-400 hover:text-red-300 transition-colors flex items-center gap-1 bg-red-500/10 px-2 py-1 rounded-md"
+                                        >
+                                            <Trash size={10} />
+                                            Svuota
+                                        </button>
+                                    </div>
+                                )}
+                            </div>
+                            <div className="bg-black/30 border border-white/10 rounded-xl overflow-hidden">
+                                {isLoadingTrash ? (
+                                    <div className="p-4 text-center text-xs text-gray-500">Caricamento cestino...</div>
+                                ) : trashItems.length === 0 ? (
+                                    <div className="p-4 text-center text-xs text-gray-500 italic">Il cestino è vuoto</div>
+                                ) : (
+                                    <div className="divide-y divide-white/5 max-h-[300px] overflow-y-auto custom-scrollbar">
+                                        {trashItems.map((item) => {
+                                            const daysLeft = Math.max(0, 30 - Math.floor((Date.now() - item.deletedAt) / (1000 * 60 * 60 * 24)));
+                                            return (
+                                                <div key={item.trashId} className="p-3 flex items-center justify-between gap-3 hover:bg-white/[0.02] transition-colors">
+                                                    <div className="min-w-0 flex-1">
+                                                        <div className="text-xs font-bold text-white truncate">{item.fileName}</div>
+                                                        <div className="text-[10px] text-gray-500 mt-0.5">
+                                                            Eliminato il {new Date(item.deletedAt).toLocaleDateString()} • {daysLeft} giorni rimasti
+                                                        </div>
+                                                    </div>
+                                                    <div className="flex items-center gap-1 shrink-0">
+                                                        <button
+                                                            onClick={() => handleRestore(item.trashId)}
+                                                            disabled={isActionRunning}
+                                                            className="flex items-center gap-1 px-2 py-1.5 text-[10px] font-bold text-blue-400 hover:bg-blue-500/10 rounded-lg transition-colors border border-blue-500/20"
+                                                            title="Ripristina progetto"
+                                                        >
+                                                            <RotateCcw size={12} />
+                                                            Ripristina
+                                                        </button>
+                                                        <button
+                                                            onClick={() => handleDeletePermanently(item.trashId)}
+                                                            disabled={isActionRunning}
+                                                            className="p-1.5 text-red-400/60 hover:text-red-400 hover:bg-red-500/10 rounded-lg transition-colors"
+                                                            title="Elimina definitivamente"
+                                                        >
+                                                            <Trash size={14} />
+                                                        </button>
                                                     </div>
                                                 </div>
-                                                <div className="flex items-center gap-1 shrink-0">
-                                                    <button
-                                                        onClick={() => handleRestore(item.trashId)}
-                                                        disabled={isActionRunning}
-                                                        className="flex items-center gap-1 px-2 py-1.5 text-[10px] font-bold text-blue-400 hover:bg-blue-500/10 rounded-lg transition-colors border border-blue-500/20"
-                                                        title="Ripristina progetto"
-                                                    >
-                                                        <RotateCcw size={12} />
-                                                        Ripristina
-                                                    </button>
-                                                    <button
-                                                        onClick={() => handleDeletePermanently(item.trashId)}
-                                                        disabled={isActionRunning}
-                                                        className="p-1.5 text-red-400/60 hover:text-red-400 hover:bg-red-500/10 rounded-lg transition-colors"
-                                                        title="Elimina definitivamente"
-                                                    >
-                                                        <Trash size={14} />
-                                                    </button>
-                                                </div>
-                                            </div>
-                                        );
-                                    })}
-                                </div>
-                            )}
+                                            );
+                                        })}
+                                    </div>
+                                )}
+                            </div>
                         </div>
-                    </div>
+                    )}
 
-                    <div className="space-y-2">
-                        <label className="text-xs font-bold text-gray-400 uppercase tracking-wider">Export PDF</label>
-                        <div className="bg-black/30 border border-white/10 rounded-xl p-3 space-y-3">
-                            <label className="flex items-center justify-between gap-3 text-sm text-white/80">
-                                <span className="text-xs font-semibold text-white/80">Mantieni spread in due pagine</span>
-                                <input
-                                    type="checkbox"
-                                    checked={exportSplitSpread}
-                                    onChange={(e) => setExportSplitSpread(e.target.checked)}
-                                    className="h-4 w-4 accent-blue-500"
-                                />
-                            </label>
-                            <label className="flex items-center justify-between gap-3 text-sm text-white/80">
-                                <span className="text-xs font-semibold text-white/80">Inserisci pagine bianche se metà vuota</span>
-                                <input
-                                    type="checkbox"
-                                    checked={exportInsertBlank}
-                                    onChange={(e) => setExportInsertBlank(e.target.checked)}
-                                    className="h-4 w-4 accent-blue-500"
-                                />
-                            </label>
-                            <div className="grid grid-cols-2 gap-3">
-                                <div className="space-y-1">
-                                    <div className="text-[10px] font-bold text-gray-400 uppercase tracking-wider">Formato output</div>
-                                    <select
-                                        value={exportFormat}
-                                        onChange={(e) => setExportFormat(e.target.value as 'A4' | 'original')}
-                                        className="w-full bg-black/30 border border-white/10 rounded-lg py-2 px-2 text-xs text-white focus:outline-none focus:border-blue-500/50 focus:ring-1 focus:ring-blue-500/20 transition-all"
-                                    >
-                                        <option value="A4">A4</option>
-                                        <option value="original">Originale (rapporto)</option>
-                                    </select>
-                                </div>
-                                <div className="space-y-1">
-                                    <div className="text-[10px] font-bold text-gray-400 uppercase tracking-wider">Anteprima export nel reader</div>
-                                    <label className="flex items-center justify-between gap-3 text-sm text-white/80">
-                                        <span className="text-xs font-semibold text-white/80">Abilita</span>
-                                        <input
-                                            type="checkbox"
-                                            checked={previewInReader}
-                                            onChange={(e) => setPreviewInReader(e.target.checked)}
-                                            className="h-4 w-4 accent-blue-500"
-                                        />
-                                    </label>
+                    {activeSection === 'export' && (
+                        <div className="space-y-2">
+                            <label className="text-xs font-bold text-gray-400 uppercase tracking-wider">Export PDF</label>
+                            <div className="bg-black/30 border border-white/10 rounded-xl p-3 space-y-3">
+                                <label className="flex items-center justify-between gap-3 text-sm text-white/80">
+                                    <span className="text-xs font-semibold text-white/80">Mantieni spread in due pagine</span>
+                                    <input
+                                        type="checkbox"
+                                        checked={exportSplitSpread}
+                                        onChange={(e) => setExportSplitSpread(e.target.checked)}
+                                        className="h-4 w-4 accent-blue-500"
+                                    />
+                                </label>
+                                <label className="flex items-center justify-between gap-3 text-sm text-white/80">
+                                    <span className="text-xs font-semibold text-white/80">Inserisci pagine bianche se metà vuota</span>
+                                    <input
+                                        type="checkbox"
+                                        checked={exportInsertBlank}
+                                        onChange={(e) => setExportInsertBlank(e.target.checked)}
+                                        className="h-4 w-4 accent-blue-500"
+                                    />
+                                </label>
+                                <div className="grid grid-cols-2 gap-3">
+                                    <div className="space-y-1">
+                                        <div className="text-[10px] font-bold text-gray-400 uppercase tracking-wider">Formato output</div>
+                                        <select
+                                            value={exportFormat}
+                                            onChange={(e) => setExportFormat(e.target.value as 'A4' | 'original')}
+                                            className="w-full bg-black/30 border border-white/10 rounded-lg py-2 px-2 text-xs text-white focus:outline-none focus:border-blue-500/50 focus:ring-1 focus:ring-blue-500/20 transition-all"
+                                        >
+                                            <option value="A4">A4</option>
+                                            <option value="original">Originale (rapporto)</option>
+                                        </select>
+                                    </div>
+                                    <div className="space-y-1">
+                                        <div className="text-[10px] font-bold text-gray-400 uppercase tracking-wider">Anteprima export nel reader</div>
+                                        <label className="flex items-center justify-between gap-3 text-sm text-white/80">
+                                            <span className="text-xs font-semibold text-white/80">Abilita</span>
+                                            <input
+                                                type="checkbox"
+                                                checked={previewInReader}
+                                                onChange={(e) => setPreviewInReader(e.target.checked)}
+                                                className="h-4 w-4 accent-blue-500"
+                                            />
+                                        </label>
+                                    </div>
                                 </div>
                             </div>
                         </div>
-                    </div>
+                    )}
 
-                    <div className="space-y-2">
-                        <label className="text-xs font-bold text-gray-400 uppercase tracking-wider">Diagnostica</label>
-                        <div className="bg-black/30 border border-white/10 rounded-xl p-3 space-y-3">
-                            <label className="flex items-center justify-between gap-3 text-sm text-white/80">
-                                <span className="text-xs font-semibold text-white/80">Log di Debug (Avanzato)</span>
-                                <input
-                                    type="checkbox"
-                                    checked={verboseEnabled}
-                                    onChange={(e) => setVerboseEnabled(e.target.checked)}
-                                    className="h-4 w-4 accent-blue-500"
-                                />
-                            </label>
-                            <div className="text-[10px] text-gray-500 leading-relaxed">
-                                Abilita messaggi dettagliati in console e log file. Utile per capire il flusso completo.
-                            </div>
-                            <button
-                                onClick={async () => {
-                                    try {
-                                        if (!window.electronAPI) return;
-                                        await window.electronAPI.openLogsDir();
-                                    } catch { }
-                                }}
-                                className="text-[10px] uppercase font-bold px-2 py-1 rounded bg-white/5 text-gray-400 hover:text-white hover:bg-white/10 transition-colors"
-                            >
-                                Apri cartella log
-                            </button>
-                            <button
-                                onClick={async () => {
-                                    try {
-                                        if (!window.electronAPI) return;
-                                        const btn = document.activeElement as HTMLButtonElement;
-                                        const originalText = btn.innerText;
-                                        btn.innerText = 'Verifica in corso...';
-                                        btn.disabled = true;
+                    {activeSection === 'diagnostics' && (
+                        <div className="space-y-2">
+                            <label className="text-xs font-bold text-gray-400 uppercase tracking-wider">Diagnostica</label>
+                            <div className="bg-black/30 border border-white/10 rounded-xl p-3 space-y-3">
+                                <label className="flex items-center justify-between gap-3 text-sm text-white/80">
+                                    <span className="text-xs font-semibold text-white/80">Log di Debug (Avanzato)</span>
+                                    <input
+                                        type="checkbox"
+                                        checked={verboseEnabled}
+                                        onChange={(e) => setVerboseEnabled(e.target.checked)}
+                                        className="h-4 w-4 accent-blue-500"
+                                    />
+                                </label>
+                                <div className="text-[10px] text-gray-500 leading-relaxed">
+                                    Abilita messaggi dettagliati in console e log file. Utile per capire il flusso completo.
+                                </div>
+                                <button
+                                    onClick={async () => {
+                                        try {
+                                            if (!window.electronAPI) return;
+                                            await window.electronAPI.openLogsDir();
+                                        } catch { }
+                                    }}
+                                    className="text-[10px] uppercase font-bold px-2 py-1 rounded bg-white/5 text-gray-400 hover:text-white hover:bg-white/10 transition-colors"
+                                >
+                                    Apri cartella log
+                                </button>
+                                <button
+                                    onClick={async () => {
+                                        try {
+                                            if (!window.electronAPI) return;
+                                            const btn = document.activeElement as HTMLButtonElement;
+                                            const originalText = btn.innerText;
+                                            btn.innerText = 'Verifica in corso...';
+                                            btn.disabled = true;
 
-                                        const res = await window.electronAPI.loggerSelfcheck();
+                                            const res = await window.electronAPI.loggerSelfcheck();
 
-                                        if (res && res.success) {
-                                            alert(`Test completato con successo!\n\nI log di test sono stati scritti in:\n${res.path}`);
-                                        } else {
-                                            alert(`Errore durante il test:\n${res?.error || 'Errore sconosciuto'}`);
+                                            if (res && res.success) {
+                                                alert(`Test completato con successo!\n\nI log di test sono stati scritti in:\n${res.path}`);
+                                            } else {
+                                                alert(`Errore durante il test:\n${res?.error || 'Errore sconosciuto'}`);
+                                            }
+
+                                            btn.innerText = originalText;
+                                            btn.disabled = false;
+                                        } catch (e) {
+                                            alert(`Errore imprevisto: ${e}`);
                                         }
-
-                                        btn.innerText = originalText;
-                                        btn.disabled = false;
-                                    } catch (e) {
-                                        alert(`Errore imprevisto: ${e}`);
-                                    }
-                                }}
-                                className="text-[10px] uppercase font-bold px-2 py-1 rounded bg-white/5 text-gray-400 hover:text-white hover:bg-white/10 transition-colors disabled:opacity-50 disabled:cursor-wait"
-                                title="Verifica che il sistema di log funzioni correttamente"
-                            >
-                                Test Diagnostico
-                            </button>
+                                    }}
+                                    className="text-[10px] uppercase font-bold px-2 py-1 rounded bg-white/5 text-gray-400 hover:text-white hover:bg-white/10 transition-colors disabled:opacity-50 disabled:cursor-wait"
+                                    title="Verifica che il sistema di log funzioni correttamente"
+                                >
+                                    Test Diagnostico
+                                </button>
+                            </div>
                         </div>
-                    </div>
+                    )}
 
-                    {provider === 'openai' && (
+                    {activeSection === 'openai' && provider === 'openai' && (
                         <>
                             <div className="space-y-2">
                                 <label className="text-xs font-bold text-gray-400 uppercase tracking-wider">Modello OpenAI</label>
@@ -838,73 +911,75 @@ export const SettingsModal = React.memo(({
                         </>
                     )}
 
-                    <div className="pt-6 border-t border-white/5">
-                        {(isLibraryView || onRedoAll) && (
+                    {activeSection === 'advanced' && (isLibraryView || onRedoAll || onRetroactiveRename || onRetroactiveRenameAll) && (
+                        <div className="pt-0">
                             <label className="text-xs font-bold text-gray-400 uppercase tracking-wider mb-3 block">Zona Pericolo / Azioni Avanzate</label>
-                        )}
-                        <div className="grid grid-cols-1 gap-3">
-                            {!isLibraryView && onRedoAll && (
-                                <button
-                                    onClick={() => {
-                                        onClose();
-                                        onRedoAll();
-                                    }}
-                                    className="w-full text-left p-3 rounded-xl border border-red-500/30 bg-red-500/10 hover:bg-red-500/20 transition-all group"
-                                >
-                                    <div className="text-sm font-bold text-red-200 group-hover:text-red-100">Reset e Ritraduci Tutto</div>
-                                    <div className="text-[10px] text-red-300/60 group-hover:text-red-300/80 mt-1">
-                                        Cancella tutte le traduzioni e le annotazioni di questo libro e ricomincia da capo.
-                                    </div>
-                                </button>
-                            )}
-                            {onRetroactiveRename && (
-                                <button
-                                    onClick={async () => {
-                                        if (isRenameLegacyRunning || isRenameAllRunning) return;
-                                        setIsRenameLegacyRunning(true);
-                                        try { await onRetroactiveRename(); } finally { setIsRenameLegacyRunning(false); }
-                                    }}
-                                    disabled={isRenameLegacyRunning || isRenameAllRunning}
-                                    className={`w-full text-left p-3 rounded-xl border transition-all group ${!isRenameLegacyRunning && !isRenameAllRunning
-                                        ? 'bg-blue-500/10 border-blue-500/20 hover:bg-blue-500/20'
-                                        : 'bg-white/5 border-white/10 opacity-60 cursor-not-allowed'
-                                        }`}
-                                >
-                                    <div className={`text-sm font-bold ${!isRenameLegacyRunning && !isRenameAllRunning ? 'text-blue-200 group-hover:text-blue-100' : 'text-white/60'
-                                        }`}>Aggiorna Nomi File (Retroattivo)</div>
-                                    <div className={`text-[10px] mt-1 ${!isRenameLegacyRunning && !isRenameAllRunning ? 'text-blue-300/60 group-hover:text-blue-300/80' : 'text-gray-400'
-                                        }`}>
-                                        {isRenameLegacyRunning ? 'Operazione in corso…' : 'Scansiona la libreria per trovare libri con vecchi nomi e prova a rinominarli in formato Anno_Autore_Titolo.'}
-                                    </div>
-                                    {!isLibraryView && (
-                                        <div className="text-[10px] text-amber-500 mt-1">Nota: Questa operazione agisce sulla libreria globale.</div>
-                                    )}
-                                </button>
-                            )}
-                            {onRetroactiveRenameAll && (
-                                <button
-                                    onClick={async () => {
-                                        if (isRenameLegacyRunning || isRenameAllRunning) return;
-                                        setIsRenameAllRunning(true);
-                                        try { await onRetroactiveRenameAll(); } finally { setIsRenameAllRunning(false); }
-                                    }}
-                                    disabled={isRenameLegacyRunning || isRenameAllRunning}
-                                    className={`w-full text-left p-3 rounded-xl border transition-all group ${!isRenameLegacyRunning && !isRenameAllRunning
-                                        ? 'bg-indigo-500/10 border-indigo-500/20 hover:bg-indigo-500/20'
-                                        : 'bg-white/5 border-white/10 opacity-60 cursor-not-allowed'
-                                        }`}
-                                >
-                                    <div className={`text-sm font-bold ${!isRenameLegacyRunning && !isRenameAllRunning ? 'text-indigo-200 group-hover:text-indigo-100' : 'text-white/60'
-                                        }`}>Aggiorna Nomi File (Tutti)</div>
-                                    <div className={`text-[10px] mt-1 ${!isRenameLegacyRunning && !isRenameAllRunning ? 'text-indigo-300/60 group-hover:text-indigo-300/80' : 'text-gray-400'
-                                        }`}>
-                                        {isRenameAllRunning ? 'Operazione in corso…' : 'Scansiona tutti i file presenti e rinomina quando Anno/Autore/Titolo sono disponibili.'}
-                                    </div>
-                                    {!isLibraryView && (
-                                        <div className="text-[10px] text-amber-500 mt-1">Nota: Questa operazione agisce sulla libreria globale.</div>
-                                    )}
-                                </button>
-                            )}
+                            <div className="grid grid-cols-1 gap-3">
+                                {!isLibraryView && onRedoAll && (
+                                    <button
+                                        onClick={() => {
+                                            onClose();
+                                            onRedoAll();
+                                        }}
+                                        className="w-full text-left p-3 rounded-xl border border-red-500/30 bg-red-500/10 hover:bg-red-500/20 transition-all group"
+                                    >
+                                        <div className="text-sm font-bold text-red-200 group-hover:text-red-100">Reset e Ritraduci Tutto</div>
+                                        <div className="text-[10px] text-red-300/60 group-hover:text-red-300/80 mt-1">
+                                            Cancella tutte le traduzioni e le annotazioni di questo libro e ricomincia da capo.
+                                        </div>
+                                    </button>
+                                )}
+                                {onRetroactiveRename && (
+                                    <button
+                                        onClick={async () => {
+                                            if (isRenameLegacyRunning || isRenameAllRunning) return;
+                                            setIsRenameLegacyRunning(true);
+                                            try { await onRetroactiveRename(); } finally { setIsRenameLegacyRunning(false); }
+                                        }}
+                                        disabled={isRenameLegacyRunning || isRenameAllRunning}
+                                        className={`w-full text-left p-3 rounded-xl border transition-all group ${!isRenameLegacyRunning && !isRenameAllRunning
+                                            ? 'bg-blue-500/10 border-blue-500/20 hover:bg-blue-500/20'
+                                            : 'bg-white/5 border-white/10 opacity-60 cursor-not-allowed'
+                                            }`}
+                                    >
+                                        <div className={`text-sm font-bold ${!isRenameLegacyRunning && !isRenameAllRunning ? 'text-blue-200 group-hover:text-blue-100' : 'text-white/60'
+                                            }`}>Aggiorna Nomi File (Retroattivo)</div>
+                                        <div className={`text-[10px] mt-1 ${!isRenameLegacyRunning && !isRenameAllRunning ? 'text-blue-300/60 group-hover:text-blue-300/80' : 'text-gray-400'
+                                            }`}>
+                                            {isRenameLegacyRunning ? 'Operazione in corso…' : 'Scansiona la libreria per trovare libri con vecchi nomi e prova a rinominarli in formato Anno_Autore_Titolo.'}
+                                        </div>
+                                        {!isLibraryView && (
+                                            <div className="text-[10px] text-amber-500 mt-1">Nota: Questa operazione agisce sulla libreria globale.</div>
+                                        )}
+                                    </button>
+                                )}
+                                {onRetroactiveRenameAll && (
+                                    <button
+                                        onClick={async () => {
+                                            if (isRenameLegacyRunning || isRenameAllRunning) return;
+                                            setIsRenameAllRunning(true);
+                                            try { await onRetroactiveRenameAll(); } finally { setIsRenameAllRunning(false); }
+                                        }}
+                                        disabled={isRenameLegacyRunning || isRenameAllRunning}
+                                        className={`w-full text-left p-3 rounded-xl border transition-all group ${!isRenameLegacyRunning && !isRenameAllRunning
+                                            ? 'bg-indigo-500/10 border-indigo-500/20 hover:bg-indigo-500/20'
+                                            : 'bg-white/5 border-white/10 opacity-60 cursor-not-allowed'
+                                            }`}
+                                    >
+                                        <div className={`text-sm font-bold ${!isRenameLegacyRunning && !isRenameAllRunning ? 'text-indigo-200 group-hover:text-indigo-100' : 'text-white/60'
+                                            }`}>Aggiorna Nomi File (Tutti)</div>
+                                        <div className={`text-[10px] mt-1 ${!isRenameLegacyRunning && !isRenameAllRunning ? 'text-indigo-300/60 group-hover:text-indigo-300/80' : 'text-gray-400'
+                                            }`}>
+                                            {isRenameAllRunning ? 'Operazione in corso…' : 'Scansiona tutti i file presenti e rinomina quando Anno/Autore/Titolo sono disponibili.'}
+                                        </div>
+                                        {!isLibraryView && (
+                                            <div className="text-[10px] text-amber-500 mt-1">Nota: Questa operazione agisce sulla libreria globale.</div>
+                                        )}
+                                    </button>
+                                )}
+                            </div>
+                        </div>
+                    )}
                         </div>
                     </div>
                 </div>

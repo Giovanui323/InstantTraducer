@@ -3,10 +3,8 @@ import { AISettings, PDFMetadata, PageAnnotation, PageStatus } from '../types';
 import { log } from '../services/logger';
 import { translatePage } from '../services/aiService';
 import { useTranslationQueue } from './useTranslationQueue';
-import { renderPageToJpegBase64 } from '../utils/pdfUtils';
 import { withTimeout } from '../utils/async';
-import { buildJpegDataUrlFromBase64, estimateBytesFromBase64, downscaleDataUrlToJpeg, cropBase64, rotateJpegBase64 } from '../utils/imageUtils';
-import { projectFileIdFromName } from '../utils/fileUtils';
+import { buildJpegDataUrlFromBase64, estimateBytesFromBase64, downscaleDataUrlToJpeg } from '../utils/imageUtils';
 import { AI_TRANSLATION_TIMEOUT_MS, PAGE_RENDER_TIMEOUT_MS, PAGE_CACHE_MAX_EDGE, PAGE_CACHE_JPEG_QUALITY } from '../constants';
 
 interface UseAppTranslationProps {
@@ -203,7 +201,7 @@ export const useAppTranslation = ({
 
       if (pdfDoc) {
         const fileName = metadata?.name;
-        const fileId = currentProjectFileId || (fileName ? projectFileIdFromName(fileName) : null);
+        const fileId = currentProjectFileId || null;
         const replacement = pageReplacementsRef.current?.[targetPage];
 
         if (replacement?.filePath) {
@@ -231,14 +229,15 @@ export const useAppTranslation = ({
 
         const cropRel = fileId ? pageImagesIndexRef.current?.crops?.[targetPage] : undefined;
         const sourceRel = fileId ? pageImagesIndexRef.current?.sources?.[targetPage] : undefined;
+        const preferredRel = cropRel || sourceRel;
 
-        if (!imageData && sourceRel && fileId) {
+        if (!imageData && preferredRel && fileId) {
           try {
-            updatePageStatus(targetPage, { loading: "Caricamento immagine originale salvata..." });
-            imageData = await propsRef.current.readProjectImageBase64({ fileId, relPath: sourceRel });
+            updatePageStatus(targetPage, { loading: cropRel ? "Caricamento immagine ritagliata salvata..." : "Caricamento immagine originale salvata..." });
+            imageData = await propsRef.current.readProjectImageBase64({ fileId, relPath: preferredRel });
             if (!originalImagesRef.current?.[targetPage]) {
               try {
-                const sourceDataUrl = await propsRef.current.readProjectImageDataUrl({ fileId, relPath: sourceRel });
+                const sourceDataUrl = await propsRef.current.readProjectImageDataUrl({ fileId, relPath: preferredRel });
                 setOriginalImages(prev => ({ ...prev, [targetPage]: sourceDataUrl }));
               } catch {
                 setOriginalImages(prev => ({ ...prev, [targetPage]: buildJpegDataUrlFromBase64(imageData!) }));
@@ -249,65 +248,97 @@ export const useAppTranslation = ({
         }
 
         if (!imageData) {
-          updatePageStatus(targetPage, { loading: "Rendering pagina PDF..." });
           propsRef.current.appendPageConsole(targetPage, "Caricamento pagina da PDF originale...");
           const page: any = await withTimeout<any>(pdfDoc.getPage(targetPage), PAGE_RENDER_TIMEOUT_MS, () => {
             pdfTimeout = true;
           });
-          const renderScale = aiSettings.provider === 'gemini' ? 2.8 : 2.5;
+
+          const baseRenderScale = aiSettings.provider === 'gemini' ? 2.8 : 2.5;
           const jpegQuality = aiSettings.provider === 'gemini' ? 0.92 : 0.9;
           const userRotation = pageRotationsRef.current?.[targetPage] || 0;
           const baseRotation = (((page?.rotate || 0) + userRotation) % 360 + 360) % 360;
-          const viewport = page.getViewport({ scale: renderScale, rotation: baseRotation });
-          
+
           const baseViewport = page.getViewport({ scale: 1, rotation: baseRotation });
           setPageDims(prev => ({ ...prev, [targetPage]: { width: baseViewport.width, height: baseViewport.height } }));
 
-          // Creazione differita canvas: solo se necessario e appena prima del render
-          canvas = document.createElement('canvas');
-          canvas.width = viewport.width;
-          canvas.height = viewport.height;
+          const attempts = [
+            { scale: baseRenderScale, label: "" },
+            { scale: Math.max(1.6, baseRenderScale * 0.62), label: " (modalità leggera)" }
+          ];
 
-          const context = canvas.getContext('2d', { alpha: false });
-          if (context) {
-            context.fillStyle = 'white';
-            context.fillRect(0, 0, canvas.width, canvas.height);
+          let lastError: any = null;
+          for (let i = 0; i < attempts.length; i += 1) {
+            const { scale, label } = attempts[i];
+            const attemptLabel = attempts.length > 1 ? ` (tentativo ${i + 1}/${attempts.length})` : "";
+            updatePageStatus(targetPage, { loading: `Rendering pagina PDF${attemptLabel}${label}...` });
+
+            try {
+              pdfTimeout = false;
+              const viewport = page.getViewport({ scale, rotation: baseRotation });
+
+              canvas = document.createElement('canvas');
+              canvas.width = viewport.width;
+              canvas.height = viewport.height;
+
+              const context = canvas.getContext('2d', { alpha: false });
+              if (context) {
+                context.fillStyle = 'white';
+                context.fillRect(0, 0, canvas.width, canvas.height);
+              }
+
+              const renderStartedAt = performance.now();
+              const renderTask = page.render({ canvasContext: context as any, viewport });
+              await withTimeout(renderTask.promise, PAGE_RENDER_TIMEOUT_MS, () => {
+                pdfTimeout = true;
+                try { renderTask.cancel(); } catch { }
+              });
+              propsRef.current.appendPageConsole(
+                targetPage,
+                `Render completato (${Math.round(performance.now() - renderStartedAt)}ms) - ${Math.round(viewport.width)}x${Math.round(viewport.height)}`,
+                { scale }
+              );
+
+              const fullImageData = canvas.toDataURL('image/jpeg', jpegQuality);
+              imageData = fullImageData.split(',')[1];
+              propsRef.current.appendPageConsole(targetPage, `Immagine JPEG generata (base64 ~${Math.round(estimateBytesFromBase64(imageData) / 1024)}KB)`, {
+                quality: jpegQuality,
+                canvas: { width: canvas.width, height: canvas.height }
+              });
+
+              let sourceDataUrl = fullImageData;
+              try {
+                sourceDataUrl = await downscaleDataUrlToJpeg(fullImageData, { maxSide: PAGE_CACHE_MAX_EDGE, jpegQuality: PAGE_CACHE_JPEG_QUALITY });
+              } catch { }
+              setOriginalImages(prev => ({ ...prev, [targetPage]: sourceDataUrl }));
+              if (metadata?.name && currentProjectFileId) {
+                try { await propsRef.current.saveSourceForPage({ page: targetPage, sourceDataUrl }); } catch { }
+              }
+
+              break;
+            } catch (e: any) {
+              lastError = e;
+              if (canvas) {
+                canvas.width = 0;
+                canvas.height = 0;
+                canvas = null;
+              }
+              if (signal?.aborted) throw e;
+              if (!pdfTimeout || i === attempts.length - 1) throw e;
+            }
           }
 
-          const renderStartedAt = performance.now();
-          const renderTask = page.render({ canvasContext: context as any, viewport });
-          await withTimeout(renderTask.promise, PAGE_RENDER_TIMEOUT_MS, () => {
-            pdfTimeout = true;
-            try { renderTask.cancel(); } catch { }
-          });
-          propsRef.current.appendPageConsole(targetPage, `Render completato (${Math.round(performance.now() - renderStartedAt)}ms) - ${Math.round(viewport.width)}x${Math.round(viewport.height)}`, { scale: renderScale });
-
-          const fullImageData = canvas.toDataURL('image/jpeg', jpegQuality);
-          imageData = fullImageData.split(',')[1];
-          propsRef.current.appendPageConsole(targetPage, `Immagine JPEG generata (base64 ~${Math.round(estimateBytesFromBase64(imageData) / 1024)}KB)`, {
-            quality: jpegQuality,
-            canvas: { width: canvas.width, height: canvas.height }
-          });
-
-          let sourceDataUrl = fullImageData;
-          try {
-            sourceDataUrl = await downscaleDataUrlToJpeg(fullImageData, { maxSide: PAGE_CACHE_MAX_EDGE, jpegQuality: PAGE_CACHE_JPEG_QUALITY });
-          } catch { }
-          setOriginalImages(prev => ({ ...prev, [targetPage]: sourceDataUrl }));
-          if (metadata?.name) {
-            try { await propsRef.current.saveSourceForPage({ page: targetPage, sourceDataUrl }); } catch { }
-          }
+          if (!imageData && lastError) throw lastError;
         }
       } else {
         const fileName = metadata?.name;
-        if (!fileName && !currentProjectFileId) return;
-        const fileId = currentProjectFileId || projectFileIdFromName(fileName!);
+        const fileId = currentProjectFileId;
+        if (!fileId) return;
         const sourceRel = pageImagesIndexRef.current?.sources?.[targetPage];
         if (!sourceRel) {
-          updatePageStatus(targetPage, { 
-            loading: "Immagine pagina non disponibile: PDF originale mancante. Riapri il progetto e seleziona il PDF.",
-            processing: "Errore!",
-            error: true
+          updatePageStatus(targetPage, {
+            error: "Immagine pagina non disponibile: PDF originale mancante. Riapri il progetto e seleziona il PDF.",
+            loading: undefined,
+            processing: "Errore!"
           });
           return;
         }
@@ -325,8 +356,8 @@ export const useAppTranslation = ({
           }
         } catch {
           updatePageStatus(targetPage, {
-            error: true,
-            loading: "Errore caricamento immagine originale dal disco.",
+            error: "Errore caricamento immagine originale dal disco.",
+            loading: undefined,
             processing: "Errore!"
           });
           return;
@@ -360,7 +391,9 @@ export const useAppTranslation = ({
             nextPageNumber,
             extraInstruction // Use the instruction from retry if present
           }, (progressText, partial) => {
-            propsRef.current.appendPageConsole(targetPage, progressText);
+            const progressData: any = { sessionId, traceId, page: targetPage };
+            if (partial !== undefined) progressData.partialChars = partial.length;
+            propsRef.current.appendPageConsole(targetPage, progressText, progressData);
             updatePageStatus(targetPage, { loading: progressText });
             if (partial !== undefined) {
               setPartialTranslations(prev => ({ ...prev, [targetPage]: partial }));
@@ -382,17 +415,19 @@ export const useAppTranslation = ({
 
       if (!result.text || result.text.trim().length === 0) throw new Error('Risposta vuota dal provider AI');
 
+      const normalizedText = result.text;
       const modelLabel = aiSettings.provider === 'gemini' ? aiSettings.gemini.model : aiSettings.openai.model;
       const savedAt = Date.now();
       const metaUpdate = { model: modelLabel, savedAt };
 
       setTranslationMap(prev => {
-        const next = { ...prev, [targetPage]: result.text };
+        const next = { ...prev, [targetPage]: normalizedText };
         translationMapRef.current = next;
         if (metadata) {
           // Optimized: only send the delta for this page to updateLibrary
           Promise.resolve().then(() => propsRef.current.updateLibrary(metadata.name, {
-            translations: { [targetPage]: result.text },
+            ...(currentProjectFileId ? { fileId: currentProjectFileId } : {}),
+            translations: { [targetPage]: normalizedText },
             translationsMeta: { [targetPage]: metaUpdate },
             annotations: { [targetPage]: result.annotations || [] }
           }));
@@ -405,7 +440,7 @@ export const useAppTranslation = ({
 
       void propsRef.current.verifyAndMaybeFixTranslation({
         page: targetPage,
-        translatedText: result.text,
+        translatedText: normalizedText,
         imageBase64: imageData,
         prevContext,
         prevPageImageBase64,
@@ -423,19 +458,19 @@ export const useAppTranslation = ({
       
       let message = err?.message || "Errore sconosciuto";
       if (pdfTimeout) {
-        message = `Timeout Rendering PDF (${Math.round(PAGE_RENDER_TIMEOUT_MS / 1000)}s) - La pagina è troppo complessa da caricare.`;
+        message = `Timeout Rendering PDF (${Math.round(PAGE_RENDER_TIMEOUT_MS / 1000)}s) - Pagina ${targetPage}: la renderizzazione è troppo lenta o complessa. Prova a ritagliare/sostituire la pagina o riprova.`;
       } else if (aiTimeout) {
-        message = `Timeout globale AI (${Math.round(AI_TRANSLATION_TIMEOUT_MS / 1000)}s) - ${providerLabel} non ha risposto in tempo.`;
+        message = `Timeout globale AI (${Math.round(AI_TRANSLATION_TIMEOUT_MS / 1000)}s) - Pagina ${targetPage}: ${providerLabel} non ha risposto in tempo.`;
       } else if (err?.name === 'AbortError' || err?.code === 'ABORTED') {
-        message = "Richiesta annullata o interrotta per timeout.";
+        message = `Pagina ${targetPage}: richiesta annullata o interrotta.`;
       }
 
       propsRef.current.appendPageConsole(targetPage, `ERRORE: ${message}`, err);
       
-      updatePageStatus(targetPage, { 
-        error: true, 
-        loading: message,
-        processing: "Errore!" 
+      updatePageStatus(targetPage, {
+        error: message,
+        loading: undefined,
+        processing: "Errore!"
       });
     } finally {
       if (canvas) { 
@@ -444,7 +479,7 @@ export const useAppTranslation = ({
         canvas = null; // Aiuto GC
       }
     }
-  }, [pdfDoc, metadata, shouldSkipTranslation, sessionId, aiSettings, docInputLanguage, translationMapRef, projectFileIdFromName, pageReplacementsRef, pageRotationsRef, setOriginalImages, setPageDims, setAnnotationMap, setTranslationsMeta, updatePageStatus]);
+  }, [pdfDoc, metadata, shouldSkipTranslation, sessionId, aiSettings, docInputLanguage, translationMapRef, pageReplacementsRef, pageRotationsRef, setOriginalImages, setPageDims, setAnnotationMap, setTranslationsMeta, updatePageStatus, currentProjectFileId]);
 
   const { enqueueTranslation, queueStats, setQueueStats, abortAll, stopTranslation: stopQueueTranslation } = useTranslationQueue({
     processPage,
@@ -469,7 +504,7 @@ export const useAppTranslation = ({
   const retranslatePage = useCallback((page: number) => {
     stopQueueTranslation(page);
 
-    updatePageStatus(page, { error: false, loading: undefined, processing: undefined });
+    updatePageStatus(page, { error: false, loading: undefined, processing: "In coda per ritraduzione…" });
 
     if (translationMapRef.current?.[page]) {
       const nextRef = { ...translationMapRef.current };
@@ -481,12 +516,12 @@ export const useAppTranslation = ({
       const next = { ...prev };
       delete next[page];
       if (metadata) {
-        Promise.resolve().then(() => updateLibrary(metadata.name, { translations: next }));
+        Promise.resolve().then(() => updateLibrary(metadata.name, { ...(currentProjectFileId ? { fileId: currentProjectFileId } : {}), translations: next }));
       }
       return next;
     });
-    enqueueTranslation(page, { priority: 'front', force: true });
-  }, [enqueueTranslation, metadata, updateLibrary, stopQueueTranslation, updatePageStatus]);
+    enqueueTranslation(page, { priority: 'front', force: true, extraInstruction: ' ' });
+  }, [enqueueTranslation, metadata, updateLibrary, stopQueueTranslation, updatePageStatus, currentProjectFileId]);
 
   const stopTranslation = useCallback((page: number) => {
     stopQueueTranslation(page);
@@ -517,6 +552,7 @@ export const useAppTranslation = ({
     abortAll,
     retranslatePage,
     stopTranslation,
+    updatePageStatus,
     shouldSkipTranslation,
     saveSourceForPage
   };

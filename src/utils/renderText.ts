@@ -1,5 +1,6 @@
 
 import { UserHighlight, UserNote } from '../types';
+import { PAGE_SPLIT, splitColumns } from './textUtils';
 
 export const escapeHtml = (value: any): string =>
   String(value ?? "").replace(/[&<>"']/g, (ch) => {
@@ -196,7 +197,7 @@ export const renderReaderBlocksHtml = (text: string, highlights?: UserHighlight[
            ${footnotes
              .map((note, i) => {
                const number = i + 1;
-               return `<div style="display:flex; gap:8px; font-size:13px; line-height:1.5; color:#cbd5e1; margin-bottom:6px;">
+               return `<div style="display:flex; gap:8px; font-size:0.9em; line-height:1.5; color:#cbd5e1; margin-bottom:6px;">
                          <span style="min-width:16px; text-align:right;">${escapeHtml(number)}</span>
                          <span style="flex:1 1 auto; padding-left:8px; text-indent:-16px; display:block;">${escapeHtml(note)}</span>
                        </div>`;
@@ -209,20 +210,19 @@ export const renderReaderBlocksHtml = (text: string, highlights?: UserHighlight[
 };
 
 export const buildReaderHtml = (text: string, highlights?: UserHighlight[], userNotes?: UserNote[]) => {
-  const PAGE_SPLIT = '[[PAGE_SPLIT]]';
   const hasSplit = String(text || '').includes(PAGE_SPLIT);
   const baseStyle = "color:#e5e7eb; font-family: ui-serif, Georgia, 'Times New Roman', Times, serif; font-size:15px; line-height:1.6;";
   
   if (!hasSplit) {
     const { html, footnotesHtml } = renderReaderBlocksHtml(text, highlights);
     const userNotesHtml = (userNotes && userNotes.length > 0)
-      ? `<div style="margin-top:14px;">${userNotes.map((n, idx) => `<div style="display:flex; gap:8px; font-size:13px; line-height:1.5; color:#cbd5e1; margin-bottom:6px;"><span style="min-width:16px; text-align:right;">${idx + 1}</span><span style="flex:1 1 auto; padding-left:8px; display:block;"><em>${escapeHtml(n.text)}</em> — ${escapeHtml(n.content)}</span></div>`).join('')}</div>`
+      ? `<div style="margin-top:14px;">${userNotes.map((n, idx) => `<div style="display:flex; gap:8px; font-size:0.9em; line-height:1.5; color:#cbd5e1; margin-bottom:6px;"><span style="min-width:16px; text-align:right;">${idx + 1}</span><span style="flex:1 1 auto; padding-left:8px; display:block;"><em>${escapeHtml(n.text)}</em> — ${escapeHtml(n.content)}</span></div>`).join('')}</div>`
       : '';
     const body = `${html}${footnotesHtml}${userNotesHtml}`;
     return `<div style="${baseStyle}">${body}</div>`;
   }
   
-  const [leftRaw, rightRaw] = String(text || '').split(PAGE_SPLIT);
+  const [leftRaw, rightRaw] = splitColumns(String(text || ''));
   const sharedFootnotes: string[] = [];
   
   // Per la pagina destra, dobbiamo aggiungere l'offset della pagina sinistra + la lunghezza del marker PAGE_SPLIT
@@ -237,7 +237,7 @@ export const buildReaderHtml = (text: string, highlights?: UserHighlight[], user
       <div>${right.html}</div>
     </div>
     ${(left.footnotesHtml || right.footnotesHtml || '')}
-    ${(userNotes && userNotes.length > 0) ? `<div style="margin-top:14px;">${userNotes.map((n, idx) => `<div style="display:flex; gap:8px; font-size:13px; line-height:1.5; color:#cbd5e1; margin-bottom:6px;"><span style="min-width:16px; text-align:right;">${idx + 1}</span><span style="flex:1 1 auto; padding-left:8px; display:block;"><em>${escapeHtml(n.text)}</em> — ${escapeHtml(n.content)}</span></div>`).join('')}</div>` : ''}
+    ${(userNotes && userNotes.length > 0) ? `<div style="margin-top:14px;">${userNotes.map((n, idx) => `<div style="display:flex; gap:8px; font-size:0.9em; line-height:1.5; color:#cbd5e1; margin-bottom:6px;"><span style="min-width:16px; text-align:right;">${idx + 1}</span><span style="flex:1 1 auto; padding-left:8px; display:block;"><em>${escapeHtml(n.text)}</em> — ${escapeHtml(n.content)}</span></div>`).join('')}</div>` : ''}
   `;
   return `<div style="${baseStyle}">${body}</div>`;
 };

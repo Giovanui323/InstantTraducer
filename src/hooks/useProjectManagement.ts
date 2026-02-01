@@ -4,6 +4,7 @@ import type React from 'react';
 import { AISettings, PDFMetadata, ReadingProgress, PageAnnotation, PageStatus } from '../types';
 import { log } from '../services/logger';
 import { extractPdfMetadata } from '../services/geminiService';
+import { sanitizeMetadataField } from '../utils/textUtils';
 import { computeFileId } from '../utils/fileUtils';
 
 interface UseProjectManagementProps {
@@ -206,10 +207,15 @@ export const useProjectManagement = ({
                     }
 
                     // Extract meta
-                    const meta = await extractPdfMetadata(apiKey, aiSettings.gemini.model, [base64]);
-                    if (meta.year && meta.author && meta.title) {
-                        const sanitize = (s: string) => s.replace(/[^a-zA-Z0-9\s]/g, '').trim();
-                        const newName = `${sanitize(meta.year)}_${sanitize(meta.author)}_${sanitize(meta.title)}`;
+                    const meta = await extractPdfMetadata(apiKey, aiSettings.gemini.model, [base64], undefined, book.inputLanguage);
+                    const y = sanitizeMetadataField(meta.year || "");
+                    const a = sanitizeMetadataField(meta.author || "");
+                    const t = sanitizeMetadataField(meta.title || "");
+
+                    if (t && t !== 'Untitled' && t.length > 2) {
+                        const yearPart = y && y !== '0000' && y !== 'Unknown' ? `${y}_` : "";
+                        const authorPart = a && a !== 'Unknown' ? `${a}_` : "";
+                        const newName = `${yearPart}${authorPart}${t}`;
 
                         if (newName !== book.fileName && newName.length > 5) {
                             const res = await window.electronAPI.renameTranslation({ fileId, newFileName: newName });
@@ -306,10 +312,15 @@ export const useProjectManagement = ({
                         continue;
                     }
 
-                    const meta = await extractPdfMetadata(apiKey, aiSettings.gemini.model, [base64]);
-                    if (meta.year && meta.author && meta.title) {
-                        const sanitize = (s: string) => s.replace(/[^a-zA-Z0-9\s]/g, '').trim();
-                        const newName = `${sanitize(meta.year)}_${sanitize(meta.author)}_${sanitize(meta.title)}`;
+                    const meta = await extractPdfMetadata(apiKey, aiSettings.gemini.model, [base64], undefined, book.inputLanguage);
+                    const y = sanitizeMetadataField(meta.year || "");
+                    const a = sanitizeMetadataField(meta.author || "");
+                    const t = sanitizeMetadataField(meta.title || "");
+
+                    if (t && t !== 'Untitled' && t.length > 2) {
+                        const yearPart = y && y !== '0000' && y !== 'Unknown' ? `${y}_` : "";
+                        const authorPart = a && a !== 'Unknown' ? `${a}_` : "";
+                        const newName = `${yearPart}${authorPart}${t}`;
                         if (newName !== book.fileName && newName.length > 5) {
                             const res = await window.electronAPI.renameTranslation({ fileId, newFileName: newName });
                             if (res?.success) {
@@ -369,10 +380,11 @@ export const useProjectManagement = ({
             for (let p = 1; p <= total; p++) {
                 const hasError = pageStatusRef.current[p]?.error;
                 const verification = verificationMapRef.current[p];
-                const isSevere = verification?.severity === 'severe';
                 const isFailed = verification?.state === 'failed';
+                const postRetryFailed = Boolean(verification?.postRetryFailed);
+                const isAutoRetrying = Boolean(verification?.autoRetryActive);
 
-                if (hasError || isSevere || isFailed) {
+                if (hasError || (!isAutoRetrying && (isFailed || postRetryFailed))) {
                     pagesToRetry.push(p);
                     count++;
                 }
@@ -402,7 +414,10 @@ export const useProjectManagement = ({
 
                 setPageStatus(prev => {
                     const next = { ...prev };
-                    pagesToRetry.forEach(p => delete next[p]);
+                    pagesToRetry.forEach(p => {
+                        delete next[p];
+                        next[p] = { error: false, loading: undefined, processing: "In coda per ritraduzione…" } as any;
+                    });
                     return next;
                 });
 
@@ -420,7 +435,7 @@ export const useProjectManagement = ({
 
                 // 3. Accodamento
                 pagesToRetry.forEach(p => {
-                    enqueueTranslation(p, { priority: 'front', force: true });
+                    enqueueTranslation(p, { priority: 'front', force: true, extraInstruction: ' ' });
                 });
 
                 setIsTranslatedMode(true);

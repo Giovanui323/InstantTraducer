@@ -1,10 +1,10 @@
 {
-  "name": "gemini-pdf-translator-di-libri",
-  "productName": "Gemini PDF Translator",
-  "description": "A PDF translator using Gemini AI",
+  "name": "librogenie",
+  "productName": "LibroGenie",
+  "description": "A magical PDF translator for your digital library powered by AI",
   "author": "User",
   "private": true,
-  "version": "3.0.8",
+  "version": "3.0.13",
   "type": "module",
   "scripts": {
     "dev": "vite",
@@ -25,8 +25,8 @@
     "build:all": "npm version patch --no-git-tag-version && npm run package"
   },
   "build": {
-    "appId": "com.gemini.pdftranslator",
-    "productName": "Gemini PDF Translator",
+    "appId": "com.librogenie.app",
+    "productName": "LibroGenie",
     "artifactName": "${productName}-${version}-${arch}.${ext}",
     "forceCodeSigning": false,
     "directories": {
@@ -45,7 +45,6 @@
         "zip"
       ],
       "icon": "build/icon.icns",
-      "identity": null,
       "gatekeeperAssess": false,
       "hardenedRuntime": false
     },

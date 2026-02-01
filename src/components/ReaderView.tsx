@@ -1,15 +1,16 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
 import Draggable from 'react-draggable';
 import type { DraggableData, DraggableEvent } from 'react-draggable';
-import { Loader2, Pause, Copy, Check, MessageSquare, Maximize2, ShieldCheck, X, RotateCw, Plus, Minus, Highlighter, Trash2, CirclePlay, Wand2, FileImage, Image, Eye, EyeOff } from 'lucide-react';
+import { Loader2, Pause, Copy, Check, MessageSquare, Maximize2, ShieldCheck, X, RotateCw, Plus, Minus, Highlighter, Trash2, CirclePlay, Wand2, Eye, EyeOff } from 'lucide-react';
 import { MarkdownText } from './MarkdownText';
 import { IndexView } from './IndexView';
-import { OriginalPreviewModal } from './OriginalPreviewModal';
+import { OriginalPreviewModal } from './OriginalPreviewModal.tsx';
 import { PageAnnotation, PageVerification, UserHighlight, UserNote, PageStatus } from '../types';
 import { safeCopy } from '../utils/clipboard';
 import { toDisplayableImageSrc } from '../utils/imageUtils';
 import { getNextScaleFromWheel } from '../utils/zoomUtils';
 import { getVerificationDisplayData, getVerificationUiState } from '../utils/verificationUi';
+import { PAGE_SPLIT, splitColumns } from '../utils/textUtils';
 
 interface ReaderViewProps {
   pages: number[];
@@ -65,9 +66,37 @@ interface ReaderViewProps {
   onUpdateNote: (page: number, id: string, content: string) => void;
   onRemoveNote: (page: number, id: string) => void;
   onScaleChange?: (s: number) => void;
+  onToggleTranslatedMode?: () => void;
   previewExportLayout?: boolean;
   showConfirm?: (title: string, message: string, onConfirm: () => void, type?: 'danger' | 'info' | 'alert') => void;
 }
+
+const formatPageRanges = (pages: number[]) => {
+  const list = Array.from(new Set(pages)).filter((p) => Number.isFinite(p)).sort((a, b) => a - b);
+  if (list.length === 0) return '';
+  const parts: string[] = [];
+  let start = list[0];
+  let prev = list[0];
+  for (let i = 1; i <= list.length; i++) {
+    const cur = list[i];
+    const isConsecutive = i < list.length && cur === prev + 1;
+    if (isConsecutive) {
+      prev = cur;
+      continue;
+    }
+    if (start === prev) parts.push(String(start));
+    else parts.push(`${start}–${prev}`);
+    start = cur;
+    prev = cur;
+  }
+  return parts.join(', ');
+};
+
+const truncateLabel = (value: string, maxChars: number) => {
+  const v = String(value || '');
+  if (v.length <= maxChars) return v;
+  return `${v.slice(0, Math.max(0, maxChars - 1))}…`;
+};
 
 type OriginalThumbnailProps = {
   src: string;
@@ -134,12 +163,19 @@ const OriginalThumbnail: React.FC<OriginalThumbnailProps> = ({ src, onOpen, onOp
       onDrag={(_: DraggableEvent, data: DraggableData) => {
         const start = dragStart.current;
         if (!start) return;
-        const distance = Math.abs(data.x - start.x) + Math.abs(data.y - start.y);
-        if (distance > 4 && !suppressClick) setSuppressClick(true);
+        const distance = Math.sqrt(Math.pow(data.x - start.x, 2) + Math.pow(data.y - start.y, 2));
+        if (distance > 15 && !suppressClick) setSuppressClick(true);
       }}
       onStop={() => {
         dragStart.current = null;
-        window.setTimeout(() => setSuppressClick(false), 0);
+        // Aumentiamo leggermente il timeout per assicurarci che l'evento click 
+        // venga catturato prima che suppressClick torni false, 
+        // ma solo se era effettivamente un drag.
+        if (suppressClick) {
+          window.setTimeout(() => setSuppressClick(false), 100);
+        } else {
+          setSuppressClick(false);
+        }
       }}
     >
       <div
@@ -485,6 +521,7 @@ export const ReaderView: React.FC<ReaderViewProps> = ({
   onUpdateNote,
   onRemoveNote,
   onScaleChange,
+  onToggleTranslatedMode,
   showConfirm
 }) => {
   const [showHighlights] = useState<boolean>(true);
@@ -698,31 +735,56 @@ export const ReaderView: React.FC<ReaderViewProps> = ({
     if (!canUseNoteTool) setIsNoteToolActive(false);
   }, [canUseNoteTool]);
 
-  const criticalErrorsCount = useMemo(() => {
-    let count = 0;
-    pages.forEach(p => {
-      const v = verificationMap[p];
-      const hasSevere = v && v.severity === 'severe';
-      const hasError = pageStatus[p]?.error;
-      if (hasSevere || hasError) count++;
-    });
-    return count;
-  }, [pages, verificationMap, pageStatus]);
-
-  const criticalErrorPages = useMemo(() => {
+  const criticalErrorPagesAll = useMemo(() => {
     const arr: number[] = [];
-    pages.forEach(p => {
+    pages.forEach((p) => {
       const v = verificationMap[p];
-      const hasSevere = v && v.severity === 'severe';
       const hasError = pageStatus[p]?.error;
-      if (hasSevere || hasError) arr.push(p);
+      const needsManualVerification = Boolean(v && (v.state === 'failed' || v.postRetryFailed));
+      const isAutoRetrying = Boolean(v?.autoRetryActive);
+      const proc = String(pageStatus[p]?.processing || '');
+      const hasRetryMarker = proc.toLowerCase().includes('ritraduz') || proc.toLowerCase().includes('rielabor');
+      if (hasError || (needsManualVerification && !isAutoRetrying) || hasRetryMarker) arr.push(p);
     });
     return arr;
   }, [pages, verificationMap, pageStatus]);
 
+  const pagesInRetry = useMemo(() => {
+    return criticalErrorPagesAll.filter((p) => {
+      const st = pageStatus[p];
+      if (!st) return false;
+      if (st.error) return false;
+      return Boolean(st.processing || st.loading);
+    });
+  }, [criticalErrorPagesAll, pageStatus]);
+
+  const criticalErrorPagesPending = useMemo(() => {
+    const inRetry = new Set(pagesInRetry);
+    return criticalErrorPagesAll.filter((p) => !inRetry.has(p));
+  }, [criticalErrorPagesAll, pagesInRetry]);
+
+  const criticalErrorsCount = criticalErrorPagesPending.length;
+  const totalCriticalCount = criticalErrorPagesAll.length;
+
   const isRetryAllCriticalInProgress = useMemo(() => {
-    return criticalErrorPages.some((p) => Boolean(pageStatus[p]?.processing || pageStatus[p]?.loading));
-  }, [criticalErrorPages, pageStatus]);
+    return pagesInRetry.length > 0;
+  }, [pagesInRetry]);
+
+  const criticalErrorPagesLabel = useMemo(() => {
+    return formatPageRanges(criticalErrorPagesPending);
+  }, [criticalErrorPagesPending]);
+
+  const criticalErrorPagesLabelShort = useMemo(() => {
+    return truncateLabel(criticalErrorPagesLabel, 80);
+  }, [criticalErrorPagesLabel]);
+
+  const retryPagesLabel = useMemo(() => {
+    return formatPageRanges(pagesInRetry);
+  }, [pagesInRetry]);
+
+  const retryPagesLabelShort = useMemo(() => {
+    return truncateLabel(retryPagesLabel, 80);
+  }, [retryPagesLabel]);
 
   const [isRetryAllCriticalCoolingDown, setIsRetryAllCriticalCoolingDown] = useState(false);
   const retryAllCriticalCooldownTimerRef = useRef<number | null>(null);
@@ -948,10 +1010,11 @@ export const ReaderView: React.FC<ReaderViewProps> = ({
           const verification = verificationMap[p];
           const hasTranslation = typeof translationMap[p] === 'string' && translationMap[p].trim().length > 0;
           const translatedText = hasTranslation ? translationMap[p] : null;
-          const PAGE_SPLIT = '[[PAGE_SPLIT]]';
-          const splitText = translatedText?.includes(PAGE_SPLIT) ? translatedText.split(PAGE_SPLIT) : null;
-          const isSplit = splitText !== null;
-          const rightBaseOffset = isSplit ? (splitText![0].length + PAGE_SPLIT.length) : 0;
+          const splitText = translatedText ? splitColumns(translatedText) : null;
+          const isSplit = Boolean(splitText && splitText.length > 1);
+          const leftText = isSplit ? (splitText?.[0] ?? '') : null;
+          const rightText = isSplit ? (splitText?.[1] ?? '') : null;
+          const rightBaseOffset = isSplit ? ((leftText?.length ?? 0) + PAGE_SPLIT.length) : 0;
           const isIndexPage = Boolean(translatedText?.includes('[[INDEX]]'));
           const cRef = canvasRefsMap ? canvasRefsMap[p] : canvasRefs[idx];
 
@@ -1006,7 +1069,7 @@ export const ReaderView: React.FC<ReaderViewProps> = ({
                           <div className="flex-1 border-r border-black/10 pr-6">
                             <MarkdownText
                               align="justify"
-                              text={splitText![0]}
+                              text={leftText ?? ''}
                               dark={translationTheme === 'dark'}
                               searchTerm={searchTerm}
                               activeResultId={activeResultId}
@@ -1016,15 +1079,19 @@ export const ReaderView: React.FC<ReaderViewProps> = ({
                               userNotes={(showUserNotes ? (userNotes[p] || []) : [])}
                               onAddHighlight={(start, end, text, color) => onAddHighlight(p, start, end, text, color)}
                               onRemoveHighlight={(id) => onRemoveHighlight(p, id)}
-                              onAddNote={(start, end, text, content) => onAddNote(p, start, end, text, content)}
+                              onAddNote={(start, end, text) => setNewNoteModal({ page: p, start, end, text })}
                               onUpdateNote={(id, content) => onUpdateNote(p, id, content)}
                               onRemoveNote={(id) => onRemoveNote(p, id)}
+                              isHighlightToolActive={isHighlightToolActive}
+                              isNoteToolActive={isNoteToolActive}
+                              isEraserToolActive={isEraserToolActive}
+                              onNoteClick={(id) => setViewingNoteId({ page: p, id })}
                             />
                           </div>
                           <div className="flex-1 pl-2">
                             <MarkdownText
                               align="justify"
-                              text={splitText![1]}
+                              text={rightText ?? ''}
                               dark={translationTheme === 'dark'}
                               searchTerm={searchTerm}
                               activeResultId={activeResultId}
@@ -1034,9 +1101,13 @@ export const ReaderView: React.FC<ReaderViewProps> = ({
                               userNotes={(showUserNotes ? (userNotes[p] || []) : [])}
                               onAddHighlight={(start, end, text, color) => onAddHighlight(p, start, end, text, color)}
                               onRemoveHighlight={(id) => onRemoveHighlight(p, id)}
-                              onAddNote={(start, end, text, content) => onAddNote(p, start, end, text, content)}
+                              onAddNote={(start, end, text) => setNewNoteModal({ page: p, start, end, text })}
                               onUpdateNote={(id, content) => onUpdateNote(p, id, content)}
                               onRemoveNote={(id) => onRemoveNote(p, id)}
+                              isHighlightToolActive={isHighlightToolActive}
+                              isNoteToolActive={isNoteToolActive}
+                              isEraserToolActive={isEraserToolActive}
+                              onNoteClick={(id) => setViewingNoteId({ page: p, id })}
                             />
                           </div>
                         </div>
@@ -1207,7 +1278,14 @@ export const ReaderView: React.FC<ReaderViewProps> = ({
 
                 {pageStatus[p]?.error && (
                   <div className="absolute inset-0 bg-red-50 flex flex-col items-center justify-center p-8 z-50">
-                    <div className="text-red-600 font-black uppercase text-[10px] tracking-widest select-text">Errore Critico AI</div>
+                    <div className="text-red-600 font-black uppercase text-[10px] tracking-widest select-text">
+                      {(() => {
+                        const t = String((typeof pageStatus[p]?.error === 'string' ? pageStatus[p]?.error : pageStatus[p]?.loading) || '');
+                        if (t.includes('Rendering PDF')) return 'Errore Rendering PDF';
+                        if (t.includes('Timeout globale AI') || t.includes(' AI')) return 'Errore Critico AI';
+                        return 'Errore Critico';
+                      })()}
+                    </div>
                     <div className="mt-2.5 max-w-[320px] w-full">
                       <div className="flex justify-end mb-1">
                         <button
@@ -1302,6 +1380,18 @@ export const ReaderView: React.FC<ReaderViewProps> = ({
         </div>
       )}
 
+      {!isTranslatedMode && onToggleTranslatedMode && (
+        <div className="fixed top-8 right-8 z-[150] pointer-events-auto">
+          <button
+            onClick={onToggleTranslatedMode}
+            className="flex items-center justify-center w-12 h-12 rounded-full bg-blue-600 text-white shadow-2xl border border-blue-400 hover:scale-105 active:scale-95 transition-all shadow-[0_0_20px_rgba(37,99,235,0.4)]"
+            title="Torna alla traduzione"
+          >
+            <X size={24} />
+          </button>
+        </div>
+      )}
+
       {/* Modal Preview */}
       {previewPage != null && (
         <OriginalPreviewModal
@@ -1315,7 +1405,7 @@ export const ReaderView: React.FC<ReaderViewProps> = ({
         />
       )}
 
-      {onRetryAllCritical && criticalErrorsCount > 0 && !isCriticalRetryDismissed && (
+      {onRetryAllCritical && totalCriticalCount > 0 && !isCriticalRetryDismissed && (
         <div className="fixed top-20 left-1/2 -translate-x-1/2 z-[200] animate-in slide-in-from-top-4 fade-in duration-300 pointer-events-auto">
           <div className="flex items-center gap-2">
             <button
@@ -1335,8 +1425,28 @@ export const ReaderView: React.FC<ReaderViewProps> = ({
               <div className="flex flex-col items-start leading-none">
                 <span className="text-[10px] font-black uppercase tracking-widest text-red-200">Attenzione</span>
                 <span className="text-sm font-bold">
-                  {isRetryAllCriticalInProgress ? 'Riprovo…' : `Riprova ${criticalErrorsCount} pagine con errori`}
+                  {isRetryAllCriticalInProgress
+                    ? (pagesInRetry.length === 1
+                        ? `Riprovo pagina ${pagesInRetry[0]}…`
+                        : (pagesInRetry.length > 1 ? `Riprovo ${pagesInRetry.length} pagine…` : 'Riprovo…'))
+                    : `Riprova ${criticalErrorsCount} pagine con errori`}
                 </span>
+                {criticalErrorsCount > 0 && criticalErrorPagesLabelShort && (
+                  <span
+                    className="mt-1 text-[10px] font-semibold text-red-100/90"
+                    title={criticalErrorPagesLabel}
+                  >
+                    Pagine: {criticalErrorPagesLabelShort}
+                  </span>
+                )}
+                {pagesInRetry.length > 0 && retryPagesLabelShort && (
+                  <span
+                    className="mt-1 text-[10px] font-semibold text-red-100/90"
+                    title={retryPagesLabel}
+                  >
+                    In ritraduzione: {retryPagesLabelShort}
+                  </span>
+                )}
               </div>
             </button>
             <button

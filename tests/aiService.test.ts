@@ -25,41 +25,49 @@ describe('ensureGeminiReady', () => {
   });
 
   it('returns false when provider is gemini and key is empty', async () => {
-    const ok = await ensureGeminiReady(makeSettings('', 'gemini'));
-    expect(ok).toBe(false);
+    const res = await ensureGeminiReady(makeSettings('', 'gemini'));
+    expect(res.ok).toBe(false);
+    expect(res.fromCache).toBe(false);
   });
 
   it('returns true and caches success for TTL', async () => {
     const settings = makeSettings('AIzaSy-test-key', 'gemini');
-    const ok1 = await ensureGeminiReady(settings);
-    expect(ok1).toBe(true);
+    const res1 = await ensureGeminiReady(settings);
+    expect(res1.ok).toBe(true);
+    expect(res1.fromCache).toBe(false);
     expect(testGeminiConnection).toHaveBeenCalledTimes(1);
-    const ok2 = await ensureGeminiReady(settings);
-    expect(ok2).toBe(true);
+    const res2 = await ensureGeminiReady(settings);
+    expect(res2.ok).toBe(true);
+    expect(res2.fromCache).toBe(true);
     expect(testGeminiConnection).toHaveBeenCalledTimes(1);
   });
 
   it('returns true for non-gemini provider without testing', async () => {
-    const ok = await ensureGeminiReady(makeSettings('', 'openai'));
-    expect(ok).toBe(true);
+    const res = await ensureGeminiReady(makeSettings('', 'openai'));
+    expect(res.ok).toBe(true);
+    expect(res.fromCache).toBe(true);
     expect(testGeminiConnection).not.toHaveBeenCalled();
   });
 
   it('propagates failure when testGeminiConnection throws', async () => {
     (testGeminiConnection as any).mockRejectedValue(new Error('bad key'));
-    const ok = await ensureGeminiReady(makeSettings('bad', 'gemini'));
-    expect(ok).toBe(false);
+    const res = await ensureGeminiReady(makeSettings('bad', 'gemini'));
+    expect(res.ok).toBe(false);
+    expect(res.fromCache).toBe(false);
   });
 
   it('caches readiness per model', async () => {
     const settings = makeSettings('AIzaSy-test-key', 'gemini');
-    const ok1 = await ensureGeminiReady(settings, 'gemini-3-flash-preview');
-    expect(ok1).toBe(true);
-    const ok2 = await ensureGeminiReady(settings, 'gemini-3-flash-preview');
-    expect(ok2).toBe(true);
+    const res1 = await ensureGeminiReady(settings, 'gemini-3-flash-preview');
+    expect(res1.ok).toBe(true);
+    expect(res1.fromCache).toBe(false);
+    const res2 = await ensureGeminiReady(settings, 'gemini-3-flash-preview');
+    expect(res2.ok).toBe(true);
+    expect(res2.fromCache).toBe(true);
     expect(testGeminiConnection).toHaveBeenCalledTimes(1);
-    const ok3 = await ensureGeminiReady(settings, 'gemini-3-pro-preview');
-    expect(ok3).toBe(true);
+    const res3 = await ensureGeminiReady(settings, 'gemini-3-pro-preview');
+    expect(res3.ok).toBe(true);
+    expect(res3.fromCache).toBe(false);
     expect(testGeminiConnection).toHaveBeenCalledTimes(2);
   });
 });

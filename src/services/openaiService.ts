@@ -276,11 +276,12 @@ export const extractPdfMetadataWithOpenAI = async (
   apiKey: string,
   model: OpenAIModel,
   imagesBase64: string[],
-  signal?: AbortSignal
+  signal?: AbortSignal,
+  targetLanguage?: string
 ): Promise<Partial<PDFMetadata>> => {
   if (!apiKey) throw new Error("API Key mancante");
 
-  const prompt = getMetadataExtractionPrompt();
+  const prompt = getMetadataExtractionPrompt(targetLanguage);
   const messages = [
     { role: 'system', content: prompt },
     {

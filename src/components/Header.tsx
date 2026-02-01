@@ -129,7 +129,7 @@ export const Header: React.FC<HeaderProps> = ({
             </>
           ) : (
             <>
-              <span>Gemini Translator Pro</span>
+              <span>LibroGenie</span>
             </>
           )}
         </h1>
@@ -145,6 +145,7 @@ export const Header: React.FC<HeaderProps> = ({
             <button
               onClick={onBatch}
               disabled={isBatchProcessing || isPaused}
+              title="Traduci tutto il documento corrente"
               className={`flex items-center justify-center gap-1.5 px-5 py-1.5 min-w-[160px] whitespace-nowrap rounded-full text-[11px] font-semibold tracking-wide transition-all shadow-sm app-region-no-drag ${isBatchProcessing ? 'bg-amber-500/20 text-amber-300 border border-amber-500/30' :
                 'bg-white/10 hover:bg-white/15 text-gray-200 hover:text-white border border-white/10 hover:border-white/20 shadow-[inset_0_1px_0_rgba(255,255,255,0.06)]'
                 }`}
@@ -188,6 +189,7 @@ export const Header: React.FC<HeaderProps> = ({
             <div className="relative app-region-no-drag">
               <button 
                 onClick={() => setShowExportMenu(!showExportMenu)} 
+                title="Esporta PDF o progetto"
                 className={`flex items-center gap-1.5 px-3.5 py-1.5 bg-[#007AFF]/80 hover:bg-[#007AFF] text-white rounded-full text-[11px] font-semibold shadow-sm border border-white/10 transition-all export-menu-trigger ${showExportMenu ? 'ring-2 ring-blue-500/50 ring-offset-2 ring-offset-[#1e1e1e]' : ''}`}
               >
                 <FileDown size={12} /> Esporta
@@ -229,8 +231,8 @@ export const Header: React.FC<HeaderProps> = ({
           </>
         ) : null}
 
-        <button onClick={onToggleControls} className="p-1.5 text-gray-400 hover:text-white hover:bg-white/10 rounded-lg transition-all app-region-no-drag controls-trigger"><Sun size={16} /></button>
-        <button onClick={onSettings} className="p-1.5 text-gray-400 hover:text-white hover:bg-white/10 rounded-lg transition-all app-region-no-drag"><Settings size={16} /></button>
+        <button onClick={onToggleControls} title="Mostra/nascondi controlli di lettura" className="p-1.5 text-gray-400 hover:text-white hover:bg-white/10 rounded-lg transition-all app-region-no-drag controls-trigger"><Sun size={16} /></button>
+        <button onClick={onSettings} title="Impostazioni" className="p-1.5 text-gray-400 hover:text-white hover:bg-white/10 rounded-lg transition-all app-region-no-drag"><Settings size={16} /></button>
         <div className="relative flex items-center app-region-no-drag search-container">
           <button
             onClick={onSearchToggle}

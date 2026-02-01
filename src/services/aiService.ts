@@ -8,24 +8,26 @@ import { GEMINI_TRANSLATION_MODEL, GEMINI_VERIFIER_MODEL } from "../constants";
 const readinessByProviderModel: Record<string, { checkedAt: number; valid: boolean }> = {};
 const CHECK_TTL_MS = 5 * 60 * 1000;
 
+type ProviderReadyResult = { ok: boolean; fromCache: boolean };
+
 const ensureProviderReady = async (
   provider: 'gemini' | 'openai',
   settings: AISettings,
   modelOverride?: string
-): Promise<boolean> => {
-  if (settings.provider !== provider) return true;
+): Promise<ProviderReadyResult> => {
+  if (settings.provider !== provider) return { ok: true, fromCache: true };
   
   const apiKey = provider === 'gemini' ? settings.gemini.apiKey?.trim() : settings.openai.apiKey?.trim();
   const model = modelOverride ?? (provider === 'gemini' ? settings.gemini.model : settings.openai.model);
   
-  if (!apiKey) return false;
+  if (!apiKey) return { ok: false, fromCache: false };
   
   const cacheKey = `${provider}:${model}`;
   const now = Date.now();
   const cache = readinessByProviderModel[cacheKey];
   
   if (cache?.valid && (now - cache.checkedAt) < CHECK_TTL_MS) {
-    return true;
+    return { ok: true, fromCache: true };
   }
   
   try {
@@ -34,10 +36,10 @@ const ensureProviderReady = async (
       : await testOpenAIConnection(apiKey, model as any);
       
     readinessByProviderModel[cacheKey] = { valid: ok, checkedAt: Date.now() };
-    return ok;
+    return { ok, fromCache: false };
   } catch (e) {
     readinessByProviderModel[cacheKey] = { valid: false, checkedAt: Date.now() };
-    return false;
+    return { ok: false, fromCache: false };
   }
 };
 
@@ -80,12 +82,15 @@ export const translatePage = async (
 
   if (settings.provider === 'gemini') {
     const model = GEMINI_TRANSLATION_MODEL;
+    const readinessStartedAt = performance.now();
+    if (onProgress) onProgress(`Verifica configurazione Gemini (${model})...`);
     const ready = await ensureGeminiReady(settings, model);
-    if (!ready) {
+    if (!ready.ok) {
       const msg = "Gemini non pronto: verifica API key fallita.";
       log.error(msg);
       throw new Error(msg);
     }
+    if (onProgress) onProgress(`Gemini pronto (${ready.fromCache ? 'cache' : 'test'} - ${Math.round(performance.now() - readinessStartedAt)}ms)`);
     if (onProgress) onProgress(`Selezionato provider Gemini (model: ${model})`);
     const res = await translateWithGemini(
       config.imageBase64,
@@ -109,12 +114,15 @@ export const translatePage = async (
 
   if (settings.provider === 'openai') {
     const model = settings.openai.model;
+    const readinessStartedAt = performance.now();
+    if (onProgress) onProgress(`Verifica configurazione OpenAI (${model})...`);
     const ready = await ensureOpenAIReady(settings, model);
-    if (!ready) {
+    if (!ready.ok) {
       const msg = "OpenAI non pronto: verifica API key fallita.";
       log.error(msg);
       throw new Error(msg);
     }
+    if (onProgress) onProgress(`OpenAI pronto (${ready.fromCache ? 'cache' : 'test'} - ${Math.round(performance.now() - readinessStartedAt)}ms)`);
     if (onProgress) onProgress(`Selezionato provider OpenAI (model: ${model})`);
     const res = await translateWithOpenAI(
       config.imageBase64,
@@ -172,14 +180,14 @@ export const verifyTranslationQuality = async (
   if (provider === 'gemini') {
     const model = GEMINI_VERIFIER_MODEL;
     const ready = await ensureGeminiReady(settings, model);
-    if (!ready) throw new Error("Gemini non pronto per la verifica.");
+    if (!ready.ok) throw new Error("Gemini non pronto per la verifica.");
     return await verifyQualityAdapter({ settings, ...rest });
   }
 
   if (provider === 'openai') {
     const model = settings.openai.model;
     const ready = await ensureOpenAIReady(settings, model);
-    if (!ready) throw new Error("OpenAI non pronto per la verifica.");
+    if (!ready.ok) throw new Error("OpenAI non pronto per la verifica.");
     return await verifyQualityAdapter({ settings, ...rest });
   }
 
@@ -199,14 +207,14 @@ export const extractPdfMetadata = async (
   if (provider === 'gemini') {
     const model = settings.gemini.model;
     const ready = await ensureGeminiReady(settings, model);
-    if (!ready) throw new Error("Gemini non pronto per l'estrazione metadati.");
+    if (!ready.ok) throw new Error("Gemini non pronto per l'estrazione metadati.");
     return await extractMetadataAdapter(base64Images, settings, options);
   }
 
   if (provider === 'openai') {
     const model = settings.openai.model;
     const ready = await ensureOpenAIReady(settings, model);
-    if (!ready) throw new Error("OpenAI non pronto per l'estrazione metadati.");
+    if (!ready.ok) throw new Error("OpenAI non pronto per l'estrazione metadati.");
     return await extractMetadataAdapter(base64Images, settings, options);
   }
 
