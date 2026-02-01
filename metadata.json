@@ -1,0 +1,5 @@
+{
+  "name": "Gemini PDF Translator di libri",
+  "description": "A sophisticated PDF reader that uses Gemini to translate German text into Italian, maintaining context across page boundaries and remembering your reading progress.",
+  "requestFramePermissions": []
+}

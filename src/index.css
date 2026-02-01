@@ -1,0 +1,24 @@
+.app-region-drag {
+  -webkit-app-region: drag;
+  user-select: none;
+  -webkit-user-select: none;
+}
+
+.app-region-no-drag {
+  -webkit-app-region: no-drag;
+}
+
+.book-text {
+  hyphens: auto;
+  -webkit-hyphens: auto;
+  overflow-wrap: break-word;
+  word-break: normal;
+  hyphenate-limit-chars: 3 3;
+  -webkit-hyphenate-limit-before: 3;
+  -webkit-hyphenate-limit-after: 3;
+  -webkit-hyphenate-limit-lines: 2;
+}
+
+.tabular-nums {
+  font-variant-numeric: tabular-nums;
+}
