@@ -1,1 +1,0 @@
-L'analisi del codice ha confermato la presenza di meccanismi di salvataggio sicuri e protezioni specifiche nel processo principale di Electron che impediscono la chiusura dell'app durante i salvataggi critici. Non sono necessari interventi tecnici; l'utente può procedere con la traduzione parziale dei documenti in totale sicurezza. Fornirò queste rassicurazioni finali all'utente.
