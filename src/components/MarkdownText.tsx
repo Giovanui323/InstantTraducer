@@ -327,26 +327,21 @@ export const MarkdownText: React.FC<MarkdownTextProps> = ({
             <Container key={pIndex} className={containerClass} style={preserveLayout ? { whiteSpace: 'pre-wrap', textAlign: align === 'left' ? 'left' : 'justify' } : { textAlign: align === 'left' ? 'left' : 'justify' }}>
               {parts.map((part, i) => {
                 const currentStart = globalVisibleOffset;
-                let visibleLength = calculateRecursiveVisibleLength(part);
-                if (part.startsWith('[[') && part.endsWith(']]')) {
-                  const content = part.slice(2, -2);
-                  const [, commentRaw] = content.split('|');
-                  const comment = (commentRaw || '').trim();
-                  if (comment.length > 0) {
-                    visibleLength += String(noteNumber + 1).length;
-                  }
-                }
+                
+                // We need to calculate the length of this part as it will appear in the DOM.
+                // This includes the text length and any superscripts from notes.
+                const partInfo = calculateVisibleLengthWithNotes(part, noteNumber);
+                const visibleLength = partInfo.length;
+                
+                // Update the global offset for the NEXT part
                 globalVisibleOffset += visibleLength;
-                // Only add NEWLINE or SPACE offset if paragraphs imply it? 
-                // paragraphs are split by \n\n, typically 1 or 2 newlines. 
-                // If we treat them as blocks, we don't count the gap? 
-                // BUT computeOffsets tracks text content in DOM. Browsers usually insert \n for block elements.
-                // We should verify if globalVisibleOffset needs to account for paragraph breaks.
-                // Usually, textContent includes newlines only if `white-space: pre`. 
-                // For normal blocks, offsets might be contiguous or separated by 1.
-                // Let's assume contiguous for now inside paragraph.
+                
+                // We don't increment noteNumber here because registerNote will do it inside renderPart.
+                // BUT we need calculateVisibleLengthWithNotes to use the correct sequence.
+                // Since registerNote increments noteNumber, we should keep noteNumber in sync.
+                // Let's ensure noteNumber is updated BEFORE the next iteration's calculateVisibleLengthWithNotes.
 
-                return renderPart(
+                const rendered = renderPart(
                   part, 
                   i, 
                   registerNote, 
@@ -356,8 +351,11 @@ export const MarkdownText: React.FC<MarkdownTextProps> = ({
                   currentStart,
                   activeResultId,
                   pageNumber,
-                  () => pageMatchCounter++
+                  () => pageMatchCounter++,
+                  noteNumber
                 );
+
+                return rendered;
               })}
             </Container>
           );
@@ -616,7 +614,8 @@ function renderPart(
   paragraphStartOffset?: number,
   activeResultId?: string | null,
   pageNumber?: number,
-  getNextMatchIdx?: () => number
+  getNextMatchIdx?: () => number,
+  currentNoteNumber?: number
 ) {
   if (part.startsWith('[FIGURA:') && part.endsWith(']')) {
     const description = part.slice(8, -1).trim();
@@ -677,11 +676,23 @@ function renderPart(
     const escaped = escapeRegExp(searchTerm.trim());
     const re = new RegExp(`(${escaped})`, 'gi');
     const chunks = part.split(re);
+    
+    let internalOffset = paragraphStartOffset || 0;
+    
     return (
       <span key={key}>
         {chunks.map((c, i) => {
-          // Quando si usa split con un gruppo di cattura, i match si trovano sempre agli indici dispari
           const isMatch = i % 2 === 1;
+          const currentChunkStart = internalOffset;
+          
+          // Calculate length of this chunk. Since it's a split of 'part', 
+          // it might still contain markdown if the search term didn't match the markdown tags.
+          // However, notes/formatting are usually NOT matched by search regex because it's plain text.
+          // BUT the chunks BETWEEN matches might contain them.
+          const chunkInfo = calculateVisibleLengthWithNotes(c, currentNoteNumber || 0);
+          
+          internalOffset += chunkInfo.length;
+
           if (isMatch) {
             const matchIdx = getNextMatchIdx ? getNextMatchIdx() : 0;
             const matchId = `search-p${pageNumber}-m${matchIdx}`;
@@ -697,8 +708,7 @@ function renderPart(
               </mark>
             );
           }
-          const startOffset = (paragraphStartOffset || 0) + chunks.slice(0, i).join('').length;
-          return <span key={`${key}-t-${i}`}>{renderTextWithHighlights ? renderTextWithHighlights(c, startOffset) : c}</span>;
+          return <span key={`${key}-t-${i}`}>{renderTextWithHighlights ? renderTextWithHighlights(c, currentChunkStart) : c}</span>;
         })}
       </span>
     );
@@ -714,32 +724,53 @@ function escapeRegExp(s: string) {
   return s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 }
 
-function calculateRecursiveVisibleLength(part: string): number {
-  if (part.startsWith('[FIGURA:') && part.endsWith(']')) return 0;
+function calculateVisibleLengthWithNotes(part: string, startNoteNumber: number): { length: number, notesCount: number } {
+  let length = 0;
+  let notesCount = 0;
+
+  if (part.startsWith('[FIGURA:') && part.endsWith(']')) {
+    return { length: 0, notesCount: 0 };
+  }
 
   if (part.startsWith('[[') && part.endsWith(']]')) {
     const content = part.slice(2, -2);
-    const [word] = content.split('|');
-    return word.trim().length;
+    const [wordRaw, commentRaw] = content.split('|');
+    const word = (wordRaw || '').trim();
+    const comment = (commentRaw || '').trim();
+    
+    length += word.length;
+    if (comment.length > 0) {
+      notesCount += 1;
+      length += String(startNoteNumber + notesCount).length;
+    }
+    return { length, notesCount };
   }
 
-  const inlineSplitRegex = /(\*\*[\s\S]*?\*\*|\*[\s\S]*?\*|__[\s\S]*?__|_[\s\S]*?_)/g;
+  const inlineSplitRegex = /(\*\*[\s\S]*?\*\*|\*[\s\S]*?\*|__[\s\S]*?__|_[\s\S]*?_|\[\[.*?\|.*?\]\])/g;
   if (inlineSplitRegex.test(part)) {
-    // Reset regex index
     inlineSplitRegex.lastIndex = 0;
     const subParts = part.split(inlineSplitRegex);
-    let total = 0;
     for (const sub of subParts) {
+      if (!sub) continue;
+      
       if ((sub.startsWith('**') && sub.endsWith('**')) || (sub.startsWith('__') && sub.endsWith('__'))) {
-        total += calculateRecursiveVisibleLength(sub.slice(2, -2));
+        const res = calculateVisibleLengthWithNotes(sub.slice(2, -2), startNoteNumber + notesCount);
+        length += res.length;
+        notesCount += res.notesCount;
       } else if ((sub.startsWith('*') && sub.endsWith('*')) || (sub.startsWith('_') && sub.endsWith('_'))) {
-        total += calculateRecursiveVisibleLength(sub.slice(1, -1));
+        const res = calculateVisibleLengthWithNotes(sub.slice(1, -1), startNoteNumber + notesCount);
+        length += res.length;
+        notesCount += res.notesCount;
+      } else if (sub.startsWith('[[') && sub.endsWith(']]')) {
+        const res = calculateVisibleLengthWithNotes(sub, startNoteNumber + notesCount);
+        length += res.length;
+        notesCount += res.notesCount;
       } else {
-        total += sub.length;
+        length += sub.length;
       }
     }
-    return total;
+    return { length, notesCount };
   }
 
-  return part.length;
+  return { length: part.length, notesCount: 0 };
 }
