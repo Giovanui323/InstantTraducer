@@ -106,7 +106,7 @@ export const useGroupManager = ({
     );
   }, []);
 
-  const handleAssignGroup = useCallback((fileId: string, groupIdOrName: string, updateLibrary: (fileId: string, data: any) => void, recentBooksRef: React.MutableRefObject<any>) => {
+  const handleAssignGroup = useCallback((fileId: string, groupIdOrName: string, updateLibrary: (fileId: string, data: any) => void) => {
     // CRITICAL FIX: Use ref to avoid stale closure state
     const book = recentBooksRef.current[fileId];
     if (!book) return;
@@ -115,10 +115,10 @@ export const useGroupManager = ({
     const currentGroups = book.groups || [];
 
     // Find the group object for the target ID
-    const targetGroupObj = availableGroups.find(g => g.id === targetId);
+    const targetGroupObj = availableGroups.find((g: Group) => g.id === targetId);
     const targetName = targetGroupObj?.name;
 
-    const isAlreadyAssigned = currentGroups.some(g => {
+    const isAlreadyAssigned = currentGroups.some((g: string) => {
         if (g === targetId) return true;
         if (targetName && g === targetName) return true; // Match by name (legacy)
         return false;
@@ -128,7 +128,7 @@ export const useGroupManager = ({
 
     if (isAlreadyAssigned) {
         // Remove both ID and Name (clean up legacy)
-        newGroups = currentGroups.filter(g => g !== targetId && g !== targetName);
+        newGroups = currentGroups.filter((g: string) => g !== targetId && g !== targetName);
     } else {
         // Add ID
         newGroups = [...currentGroups, targetId];

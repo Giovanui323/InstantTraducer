@@ -5,7 +5,7 @@ import equal from 'fast-deep-equal';
 import { isUuidV4FileId } from '../utils/idUtils';
 import { buildProjectSavePayload, mergeSaveDelta } from '../utils/saveQueueUtils';
 import * as usageTracker from '../services/usageTracker';
-import { useSaveQueueManager, type SavePriority } from './saveQueue/SaveQueueManager';
+import { useSaveQueueManager, type SavePriority, type SaveRequest } from './saveQueue/SaveQueueManager';
 import { useGroupManager } from './library/GroupManager';
 import { useSaveBlockingManager } from './library/SaveBlockingManager';
 

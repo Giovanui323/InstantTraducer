@@ -8,7 +8,7 @@ export interface ConcurrencyControl {
 
 export interface SlotManagerProps {
   MAX_CONCURRENT_TRANSLATIONS: number;
-  setQueueStats: (stats: { queued: number; active: number }) => void;
+  setQueueStats: React.Dispatch<React.SetStateAction<{ queued: number; active: number }>>;
   pumpQueueRef: React.MutableRefObject<(() => Promise<void>) | undefined>;
 }
 

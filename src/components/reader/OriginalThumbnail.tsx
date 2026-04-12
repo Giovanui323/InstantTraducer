@@ -1,9 +1,8 @@
 import React, { useEffect, useRef, useState } from 'react';
 import Draggable, { DraggableData, DraggableEvent } from 'react-draggable';
 import { PDFDocumentProxy } from 'pdfjs-dist';
-import { Plus, Minus, Pencil } from 'lucide-react';
+import { Plus, Minus, Pencil, Loader2 } from 'lucide-react';
 import { useZoomSystem } from '../../hooks/useZoomSystem';
-import { PdfThumbnail } from './PdfThumbnail';
 import { READER_STYLES, dynamicStyles } from '../../styles/readerStyles';
 
 interface OriginalThumbnailProps {
@@ -111,13 +110,9 @@ export const OriginalThumbnail: React.FC<OriginalThumbnailProps> = ({
           style={dynamicStyles.thumbnail(currentW, currentH)}
         >
           {((!isCropped) || !src) && pdfDoc && typeof page === 'number' ? (
-            <PdfThumbnail
-              pdfDoc={pdfDoc}
-              page={page}
-              width={currentW}
-              height={currentH}
-              className="w-full h-full"
-            />
+            <div className="w-full h-full flex items-center justify-center bg-gray-50 text-txt-muted">
+              <Loader2 size={20} className="animate-spin text-accent" />
+            </div>
           ) : src ? (
             <img
               src={src}

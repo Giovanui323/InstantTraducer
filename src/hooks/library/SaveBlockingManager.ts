@@ -131,7 +131,7 @@ export const useSaveBlockingManager = ({
       recentBooksRef.current = { ...recentBooksRef.current, [fileId]: updated };
 
       // 2. Update React State
-      setRecentBooks(prev => ({ ...prev, [fileId]: updated }));
+      setRecentBooks((prev: any) => ({ ...prev, [fileId]: updated }));
     } else {
       // Recovery: If book not in memory but we are renaming it (rare), just update cache
       log.warning(`Registering name change for unloaded book ${fileId}: -> '${newName}'`);

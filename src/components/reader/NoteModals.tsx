@@ -1,6 +1,6 @@
 import React from 'react';
 import { MessageSquare, Trash2 } from 'lucide-react';
-import { UserNote, ReaderAction } from './readerReducer';
+import { UserNote } from '../../types';
 
 interface NewNoteModalProps {
   noteModal: { page: number, start: number, end: number, text: string } | null;

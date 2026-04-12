@@ -24,180 +24,36 @@ import {
   GEMINI_FIRST_CHUNK_TIMEOUT_MS
 } from "../constants";
 import { getNextFallbackModel, getNextVerifierFallbackModel } from "./geminiModelLogic";
+import {
+  resetGeminiCooldowns,
+  isGlobalCooldownActive,
+  isModelInCooldown,
+  setModelCooldown,
+  getCooldownStats,
+  isModelInExtendedCooldown
+} from "./geminiCooldown";
+import { globalGeminiCooldownUntil } from "./geminiCooldown";
 
-// Stato globale per il cooldown dei modelli Pro
-const modelCooldowns: Record<string, number> = {};
-// Global cooldown timestamp (0 means inactive)
-let globalGeminiCooldownUntil = 0;
-
-const pageRetryAttempts: Record<number, number> = {};
-const pageRetryDelays: Record<number, number> = {};
-
-// Enhanced cooldown tracking with statistics
-const cooldownStats: Record<string, {
-  activationCount: number;
-  lastActivationTime: number;
-  totalCooldownTime: number;
-  reason: string[];
-}> = {};
-
-const isGlobalCooldownActive = (): boolean => {
-  if (globalGeminiCooldownUntil > 0 && Date.now() < globalGeminiCooldownUntil) {
-    return true;
-  }
-  if (globalGeminiCooldownUntil > 0) {
-    globalGeminiCooldownUntil = 0; // Reset if expired
-    log.info("Cooldown Globale Gemini terminato. Riprendo le operazioni.");
-  }
-  return false;
-};
-
-export const resetGeminiCooldowns = () => {
-    globalGeminiCooldownUntil = 0;
-    // Clear individual models as well
-    for (const key of Object.keys(modelCooldowns)) {
-        delete modelCooldowns[key];
-    }
-    log.info("Cooldown Globale Gemini rimosso forzatamente dall'utente.");
-};
-
-const isModelInCooldown = (model: string): boolean => {
-  if (isGlobalCooldownActive()) return true;
-
-  const expiry = modelCooldowns[model];
-  if (!expiry) return false;
-  if (Date.now() > expiry) {
-    delete modelCooldowns[model];
-    return false;
-  }
-  return true;
-};
-
-const setModelCooldown = (model: string, reason: string = 'quota/timeout', durationMs: number = GEMINI_COOLDOWN_MS) => {
-  const now = Date.now();
-  const expiry = now + durationMs;
-
-  // Initialize stats if not exists
-  if (!cooldownStats[model]) {
-    cooldownStats[model] = {
-      activationCount: 0,
-      lastActivationTime: 0,
-      totalCooldownTime: 0,
-      reason: []
-    };
-  }
-
-  // Update stats
-  cooldownStats[model].activationCount++;
-  cooldownStats[model].lastActivationTime = now;
-  cooldownStats[model].totalCooldownTime += durationMs;
-  cooldownStats[model].reason.push(reason);
-
-  // Keep only last 10 reasons
-  if (cooldownStats[model].reason.length > 10) {
-    cooldownStats[model].reason = cooldownStats[model].reason.slice(-10);
-  }
-
-  log.warning(`Attivazione cooldown di ${Math.round(durationMs / 60000)} min per il modello ${model} (${reason}). Stats: ${cooldownStats[model].activationCount} activations`, {
-    model,
-    reason,
-    durationMs,
-    activationCount: cooldownStats[model].activationCount,
-    totalCooldownTime: cooldownStats[model].totalCooldownTime,
-    lastActivationTime: new Date(now).toISOString()
-  });
-
-  modelCooldowns[model] = expiry;
-};
-
-const getCooldownStats = (model: string) => {
-  return cooldownStats[model] || {
-    activationCount: 0,
-    lastActivationTime: 0,
-    totalCooldownTime: 0,
-    reason: []
-  };
-};
-
-const isModelInExtendedCooldown = (model: string): boolean => {
-  const stats = getCooldownStats(model);
-  const now = Date.now();
-
-  // If model has been activated more than 5 times in the last hour, extend cooldown
-  if (stats.activationCount >= 5 && now - stats.lastActivationTime < 3600000) {
-    log.warning(`[COOLDOWN] Model ${model} has ${stats.activationCount} activations in last hour, extending cooldown`);
-    return true;
-  }
-
-  return isModelInCooldown(model);
-};
-
-const getRetryDelay = (pageNumber: number): number => {
-  const attempts = pageRetryAttempts[pageNumber] || 0;
-  // Exponential backoff: 2^attempts * 1000ms, max 30 seconds
-  return Math.min(Math.pow(2, attempts) * 1000, 30000);
-};
-
-const recordRetryAttempt = (pageNumber: number): number => {
-  pageRetryAttempts[pageNumber] = (pageRetryAttempts[pageNumber] || 0) + 1;
-  const attempts = pageRetryAttempts[pageNumber];
-
-  if (attempts >= 5) {
-    log.error(`[RETRY] Page ${pageNumber} has reached maximum retry attempts (${attempts}). Giving up.`);
-    return attempts;
-  }
-
-  const delay = getRetryDelay(pageNumber);
-  log.warning(`[RETRY] Page ${pageNumber} attempt ${attempts}, next retry in ${delay}ms`);
-  return attempts;
-};
-
-const resetRetryAttempts = (pageNumber: number): void => {
-  if (pageRetryAttempts[pageNumber] > 0) {
-    log.info(`[RETRY] Resetting retry attempts for page ${pageNumber} (was ${pageRetryAttempts[pageNumber]})`);
-  }
-  delete pageRetryAttempts[pageNumber];
-  delete pageRetryDelays[pageNumber];
-};
+// Re-export for backwards compatibility
+export { resetGeminiCooldowns, isGlobalCooldownActive, isModelInCooldown, setModelCooldown, getCooldownStats, isModelInExtendedCooldown };
+import {
+  getRetryDelay,
+  recordRetryAttempt,
+  resetRetryAttempts
+} from "./geminiRetry";
+import { normalizeGeminiError } from "./geminiUtils";
 
 export const __resetGeminiStateForTests = () => {
-  for (const k in modelCooldowns) delete modelCooldowns[k];
-  for (const k in cooldownStats) delete cooldownStats[k];
-  for (const k in pageRetryAttempts) delete pageRetryAttempts[k];
-  for (const k in pageRetryDelays) delete pageRetryDelays[k];
-  globalGeminiCooldownUntil = 0;
+  resetGeminiCooldowns();
+  const __resetGeminiCooldownStateForTests = require('./geminiCooldown').__resetGeminiCooldownStateForTests;
+  const __resetGeminiRetryStateForTests = require('./geminiRetry').__resetGeminiRetryStateForTests;
+  __resetGeminiCooldownStateForTests();
+  __resetGeminiRetryStateForTests();
 };
 
 import { getGeminiTranslateSystemPrompt, getGeminiTranslateUserInstruction } from './prompts/gemini';
 import { getMetadataExtractionPrompt, buildRetryInstruction } from './prompts/shared';
 import { getVerifyQualitySystemPrompt } from "./verifierPrompts";
-
-const normalizeGeminiError = (e: any) => {
-  if (e instanceof Error) {
-    if (e.message === "Richiesta annullata" && !(e as any).code) {
-      (e as any).code = 'ABORTED';
-    }
-    return e;
-  }
-
-  const msg = e?.error?.message || e?.message || e?.statusText || (typeof e === 'string' ? e : "");
-  const code = e?.error?.code || e?.status || (e?.name === 'AbortError' ? 'ABORTED' : undefined);
-
-  if (msg.includes("Base64 decoding failed")) {
-    return new Error("Immagine non valida: fornire Base64 senza prefisso data:, con mime corretto.");
-  }
-
-  if (msg === "Richiesta annullata" || msg === "Operazione annullata") {
-    const err = new Error(msg);
-    (err as any).code = 'ABORTED';
-    return err;
-  }
-
-  const finalMsg = msg || "Errore sconosciuto Gemini API";
-  const err = new Error(finalMsg);
-  if (code) (err as any).code = code;
-  return err;
-};
 
 const isQuotaError = (e: any): boolean => {
   const msg = String(e?.error?.message || e?.message || "").toLowerCase();
