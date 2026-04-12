@@ -33,11 +33,11 @@ export const getVerificationUiState = (report?: PageVerification) => {
     if (report.postRetryFailed) {
       return { dotClass: 'bg-amber-500', label: 'Verifica: da ricontrollare', severityLabel: undefined as string | undefined };
     }
-    if (report.changed) {
-      return { dotClass: 'bg-amber-500', label: 'Verifica: testo aggiornato', severityLabel: undefined as string | undefined };
-    }
     if (report.severity === 'severe') {
       return { dotClass: 'bg-red-500', label: 'Verifica: problemi gravi', severityLabel: 'SEVERE' };
+    }
+    if (report.changed) {
+      return { dotClass: 'bg-amber-500', label: 'Verifica: testo aggiornato', severityLabel: undefined as string | undefined };
     }
     if (report.severity === 'minor') {
       return { dotClass: 'bg-amber-500', label: 'Verifica: attenzione', severityLabel: 'MINOR' };

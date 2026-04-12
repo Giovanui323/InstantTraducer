@@ -1,20 +1,37 @@
 import React, { useRef, useEffect } from 'react';
 import { Image as ImageIcon, MessageSquare } from 'lucide-react';
 import { UserHighlight, UserNote } from '../types';
-import { computeOffsets, normalizeHighlights } from '../utils/textSelection';
+import { computeOffsets, computeOffsetsWithContext, normalizeHighlights } from '../utils/textSelection';
+import { buildSelectableText, getInlineSplitRegex, getSplitRegex, resolveHighlightsByQuote } from '../utils/highlightSelectors';
+import { normalizeTextForRendering } from '../utils/textUtils';
+import { sanitizeHTML, validateSelectionRange } from '../utils/securityUtils';
+import { debounce } from '../utils/performanceUtils';
+import { ErrorBoundary } from './ErrorBoundary';
+import { splitByFootnoteSeparator, parseFootnotes } from '../utils/footnoteUtils';
+import { calculateVisibleLength } from '../utils/readerTextAlignment';
+import {
+  textSelectionToPdfCoordinates,
+  getTextContainerMetrics,
+  PdfRect
+} from '../utils/pdfCoordinates';
+import {
+  applyAntiReflowStrategy,
+  HIGHLIGHT_STYLES
+} from '../utils/antiReflowUtils';
+import { getHighlightClasses } from '../utils/highlightStyles';
 
 interface MarkdownTextProps {
   text: string;
   align?: 'justify' | 'left';
   preserveLayout?: boolean;
-  dark?: boolean;
+  theme?: 'light' | 'sepia' | 'dark';
   searchTerm?: string;
   activeResultId?: string | null;
   pageNumber?: number;
   baseOffset?: number;
   highlights?: UserHighlight[];
   userNotes?: UserNote[];
-  onAddHighlight?: (start: number, end: number, text: string, color?: string) => void;
+  onAddHighlight?: (start: number, end: number, text: string, color?: string, quote?: { exact: string; prefix: string; suffix: string }, pdfRect?: PdfRect) => void;
   onRemoveHighlight?: (id: string) => void;
   onAddNote?: (start: number, end: number, text: string, content: string) => void;
   onUpdateNote?: (id: string, content: string) => void;
@@ -23,13 +40,72 @@ interface MarkdownTextProps {
   isNoteToolActive?: boolean;
   isEraserToolActive?: boolean;
   onNoteClick?: (id: string) => void;
+  hideFootnotes?: boolean;
+  externalNotes?: Array<{ n: number | string; word: string; comment: string }>;
+  onNotesUpdate?: (notes: Array<{ n: number | string; word: string; comment: string }>) => void;
+  noteOffset?: number;
+  pageDimensions?: { width: number; height: number };
 }
+
+interface NoteListProps {
+  notes: Array<{ n: number | string; word?: string; text: string; id?: string }>;
+  theme: 'light' | 'sepia' | 'dark';
+  renderTextWithHighlights: (plain: string, startOffset: number) => React.ReactNode;
+  startOffset: number;
+}
+
+const NoteList: React.FC<NoteListProps> = ({ notes, theme, renderTextWithHighlights, startOffset }) => {
+  let currentOffset = startOffset;
+  const isDark = theme === 'dark';
+  const isSepia = theme === 'sepia';
+
+  return (
+    <div className="mt-auto pt-6 flex flex-col items-start w-full select-text">
+      <div className="block w-full mb-2" data-ignore-offset="true">
+        <div className={`block h-px w-full ${isDark ? 'bg-gray-600' : (isSepia ? 'bg-amber-200' : 'bg-stone-400')}`} />
+      </div>
+      <div className={`w-full leading-tight ${isDark ? 'text-gray-300' : (isSepia ? 'text-amber-900/80' : 'text-stone-800')}`} style={{ fontSize: '0.9em' }}>
+        {notes.map((note) => {
+          const noteNumStr = String(note.n);
+          const wordStr = note.word || '';
+
+          currentOffset += noteNumStr.length; // Number
+          currentOffset += 1; // Space
+
+          let wordNode: React.ReactNode = null;
+          if (wordStr) {
+            wordNode = (
+              <>
+                <span className={`italic ${isDark ? 'text-gray-100' : (isSepia ? 'text-amber-950' : 'text-stone-900')}`}>{wordStr}</span>
+                <span className={isDark ? 'text-gray-400' : (isSepia ? 'text-amber-700/50' : 'text-stone-500')}> </span>
+              </>
+            );
+            currentOffset += wordStr.length;
+            currentOffset += 1; // Space
+          }
+
+          const textElement = renderTextWithHighlights(note.text, currentOffset);
+          currentOffset += note.text.length;
+
+          return (
+            <span key={note.id || note.n} className="block mb-1">
+              <span className={`font-semibold ${isDark ? 'text-gray-300' : (isSepia ? 'text-amber-900' : 'text-stone-800')}`}>{note.n}</span>
+              <span className={isDark ? 'text-gray-300' : (isSepia ? 'text-amber-900' : 'text-stone-800')}> </span>
+              {wordNode}
+              <span className={isDark ? 'text-gray-300' : (isSepia ? 'text-amber-900' : 'text-stone-800')}>{textElement}</span>
+            </span>
+          );
+        })}
+      </div>
+    </div>
+  );
+};
 
 export const MarkdownText: React.FC<MarkdownTextProps> = ({
   text,
   align = 'justify',
   preserveLayout = false,
-  dark = false,
+  theme = 'light',
   searchTerm,
   activeResultId,
   pageNumber,
@@ -39,13 +115,23 @@ export const MarkdownText: React.FC<MarkdownTextProps> = ({
   onAddHighlight,
   onRemoveHighlight,
   onAddNote,
+  onUpdateNote,
+  onRemoveNote,
   isHighlightToolActive = false,
   isEraserToolActive = false,
   isNoteToolActive = false,
-  onNoteClick
+  onNoteClick,
+  hideFootnotes = false,
+  externalNotes,
+  onNotesUpdate,
+  noteOffset = 0,
+  pageDimensions
 }) => {
   const containerRef = useRef<HTMLDivElement>(null);
+  const bodyRef = useRef<HTMLDivElement>(null);
   const baseOffsetSafe = Number.isFinite(baseOffset) ? (baseOffset as number) : 0;
+  const isDark = theme === 'dark';
+  const isSepia = theme === 'sepia';
 
   // Scroll to active search result
   useEffect(() => {
@@ -57,11 +143,10 @@ export const MarkdownText: React.FC<MarkdownTextProps> = ({
     }
   }, [activeResultId]);
 
-  const normalizedText = preserveLayout
-    ? text.replace(/\r\n/g, '\n')
-    : text
-      .replace(/\r\n/g, '\n')
-      .replace(/([A-Za-zÀ-ÖØ-öø-ÿ])-\n\s*([A-Za-zÀ-ÖØ-öø-ÿ])/g, '$1$2');
+  const normalizedText = React.useMemo(() =>
+    normalizeTextForRendering(text, preserveLayout),
+    [text, preserveLayout]
+  );
 
   const splitFootnotes = splitByFootnoteSeparator(normalizedText);
   const bodyText = splitFootnotes?.body ?? normalizedText;
@@ -69,31 +154,202 @@ export const MarkdownText: React.FC<MarkdownTextProps> = ({
   const parsedFootnotes = splitFootnotes ? parseFootnotes(footnotesRaw) : [];
   const hasPdfFootnotes = Boolean(splitFootnotes) && footnotesRaw.trim().length > 0;
 
-  const normalizedHighlights = normalizeHighlights(highlights || []);
+  const paragraphs = React.useMemo(() => bodyText.split(/\n\s*\n/), [bodyText]);
 
-  const paragraphs = bodyText.split(/\n\s*\n/);
-  const splitRegex = /(\*\*[\s\S]*?\*\*|\*[\s\S]*?\*|__[\s\S]*?__|_[\s\S]*?_|\[\[.*?\|.*?\]\]|\[FIGURA:.*?\])/g;
-  const inlineSplitRegex = /(\*\*[\s\S]*?\*\*|\*[\s\S]*?\*|__[\s\S]*?__|_[\s\S]*?_)/g;
+  const selectableText = React.useMemo(() => {
+    let fullText = buildSelectableText(bodyText, preserveLayout);
 
-  let globalVisibleOffset = baseOffsetSafe; // Tracks the offset in the "visible" plain text representation
-  let renderedParagraphs = 0;
-  let noteNumber = 0;
+    // Append text from notes to match DOM structure and allow highlighting within notes
+    // Logic must match how computeOffsets sees the text (concatenated blocks)
+
+    if (!hideFootnotes && hasPdfFootnotes) {
+      fullText += '\n'; // Newline for the block separator
+      fullText += parsedFootnotes.map(f => `${f.n} ${f.text}`).join('');
+    }
+
+    if (!hideFootnotes && userNotes && userNotes.length > 0) {
+      if (fullText.length > 0) fullText += '\n'; // Newline for the block separator
+      fullText += userNotes.map((n, idx) => {
+        const num = idx + 1;
+        const word = n.text ? `${n.text} ` : '';
+        return `${num} ${word}${n.content}`;
+      }).join('');
+    }
+
+    if (externalNotes && externalNotes.length > 0) {
+      if (fullText.length > 0) fullText += '\n'; // Newline for the block separator
+      fullText += externalNotes.map(n => {
+        const word = n.word ? `${n.word} ` : '';
+        return `${n.n} ${word}${n.comment}`;
+      }).join('');
+    }
+
+    return fullText;
+  }, [bodyText, preserveLayout, hideFootnotes, hasPdfFootnotes, parsedFootnotes, userNotes, externalNotes]);
+
+  const normalizedHighlights = React.useMemo(() => {
+    const valid = normalizeHighlights(highlights || []);
+    // Quote-first resolution: finds each highlight by its text context,
+    // using offsets only as a disambiguation hint
+    return resolveHighlightsByQuote(valid, selectableText, baseOffsetSafe);
+  }, [highlights, selectableText, baseOffsetSafe]);
+
+  const splitRegex = React.useMemo(() => getSplitRegex(), []);
+  const inlineSplitRegex = React.useMemo(() => getInlineSplitRegex(), []);
+
+  // === FIX: Pre-compute all paragraph offsets, inline notes, and NoteList start offsets ===
+  // This replaces the mutable variables that were mutated during render (React anti-pattern).
+  const precomputed = React.useMemo(() => {
+    let offset = baseOffsetSafe;
+    let renderedCount = 0;
+    let noteNum = noteOffset;
+    let matchCounter = 0;
+    const inlineNotes: Array<{ n: number; word: string; comment: string }> = [];
+
+    // Pre-process paragraphs to get their start offsets and part offsets
+    const paragraphMeta: Array<{
+      startOffset: number;
+      partOffsets: number[];
+      isFirst: boolean;
+    }> = [];
+
+    for (const paragraph of paragraphs) {
+      const paragraphText = preserveLayout ? paragraph : paragraph.replace(/\n+/g, ' ').replace(/\s{2,}/g, ' ').trim();
+      if (!paragraphText) {
+        paragraphMeta.push({ startOffset: offset, partOffsets: [], isFirst: false });
+        continue;
+      }
+
+      const parts = paragraphText.split(splitRegex);
+      const hasBlockElements = parts.some(p => p.startsWith('[FIGURA:') && p.endsWith(']'));
+      const isIgnoredParagraph = hasBlockElements && parts.length === 1;
+
+      const isFirstRendered = renderedCount === 0;
+      if (!isIgnoredParagraph) {
+        renderedCount += 1;
+        if (!isFirstRendered) {
+          offset += 1; // paragraph separator
+        }
+      }
+
+      const partOffsets: number[] = [];
+      for (const part of parts) {
+        partOffsets.push(offset);
+        const partInfo = calculateVisibleLength(part);
+        offset += partInfo.length;
+
+        // Track inline notes (same logic as registerNote)
+        if (partInfo.notesCount > 0) {
+          // Extract note info from the part
+          if (part.startsWith('[[') && part.endsWith(']]')) {
+            const content = part.slice(2, -2);
+            if (content !== 'PAGE_SPLIT') {
+              const [wordRaw, commentRaw] = content.split('|');
+              const word = (wordRaw || '').trim();
+              const comment = (commentRaw || '').trim();
+              if (comment.length > 0) {
+                noteNum += 1;
+                inlineNotes.push({ n: noteNum, word: word.trim(), comment: comment.trim() });
+              }
+            }
+          }
+        }
+      }
+
+      paragraphMeta.push({ startOffset: offset - (partOffsets.length > 0 ? offset - partOffsets[0] : 0), partOffsets, isFirst: isFirstRendered });
+    }
+
+    // Compute the final offset after all paragraphs (this is what globalVisibleOffset would be)
+    const bodyEndOffset = offset;
+
+    // Pre-compute NoteList start offsets
+    // Each NoteList starts at (previous end offset + 1)
+    const computeNoteListEndOffset = (
+      notes: Array<{ n: number | string; word?: string; text: string }>,
+      startOff: number
+    ): number => {
+      let o = startOff;
+      for (const note of notes) {
+        o += String(note.n).length; // note number
+        o += 1; // space
+        if (note.word) {
+          o += note.word.length; // plain text length (matches DOM text node)
+          o += 1; // space
+        }
+        o += note.text.length; // plain text length (matches DOM text node)
+      }
+      return o;
+    };
+
+    let runningOffset = bodyEndOffset;
+
+    // PDF footnotes
+    let pdfFootnotesStart = runningOffset + 1;
+    if (!hideFootnotes && hasPdfFootnotes && parsedFootnotes.length > 0) {
+      runningOffset = computeNoteListEndOffset(
+        parsedFootnotes.map(f => ({ n: f.n, text: f.text })),
+        pdfFootnotesStart
+      );
+    }
+
+    // Inline notes (registered by [[word|comment]] syntax)
+    let inlineNotesStart = runningOffset + 1;
+    if (!hideFootnotes && inlineNotes.length > 0) {
+      runningOffset = computeNoteListEndOffset(
+        inlineNotes.map(n => ({ n: n.n, word: n.word, text: n.comment })),
+        inlineNotesStart
+      );
+    }
+
+    // User notes
+    let userNotesStart = runningOffset + 1;
+    if (!hideFootnotes && userNotes && userNotes.length > 0) {
+      runningOffset = computeNoteListEndOffset(
+        userNotes.map((n, idx) => ({ n: idx + 1, word: n.text, text: n.content })),
+        userNotesStart
+      );
+    }
+
+    // External notes
+    let externalNotesStart = runningOffset + 1;
+
+    return {
+      paragraphMeta,
+      inlineNotes,
+      noteCount: noteNum,
+      pdfFootnotesStart,
+      inlineNotesStart,
+      userNotesStart,
+      externalNotesStart,
+    };
+  }, [paragraphs, preserveLayout, baseOffsetSafe, noteOffset, splitRegex, hideFootnotes, hasPdfFootnotes, parsedFootnotes, userNotes, externalNotes]);
+
+  // Mutable counters for renderPart callbacks that MUST mutate during render.
+  // These are isolated to the minimum needed — the note registration callback
+  // and the search match counter. The offset tracking is fully pre-computed above.
+  let noteNumberCounter = noteOffset;
+  const getNoteNumber = () => noteNumberCounter;
   let pageMatchCounter = 0;
-  const notes: Array<{ n: number; word: string; comment: string }> = [];
+  const inlineNotesCollected: Array<{ n: number | string; word: string; comment: string }> = [];
 
   const registerNote = (word: string, comment: string) => {
-    noteNumber += 1;
-    notes.push({ n: noteNumber, word: word.trim(), comment: comment.trim() });
-    return noteNumber;
+    noteNumberCounter += 1;
+    const newNote = { n: noteNumberCounter, word: word.trim(), comment: comment.trim() };
+    inlineNotesCollected.push(newNote);
+    return noteNumberCounter;
   };
 
-  const renderTextWithHighlights = (plain: string, startOffset: number) => {
-    // ... (rest of the component)
+  // Sync pre-computed inline notes with parent if callback provided
+  useEffect(() => {
+    if (onNotesUpdate && precomputed.inlineNotes.length > 0) {
+      onNotesUpdate(precomputed.inlineNotes);
+    }
+  }, [onNotesUpdate, precomputed.inlineNotes]);
 
-    // Combine highlights (ranges) and notes (points)
+
+  const renderTextWithHighlights = React.useCallback((plain: string, startOffset: number) => {
     const points: Array<{ type: 'note', offset: number, id: string, text: string, content: string }> = [];
     userNotes.forEach(n => {
-      // We place the note icon at the end of the selected text (n.end)
       if (n.end > startOffset && n.end <= startOffset + plain.length) {
         points.push({ type: 'note', offset: n.end, id: n.id, text: n.text, content: n.content });
       }
@@ -107,9 +363,8 @@ export const MarkdownText: React.FC<MarkdownTextProps> = ({
       id: h.id
     }));
 
-    if (ranges.length === 0 && points.length === 0) return <span>{plain}</span>;
+    if (ranges.length === 0 && points.length === 0) return <span key={`p-${startOffset}`}>{plain}</span>;
 
-    // Sort interesting offsets
     const offsets = new Set<number>([startOffset, startOffset + plain.length]);
     ranges.forEach(r => { offsets.add(r.start); offsets.add(r.end); });
     points.forEach(p => offsets.add(p.offset));
@@ -123,17 +378,31 @@ export const MarkdownText: React.FC<MarkdownTextProps> = ({
       if (segEnd <= segStart) continue;
 
       const segText = plain.slice(segStart - startOffset, segEnd - startOffset);
-      const isHighlighted = ranges.find(r => r.start < segEnd && r.end > segStart);
+
+      // Find all overlapping highlights and prioritize by severity (red > blue > green > yellow)
+      const overlapping = ranges.filter(r => r.start < segEnd && r.end > segStart);
+      const SEVERITY_ORDER: Record<string, number> = { 'red': 4, 'blue': 3, 'green': 2, 'yellow': 1 };
+      const isHighlighted = overlapping.sort((a, b) => {
+        return (SEVERITY_ORDER[b.color || 'yellow'] || 0) - (SEVERITY_ORDER[a.color || 'yellow'] || 0);
+      })[0];
 
       const element = isHighlighted
         ? <span
           key={`s-${segStart}`}
-          className={`${dark ? 'bg-yellow-500/40 text-white' : 'bg-yellow-200 text-black'} rounded px-[2px] cursor-pointer hover:brightness-95`}
+          className={`${getHighlightClasses(isHighlighted.color, theme)} rounded-[2px] cursor-pointer hover:brightness-95`}
+          style={{
+            boxDecorationBreak: 'clone',
+            WebkitBoxDecorationBreak: 'clone',
+            // Stili anti-reflow per minimizzare spostamenti
+            fontVariantLigatures: 'no-common-ligatures',
+            WebkitFontVariantLigatures: 'no-common-ligatures',
+            textRendering: 'optimizeSpeed',
+            fontKerning: 'auto'
+          }}
           title={isEraserToolActive ? "Clicca per cancellare" : undefined}
           onClick={(e) => {
             if (isEraserToolActive && onRemoveHighlight) {
               e.stopPropagation();
-              // Remove highlight
               if (isHighlighted.id) onRemoveHighlight(isHighlighted.id);
             }
           }}
@@ -142,36 +411,44 @@ export const MarkdownText: React.FC<MarkdownTextProps> = ({
 
       segments.push(element);
 
-      // Check if there is a note at segEnd
       const noteAtEnd = points.filter(p => p.offset === segEnd);
       noteAtEnd.forEach(note => {
         segments.push(
           <button
             key={`note-${note.id}`}
-            className="inline-flex items-center justify-center align-text-bottom mx-0.5 hover:scale-110 transition-transform"
+            data-ignore-offset="true"
+            className="inline-flex items-center justify-center align-text-bottom mx-0.5 hover:scale-110 transition-transform select-none"
             onClick={(e) => {
               e.stopPropagation();
-              if (onNoteClick) onNoteClick(note.id);
+              if (isEraserToolActive && onRemoveNote) {
+                if (note.id) onRemoveNote(note.id);
+              } else if (onNoteClick) {
+                onNoteClick(note.id);
+              }
             }}
-            title={note.content}
+            title={isEraserToolActive ? "Clicca per rimuovere la nota" : sanitizeHTML(note.content)}
           >
-            <MessageSquare size={16} className="text-amber-500 fill-amber-500/20 drop-shadow-sm" />
+            <MessageSquare size={16} className={`${isEraserToolActive ? 'text-red-500 fill-red-500/20' : 'text-amber-500 fill-amber-500/20'} drop-shadow-sm`} />
           </button>
         );
       });
     }
 
-    return <span>{segments}</span>;
-  };
+    return <span key={`p-${startOffset}`}>{segments}</span>;
+  }, [userNotes, normalizedHighlights, isDark, isSepia, isEraserToolActive, onRemoveHighlight, onNoteClick]);
 
   const tryGetWordRangeAtPoint = (root: HTMLElement, clientX: number, clientY: number) => {
-    const docAny = document as any;
+    const doc = document as Document & {
+      caretRangeFromPoint?: (x: number, y: number) => Range | null;
+      caretPositionFromPoint?: (x: number, y: number) => { offsetNode: Node; offset: number } | null;
+    };
+
     const caretRange: Range | null =
-      typeof docAny.caretRangeFromPoint === 'function'
-        ? docAny.caretRangeFromPoint(clientX, clientY)
-        : (typeof docAny.caretPositionFromPoint === 'function'
+      typeof doc.caretRangeFromPoint === 'function'
+        ? doc.caretRangeFromPoint(clientX, clientY)
+        : (typeof doc.caretPositionFromPoint === 'function'
           ? (() => {
-            const pos = docAny.caretPositionFromPoint(clientX, clientY);
+            const pos = doc.caretPositionFromPoint!(clientX, clientY);
             if (!pos) return null;
             const r = document.createRange();
             r.setStart(pos.offsetNode, pos.offset);
@@ -233,23 +510,21 @@ export const MarkdownText: React.FC<MarkdownTextProps> = ({
     return r;
   };
 
-  const handleMouseUp: React.MouseEventHandler<HTMLDivElement> = (e) => {
-    const target = e.target as HTMLElement | null;
+  const handleMouseUp = React.useCallback(debounce((clientX: number, clientY: number, target: HTMLElement | null) => {
     if (target?.closest('button')) return;
 
-    const root = containerRef.current;
-    if (!root) return;
+    const bodyRoot = bodyRef.current;
+    if (!bodyRoot) return;
 
     const sel = window.getSelection();
     const isCollapsed = !sel || sel.rangeCount === 0 ? true : sel.isCollapsed;
 
-    // If it's just a click (collapsed), we check validation/eraser but computeOffsets needs selection
     if (isCollapsed) {
       if (!isNoteToolActive || !onAddNote) return;
-      const wordRange = tryGetWordRangeAtPoint(root, e.clientX, e.clientY);
+      const wordRange = tryGetWordRangeAtPoint(bodyRoot, clientX, clientY);
       if (!wordRange) return;
-      if (!root.contains(wordRange.startContainer) || !root.contains(wordRange.endContainer)) return;
-      const { start, end, text: selectedText } = computeOffsets(root, wordRange);
+      if (!bodyRoot.contains(wordRange.startContainer) || !bodyRoot.contains(wordRange.endContainer)) return;
+      const { start, end, text: selectedText } = computeOffsets(bodyRoot, wordRange);
       if (!selectedText || selectedText.trim().length === 0) return;
       onAddNote(start + baseOffsetSafe, end + baseOffsetSafe, selectedText.trim(), "");
       sel?.removeAllRanges();
@@ -258,349 +533,264 @@ export const MarkdownText: React.FC<MarkdownTextProps> = ({
 
     if (!sel || sel.rangeCount === 0) return;
     const range = sel.getRangeAt(0);
-    if (!root.contains(range.startContainer) || !root.contains(range.endContainer)) return;
+    if (!bodyRoot.contains(range.startContainer) || !bodyRoot.contains(range.endContainer)) return;
 
-    const { start, end, text: selectedText } = computeOffsets(root, range);
+    const { start, end, text: selectedText, prefix, suffix } = computeOffsetsWithContext(bodyRoot, range, 32);
 
     if (!selectedText || selectedText.trim().length === 0) return;
-    if (!Number.isFinite(start) || !Number.isFinite(end) || end <= start) return;
+    if (!validateSelectionRange(start, end, selectableText.length)) return;
 
-    const adjustedStart = start + baseOffsetSafe;
-    const adjustedEnd = end + baseOffsetSafe;
+    // Use the selection offsets directly — applyAntiReflowStrategy handles expansion.
+    // expandToWordBoundaries was causing double-expansion (grabbing extra words).
+    // IMPORTANT: Pass only the SELECTED text to anti-reflow check, not the full page text.
+    // Otherwise isTextReflowSensitive always triggers on Italian text (contains 'fi'/'fl').
+    const selectedSlice = selectableText.slice(start, end);
+    const antiReflowResult = applyAntiReflowStrategy(
+      selectableText,
+      start,
+      end,
+      align === 'justify'
+    );
 
-    // ERASER TOOL (Swipe)
+    // Only use anti-reflow expansion if the SELECTED text is reflow-sensitive
+    // (not the entire page text which always contains ligatures in Italian)
+    const useAntiReflow = selectedSlice.length < 10 || /fi|fl|ff|ffi|ffl/.test(selectedSlice);
+
+    const adjustedStart = (useAntiReflow ? antiReflowResult.adjustedStart : start) + baseOffsetSafe;
+    const adjustedEnd = (useAntiReflow ? antiReflowResult.adjustedEnd : end) + baseOffsetSafe;
+    const adjustedText = useAntiReflow ? antiReflowResult.adjustedText : selectedText;
+
     if (isEraserToolActive && onRemoveHighlight) {
-      // Find highlights overlapping with selection
       const overlapping = normalizedHighlights.filter(h => h.start < adjustedEnd && h.end > adjustedStart);
       overlapping.forEach(h => onRemoveHighlight(h.id));
       sel.removeAllRanges();
       return;
     }
 
-    // NOTE TOOL
     if (isNoteToolActive && onAddNote) {
-      onAddNote(adjustedStart, adjustedEnd, selectedText.trim(), ""); // Content will be asked by modal
+      onAddNote(adjustedStart, adjustedEnd, adjustedText.trim(), "");
       sel.removeAllRanges();
       return;
     }
 
-    // HIGHLIGHT TOOL
     if (isHighlightToolActive && onAddHighlight) {
-      onAddHighlight(adjustedStart, adjustedEnd, selectedText);
+      // Calcola coordinate PDF per zoom-indipendenza (Adobe-like)
+      let pdfRect: PdfRect | undefined;
+      try {
+        const scale = (pageDimensions && pageDimensions.width > 0)
+          ? bodyRoot.offsetWidth / pageDimensions.width
+          : 1;
+
+        const containerMetrics = getTextContainerMetrics(bodyRoot, scale);
+        const pdfCoords = textSelectionToPdfCoordinates(
+          sel,
+          bodyRoot,
+          containerMetrics.pageWidth,
+          containerMetrics.pageHeight,
+          scale
+        );
+        pdfRect = pdfCoords || undefined; // Converti null in undefined
+      } catch (error) {
+        console.warn('Errore nel calcolo coordinate PDF:', error);
+      }
+
+      // Recalculate prefix/suffix for the selection (use local offsets)
+      const localStart = adjustedStart - baseOffsetSafe;
+      const localEnd = adjustedEnd - baseOffsetSafe;
+      const preStart = Math.max(0, localStart - 32);
+      const sufEnd = Math.min(selectableText.length, localEnd + 32);
+      const newPrefix = selectableText.slice(preStart, localStart);
+      const newSuffix = selectableText.slice(localEnd, sufEnd);
+
+      onAddHighlight(adjustedStart, adjustedEnd, adjustedText, undefined, { exact: adjustedText, prefix: newPrefix, suffix: newSuffix }, pdfRect);
       sel.removeAllRanges();
       return;
     }
-  };
+  }, 150), [
+    isNoteToolActive,
+    onAddNote,
+    baseOffsetSafe,
+    isEraserToolActive,
+    onRemoveHighlight,
+    normalizedHighlights,
+    isHighlightToolActive,
+    onAddHighlight,
+    selectableText.length,
+    pageDimensions
+  ]);
 
   return (
-    <div ref={containerRef} onMouseUp={handleMouseUp} lang="it" className={`${dark ? 'text-gray-200' : 'text-gray-900'} leading-relaxed book-text min-h-full flex flex-col`} style={{
+    <div ref={containerRef} onMouseUp={(e) => handleMouseUp(e.clientX, e.clientY, e.target as HTMLElement)} lang="it" className={`${isDark ? 'text-gray-200' : (isSepia ? 'text-amber-900' : 'text-gray-900')} leading-relaxed book-text min-h-full flex flex-col`} style={{
       fontFamily: 'Iowan Old Style, Palatino, "Palatino Linotype", "Book Antiqua", Georgia, Cambria, "Times New Roman", Times, serif',
       fontSize: '1em',
       lineHeight: 1.28,
       textRendering: 'optimizeLegibility',
-      fontKerning: 'normal'
+      fontKerning: 'normal',
+      // Stili anti-reflow per maggiore stabilità
+      fontVariantLigatures: 'common-ligatures',
+      WebkitFontVariantLigatures: 'common-ligatures',
+      fontFeatureSettings: '"kern" 1, "liga" 1, "clig" 1',
+      letterSpacing: 'normal',
+      wordSpacing: 'normal'
     }}>
-      <div className="flex-1">
+      <div ref={bodyRef} className="flex-1">
         {paragraphs.map((paragraph, pIndex) => {
           const paragraphText = preserveLayout ? paragraph : paragraph.replace(/\n+/g, ' ').replace(/\s{2,}/g, ' ').trim();
           if (!paragraphText) return null;
 
-          const isFirstRendered = renderedParagraphs === 0;
-          renderedParagraphs += 1;
-
-          // Se non è il primo paragrafo, aggiungiamo un offset per la nuova riga (\n) inserita dal browser tra i blocchi <p>
-          if (!isFirstRendered) {
-            globalVisibleOffset += 1;
-          }
-
           const parts = paragraphText.split(splitRegex);
           const hasBlockElements = parts.some(p => p.startsWith('[FIGURA:') && p.endsWith(']'));
+          const isIgnoredParagraph = hasBlockElements && parts.length === 1;
+
+          // Use pre-computed offsets
+          const meta = precomputed.paragraphMeta[pIndex];
+          const isFirstRendered = meta?.isFirst ?? false;
+
           const looksLikeHeading = /^\s*(\d+\.|[IVXLC]+\.|CAPITOLO\b|ART\.|Art\.)/.test(paragraphText);
           const Container = hasBlockElements ? 'div' : 'p';
           const alignClass = align === 'left' ? 'text-left' : 'text-justify';
           const headingSpacingClass = looksLikeHeading ? (isFirstRendered ? ' mt-0' : ' mt-5') : '';
           const containerClass = hasBlockElements
             ? `mb-6 ${alignClass}`
-            : `mb-[1em] ${alignClass}${looksLikeHeading ? ` font-semibold${headingSpacingClass} mb-3 tracking-[0.01em] ${dark ? 'text-gray-100' : 'text-stone-900'}` : ''}`;
+            : `mb-[1em] ${alignClass}${looksLikeHeading ? ` font-semibold${headingSpacingClass} mb-3 tracking-[0.01em] ${isDark ? 'text-gray-100' : (isSepia ? 'text-amber-950' : 'text-stone-900')}` : ''}`;
 
           return (
-            <Container key={pIndex} className={containerClass} style={preserveLayout ? { whiteSpace: 'pre-wrap', textAlign: align === 'left' ? 'left' : 'justify' } : { textAlign: align === 'left' ? 'left' : 'justify' }}>
+            <Container key={pIndex} className={containerClass} style={preserveLayout ? { whiteSpace: 'pre-wrap' } : undefined}>
               {parts.map((part, i) => {
-                const currentStart = globalVisibleOffset;
-                
-                // We need to calculate the length of this part as it will appear in the DOM.
-                // This includes the text length and any superscripts from notes.
-                const partInfo = calculateVisibleLengthWithNotes(part, noteNumber);
-                const visibleLength = partInfo.length;
-                
-                // Update the global offset for the NEXT part
-                globalVisibleOffset += visibleLength;
-                
-                // We don't increment noteNumber here because registerNote will do it inside renderPart.
-                // BUT we need calculateVisibleLengthWithNotes to use the correct sequence.
-                // Since registerNote increments noteNumber, we should keep noteNumber in sync.
-                // Let's ensure noteNumber is updated BEFORE the next iteration's calculateVisibleLengthWithNotes.
+                // Use pre-computed part offset
+                const currentStart = meta?.partOffsets[i] ?? 0;
 
-                const rendered = renderPart(
-                  part, 
-                  i, 
-                  registerNote, 
-                  searchTerm, 
-                  dark, 
-                  renderTextWithHighlights, 
+                return renderPart(
+                  part,
+                  i,
+                  registerNote,
+                  searchTerm,
+                  isDark,
+                  renderTextWithHighlights,
                   currentStart,
                   activeResultId,
                   pageNumber,
                   () => pageMatchCounter++,
-                  noteNumber
+                  getNoteNumber,
+                  isSepia
                 );
-
-                return rendered;
               })}
             </Container>
           );
         })}
+
+        {!hideFootnotes && hasPdfFootnotes && (
+          <NoteList
+            notes={parsedFootnotes.map(f => ({ n: f.n, text: f.text }))}
+            theme={theme}
+            renderTextWithHighlights={renderTextWithHighlights}
+            startOffset={precomputed.pdfFootnotesStart}
+          />
+        )}
+
+        {!hideFootnotes && inlineNotesCollected.length > 0 && (
+          <NoteList
+            notes={inlineNotesCollected.map(n => ({ n: n.n, word: n.word, text: n.comment }))}
+            theme={theme}
+            renderTextWithHighlights={renderTextWithHighlights}
+            startOffset={precomputed.inlineNotesStart}
+          />
+        )}
+
+        {!hideFootnotes && userNotes && userNotes.length > 0 && (
+          <NoteList
+            notes={userNotes.map((n, idx) => ({ n: idx + 1, word: n.text, text: n.content, id: n.id }))}
+            theme={theme}
+            renderTextWithHighlights={renderTextWithHighlights}
+            startOffset={precomputed.userNotesStart}
+          />
+        )}
+
+        {externalNotes && externalNotes.length > 0 && (
+          <NoteList
+            notes={externalNotes.map(n => ({ n: n.n, word: n.word, text: n.comment }))}
+            theme={theme}
+            renderTextWithHighlights={renderTextWithHighlights}
+            startOffset={precomputed.externalNotesStart}
+          />
+        )}
       </div>
-
-      {hasPdfFootnotes && (
-        <div className="mt-auto pt-6 flex flex-col items-start w-full">
-          <div className="block w-full mb-2">
-            <div className={`block h-px w-full ${dark ? 'bg-gray-600' : 'bg-stone-400'}`} />
-          </div>
-          <div className={`w-full leading-tight ${dark ? 'text-gray-300' : 'text-stone-800'}`} style={{ fontSize: '0.9em' }}>
-            {parsedFootnotes.length >= 1 ? (
-              parsedFootnotes.map((note, idx) => (
-                <div key={note.n} className="flex gap-1 mb-2 items-start">
-                  <span className={`font-semibold shrink-0 ${dark ? 'text-gray-300' : 'text-stone-800'}`}>{note.n}</span>
-                  <span className={`block ${dark ? 'text-gray-300' : 'text-stone-800'}`}>
-                    {renderInlineMarkdown(note.text, `${note.n}-`, /(\*\*[\s\S]*?\*\*|\*[\s\S]*?\*|__[\s\S]*?__|_[\s\S]*?_)/g)}
-                  </span>
-                </div>
-              ))
-            ) : (
-              <span className="block whitespace-pre-wrap">
-                {renderInlineMarkdown(
-                  footnotesRaw.replace(/\s{2,}/g, ' ').trim(),
-                  'raw-',
-                  inlineSplitRegex
-                )}
-              </span>
-            )}
-          </div>
-        </div>
-      )}
-
-      {notes.length > 0 && (
-        <div className="mt-auto pt-6 flex flex-col items-start w-full">
-          <div className="block w-full mb-2">
-            <div className={`block h-px w-full ${dark ? 'bg-gray-600' : 'bg-stone-400'}`} />
-          </div>
-          <div className={`w-full leading-tight ${dark ? 'text-gray-300' : 'text-stone-800'}`} style={{ fontSize: '0.9em' }}>
-            {notes.map((note, idx) => (
-              <span key={note.n} className="block mb-1">
-                <span className={`font-semibold ${dark ? 'text-gray-300' : 'text-stone-800'}`}>{note.n}</span>
-                <span className={dark ? 'text-gray-300' : 'text-stone-800'}> </span>
-                <span className={`italic ${dark ? 'text-gray-100' : 'text-stone-900'}`}>{note.word}</span>
-                <span className={dark ? 'text-gray-400' : 'text-stone-500'}> </span>
-                <span className={dark ? 'text-gray-300' : 'text-stone-800'}>{note.comment}</span>
-              </span>
-            ))}
-          </div>
-        </div>
-      )}
-      {userNotes && userNotes.length > 0 && (
-        <div className="mt-2 flex flex-col items-start w-full">
-          <div className={`w-full leading-tight ${dark ? 'text-gray-300' : 'text-stone-800'}`} style={{ fontSize: '0.9em' }}>
-            {userNotes.map((n, idx) => (
-              <span key={n.id} className="block mb-1">
-                <span className={`font-semibold ${dark ? 'text-gray-300' : 'text-stone-800'}`}>{idx + 1}</span>
-                <span className={dark ? 'text-gray-300' : 'text-stone-800'}> </span>
-                <span className={`italic ${dark ? 'text-gray-100' : 'text-stone-900'}`}>{n.text}</span>
-                <span className={dark ? 'text-gray-400' : 'text-stone-500'}> </span>
-                <span className={dark ? 'text-gray-300' : 'text-stone-800'}>{n.content}</span>
-              </span>
-            ))}
-          </div>
-        </div>
-      )}
     </div>
   );
 };
 
-function splitByFootnoteSeparator(text: string) {
-  // 1. Try explicit separator (Markdown horizontal rule)
-  const re = /(?:^|\n)\s*(?:_{3,}|-{3,}|—{3,}|‐{3,}|‑{3,})\s*/;
-  const match = re.exec(text);
-  if (match && match.index != null) {
-    const start = match.index;
-    const end = match.index + match[0].length;
-    return {
-      body: text.slice(0, start).trimEnd(),
-      footnotes: text.slice(end).trim()
-    };
-  }
-
-  // 2. Fallback: Try to detect footnote block at the end (numbered list 1, 2, 3...)
-  // Look for the last occurrence of "1" followed by "2" etc.
-  // This is a simple heuristic: if we find a block starting with 1 at the end of the text.
-
-  // We'll look for a pattern like: \n1. or \n1
-  // followed by \n2. or \n2 later
-
-  const lines = text.split('\n');
-  let potentialSplitIndex = -1;
-
-  // Iterate backwards to find where the footnotes might start
-  // We look for "1" that starts a line, and verify if it's part of a sequence
-  // However, simple regex on the tail might be safer.
-
-  // Let's try to match a sequence of footnotes at the very end of the string.
-  // Regex: Finds 1... then 2... at the end.
-  const footnoteBlockRe = /(?:^|\n)\s*(?:1[.\s]|\^1\s?)(?:.|\n)*?(?:^|\n)\s*(?:2[.\s]|\^2\s?)(?:.|\n)*$/;
-  const blockMatch = footnoteBlockRe.exec(text);
-
-  if (blockMatch && blockMatch.index != null) {
-    // If found, we assume this is the footnote block.
-    // But we need to make sure we didn't match the start of the document if it's numbered.
-    // Check if the match is in the last 50% of the text, or if the text is short.
-    if (blockMatch.index > text.length * 0.3 || text.length < 1000) {
-      return {
-        body: text.slice(0, blockMatch.index).trimEnd(),
-        footnotes: text.slice(blockMatch.index).trim()
-      };
-    }
-  }
-
-  return null;
+function escapeRegExp(s: string) {
+  return s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 }
 
-function parseFootnotes(text: string): Array<{ n: string; text: string }> {
-  // Collapse whitespace but keep numbers distinct
-  const compact = text.replace(/\n+/g, ' ').replace(/\s{2,}/g, ' ').trim();
-  if (!compact) return [];
-
-  const superscripts: Record<string, string> = {
-    '⁰': '0', '¹': '1', '²': '2', '³': '3', '⁴': '4',
-    '⁵': '5', '⁶': '6', '⁷': '7', '⁸': '8', '⁹': '9'
-  };
-  const normalizeNum = (s: string) => s.split('').map(c => superscripts[c] || c).join('');
-
-  // Regex to find footnote numbers: "123 " or "123. " or "²⁷ "
-  // We match digits or superscript digits followed by space, or followed by dot then space.
-  const candidateRe = /(?:^|\s)(\d{1,4}|[⁰¹²³⁴⁵⁶⁷⁸⁹]{1,4})(?:\.|\s)/g;
-
-  const candidates: Array<{ n: number; raw: string; start: number; end: number }> = [];
-  let m: RegExpExecArray | null;
-  while ((m = candidateRe.exec(compact)) !== null) {
-    // m[1] is the number (could be superscript)
-    const n = Number(normalizeNum(m[1]));
-    const start = m.index + (m[0].startsWith(' ') ? 1 : 0);
-    // Be careful with end, m[0] includes the separator
-    const end = start + m[1].length;
-
-    if (!Number.isFinite(n)) continue;
-    // Context check
-    if (!isFootnoteMarkerContext(compact, start)) continue;
-    candidates.push({ n, raw: m[1], start, end });
-  }
-
-  if (candidates.length === 0) return [{ n: '', text: compact }];
-
-  const best = pickBestSequentialRun(candidates);
-  if (!best) return [{ n: '', text: compact }];
-
-  const out: Array<{ n: string; text: string }> = [];
-  for (let i = 0; i < best.length; i++) {
-    const curr = best[i];
-    const next = best[i + 1];
-
-    // The text for this footnote starts after the number (and potentially dot)
-    // We detected the number part. Let's look at compact[curr.end].
-    let textStart = curr.end;
-    if (compact[textStart] === '.') textStart++;
-
-    const textEnd = next ? next.start : compact.length;
-    const chunkText = compact.slice(textStart, textEnd).trim();
-
-    if (chunkText.length === 0 && !next) continue; // Skip empty last
-    out.push({ n: curr.raw, text: chunkText });
-  }
-
-  return out.length > 0 ? out : [{ n: '', text: compact }];
-}
-
-function isFootnoteMarkerContext(text: string, start: number) {
-  if (start === 0) return true;
-
-  const before = text.slice(Math.max(0, start - 8), start);
-  const after = text.slice(start, Math.min(text.length, start + 12));
-
-  if (/[.;:)\]]\s*$/.test(before)) return true;
-
-  if (/\b(?:Art\.|Art|Artikel)\s*$/.test(before)) return false;
-  if (/§\s*$/.test(before)) return false;
-  if (/\bRn\.?\s*$/.test(before)) return false;
-
-  if (/^\d+\s*\bRn\./.test(after)) return false;
-
-  return true;
-}
-
-function pickBestSequentialRun<T extends { n: number; start: number; end: number }>(candidates: T[]): T[] | null {
-  const sorted = [...candidates].sort((a, b) => a.start - b.start);
-
-  let best: T[] | null = null;
-  let bestScore = -1;
-
-  for (let i = 0; i < sorted.length; i++) {
-    // Run finding logic
-    const startCandidate = sorted[i];
-    const run = [startCandidate];
-    let expected = startCandidate.n + 1;
-    let lastStart = startCandidate.start;
-
-    for (let j = i + 1; j < sorted.length; j++) {
-      const next = sorted[j];
-      if (next.start > lastStart && next.n === expected) {
-        run.push(next);
-        expected++;
-        lastStart = next.start;
-      }
-    }
-
-    // Heuristic: longer runs are better. Small numbers (start with 1) are better.
-    const score = run.length * 10 - (startCandidate.n * 0.1);
-    if (score > bestScore) {
-      bestScore = score;
-      best = run;
-    }
-  }
-  return best;
-}
-
-function renderInlineMarkdown(text: string, keyPrefix: string, splitRegex: RegExp) {
+function renderInlineMarkdown(
+  text: string,
+  keyPrefix: string,
+  splitRegex: RegExp,
+  renderTextWithHighlights?: (plain: string, startOffset: number) => React.ReactNode,
+  startOffset?: number,
+  getNoteNumber?: () => number,
+  dark?: boolean,
+  registerNote?: (word: string, comment: string) => number,
+  isSepia?: boolean
+) {
   const parts = text.split(splitRegex);
+  let internalOffset = startOffset || 0;
+
   return parts.map((part, idx) => {
     const key = `${keyPrefix}${idx}`;
+    const currentPartStart = internalOffset;
+    const currentNoteBase = getNoteNumber ? getNoteNumber() : 0;
+
     if ((part.startsWith('**') && part.endsWith('**')) || (part.startsWith('__') && part.endsWith('__'))) {
       const inner = part.startsWith('**') ? part.slice(2, -2) : part.slice(2, -2);
-      return (
-        <strong key={key} className="font-bold text-black">
-          {renderInlineMarkdown(inner, `${keyPrefix}${idx}-b-`, splitRegex)}
+      const res = (
+        <strong key={key} className={`font-bold ${dark ? 'text-white' : (isSepia ? 'text-amber-950' : 'text-black')}`}>
+          {renderInlineMarkdown(inner, `${keyPrefix}${idx}-b-`, splitRegex, renderTextWithHighlights, currentPartStart, getNoteNumber, dark, registerNote, isSepia)}
         </strong>
       );
+      const info = calculateVisibleLength(inner);
+      internalOffset += info.length;
+      return res;
     }
 
     if ((part.startsWith('*') && part.endsWith('*')) || (part.startsWith('_') && part.endsWith('_'))) {
       const inner = part.startsWith('*') ? part.slice(1, -1) : part.slice(1, -1);
-      return (
-        <em key={key} className="italic text-gray-800">
-          {renderInlineMarkdown(inner, `${keyPrefix}${idx}-i-`, splitRegex)}
+      const res = (
+        <em key={key} className={`italic ${dark ? 'text-white' : (isSepia ? 'text-amber-950' : 'text-black')}`}>
+          {renderInlineMarkdown(inner, `${keyPrefix}${idx}-i-`, splitRegex, renderTextWithHighlights, currentPartStart, getNoteNumber, dark, registerNote, isSepia)}
         </em>
+      );
+      const info = calculateVisibleLength(inner);
+      internalOffset += info.length;
+      return res;
+    }
+
+    if (part.startsWith('[[') && part.endsWith(']]')) {
+      const content = part.slice(2, -2);
+      if (content === 'PAGE_SPLIT') return null;
+
+      const [wordRaw, commentRaw] = content.split('|');
+      const word = (wordRaw || '').trim();
+      const comment = (commentRaw || '').trim();
+
+      const info = calculateVisibleLength(part);
+      internalOffset += info.length;
+
+      const wordNode = renderTextWithHighlights ? renderTextWithHighlights(word, currentPartStart) : word;
+
+      if (comment.length === 0 || !registerNote) {
+        return <span key={key} className="whitespace-nowrap">{wordNode}</span>;
+      }
+      const n = registerNote(word, comment);
+      return (
+        <span key={key} className="whitespace-nowrap">{wordNode}<sup data-ignore-offset="true" className="ml-0.5 text-[0.7em] leading-none align-super text-stone-700 font-semibold select-none">{n}</sup></span>
       );
     }
 
-    return <span key={key}>{part}</span>;
+    const res = <span key={key}>{renderTextWithHighlights ? renderTextWithHighlights(part, currentPartStart) : part}</span>;
+    internalOffset += part.length;
+    return res;
   });
 }
 
@@ -615,18 +805,21 @@ function renderPart(
   activeResultId?: string | null,
   pageNumber?: number,
   getNextMatchIdx?: () => number,
-  currentNoteNumber?: number
+  getNoteNumber?: () => number,
+  isSepia?: boolean
 ) {
+  const inlineRegex = getInlineSplitRegex();
+
   if (part.startsWith('[FIGURA:') && part.endsWith(']')) {
     const description = part.slice(8, -1).trim();
     return (
-      <div key={key} className="my-8 p-6 bg-[#fbf7ef] border border-stone-200 rounded-sm flex flex-col items-center gap-3 shadow-sm select-none mx-auto max-w-2xl">
-        <div className="p-2 text-stone-500">
+      <div key={key} data-ignore-offset="true" className={`my-8 p-6 ${isSepia ? 'bg-[#f4f1e8] border-amber-200' : 'bg-[#fbf7ef] border-stone-200'} border rounded-sm flex flex-col items-center gap-3 shadow-sm select-none mx-auto max-w-2xl`}>
+        <div className={isSepia ? 'text-amber-700' : 'text-stone-500'}>
           <ImageIcon size={20} />
         </div>
         <div className="flex flex-col gap-1 text-center">
-          <span className="text-[10px] font-bold uppercase tracking-[0.18em] text-stone-500">Elemento Visivo</span>
-          <span className="text-sm italic text-stone-700 leading-relaxed font-serif">{description}</span>
+          <span className={`text-[10px] font-bold uppercase tracking-[0.18em] ${isSepia ? 'text-amber-600' : 'text-stone-500'}`}>Elemento Visivo</span>
+          <span className={`text-sm italic ${isSepia ? 'text-amber-900' : 'text-stone-700'} leading-relaxed font-serif`}>{sanitizeHTML(description)}</span>
         </div>
       </div>
     );
@@ -639,26 +832,19 @@ function renderPart(
     const comment = (commentRaw || '').trim();
     const wordNode = renderTextWithHighlights ? renderTextWithHighlights(word, paragraphStartOffset || 0) : word;
     if (comment.length === 0) {
-      return (
-        <span key={key} className="whitespace-nowrap">
-          {wordNode}
-        </span>
-      );
+      return <span key={key} className="whitespace-nowrap">{wordNode}</span>;
     }
     const n = registerNote(word, comment);
     return (
-      <span key={key} className="whitespace-nowrap">
-        {wordNode}
-        <sup className="ml-0.5 text-[9px] leading-none align-super text-stone-700 font-semibold">{n}</sup>
-      </span>
+      <span key={key} className="whitespace-nowrap">{wordNode}<sup data-ignore-offset="true" className="ml-0.5 text-[0.7em] leading-none align-super text-stone-700 font-semibold select-none">{n}</sup></span>
     );
   }
 
   if ((part.startsWith('**') && part.endsWith('**')) || (part.startsWith('__') && part.endsWith('__'))) {
     const inner = part.startsWith('**') ? part.slice(2, -2) : part.slice(2, -2);
     return (
-      <strong key={key} className="font-bold text-black">
-        {renderInlineMarkdown(inner, `p-${key}-b-`, /(\*\*[\s\S]*?\*\*|\*[\s\S]*?\*|__[\s\S]*?__|_[\s\S]*?_)/g)}
+      <strong key={key} className={`font-bold ${dark ? 'text-white' : (isSepia ? 'text-amber-950' : 'text-black')}`}>
+        {renderInlineMarkdown(inner, `p-${key}-b-`, inlineRegex, renderTextWithHighlights, paragraphStartOffset, getNoteNumber, dark, registerNote, isSepia)}
       </strong>
     );
   }
@@ -666,8 +852,8 @@ function renderPart(
   if ((part.startsWith('*') && part.endsWith('*')) || (part.startsWith('_') && part.endsWith('_'))) {
     const inner = part.startsWith('*') ? part.slice(1, -1) : part.slice(1, -1);
     return (
-      <em key={key} className="italic text-gray-800">
-        {renderInlineMarkdown(inner, `p-${key}-i-`, /(\*\*[\s\S]*?\*\*|\*[\s\S]*?\*|__[\s\S]*?__|_[\s\S]*?_)/g)}
+      <em key={key} className={`italic ${dark ? 'text-gray-200' : (isSepia ? 'text-amber-900' : 'text-gray-800')}`}>
+        {renderInlineMarkdown(inner, `p-${key}-i-`, inlineRegex, renderTextWithHighlights, paragraphStartOffset, getNoteNumber, dark, registerNote, isSepia)}
       </em>
     );
   }
@@ -676,22 +862,18 @@ function renderPart(
     const escaped = escapeRegExp(searchTerm.trim());
     const re = new RegExp(`(${escaped})`, 'gi');
     const chunks = part.split(re);
-    
+
     let internalOffset = paragraphStartOffset || 0;
-    
+    const currentNoteBase = getNoteNumber ? getNoteNumber() : 0;
+
     return (
       <span key={key}>
         {chunks.map((c, i) => {
           const isMatch = i % 2 === 1;
           const currentChunkStart = internalOffset;
-          
-          // Calculate length of this chunk. Since it's a split of 'part', 
-          // it might still contain markdown if the search term didn't match the markdown tags.
-          // However, notes/formatting are usually NOT matched by search regex because it's plain text.
-          // BUT the chunks BETWEEN matches might contain them.
-          const chunkInfo = calculateVisibleLengthWithNotes(c, currentNoteNumber || 0);
-          
-          internalOffset += chunkInfo.length;
+          const chunkInfo = calculateVisibleLength(c);
+          const visibleLength = chunkInfo.length;
+          internalOffset += visibleLength;
 
           if (isMatch) {
             const matchIdx = getNextMatchIdx ? getNextMatchIdx() : 0;
@@ -702,7 +884,8 @@ function renderPart(
               <mark
                 key={`${key}-h-${i}`}
                 data-search-id={matchId}
-                className={`${isActive ? 'bg-orange-500 text-white z-10 shadow-[0_0_8px_rgba(249,115,22,0.6)] scale-[1.05]' : (dark ? 'bg-yellow-500/40 text-white' : 'bg-yellow-200 text-black')} rounded-[2px] px-[2px] -mx-[2px] transition-all duration-300 inline-block`}
+                className={`${isActive ? 'bg-orange-500 text-white z-10 shadow-[0_0_8px_rgba(249,115,22,0.6)] scale-[1.05]' : (dark ? 'bg-yellow-500/40 text-white' : (isSepia ? 'bg-amber-200 text-amber-950' : 'bg-yellow-200 text-black'))} rounded-[2px] transition-all duration-300 inline`}
+                style={{ boxDecorationBreak: 'clone', WebkitBoxDecorationBreak: 'clone' }}
               >
                 {c}
               </mark>
@@ -716,61 +899,4 @@ function renderPart(
 
   const startOffset = (paragraphStartOffset || 0);
   return <span key={key}>{renderTextWithHighlights ? renderTextWithHighlights(part, startOffset) : part}</span>;
-}
-
-
-
-function escapeRegExp(s: string) {
-  return s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-}
-
-function calculateVisibleLengthWithNotes(part: string, startNoteNumber: number): { length: number, notesCount: number } {
-  let length = 0;
-  let notesCount = 0;
-
-  if (part.startsWith('[FIGURA:') && part.endsWith(']')) {
-    return { length: 0, notesCount: 0 };
-  }
-
-  if (part.startsWith('[[') && part.endsWith(']]')) {
-    const content = part.slice(2, -2);
-    const [wordRaw, commentRaw] = content.split('|');
-    const word = (wordRaw || '').trim();
-    const comment = (commentRaw || '').trim();
-    
-    length += word.length;
-    if (comment.length > 0) {
-      notesCount += 1;
-      length += String(startNoteNumber + notesCount).length;
-    }
-    return { length, notesCount };
-  }
-
-  const inlineSplitRegex = /(\*\*[\s\S]*?\*\*|\*[\s\S]*?\*|__[\s\S]*?__|_[\s\S]*?_|\[\[.*?\|.*?\]\])/g;
-  if (inlineSplitRegex.test(part)) {
-    inlineSplitRegex.lastIndex = 0;
-    const subParts = part.split(inlineSplitRegex);
-    for (const sub of subParts) {
-      if (!sub) continue;
-      
-      if ((sub.startsWith('**') && sub.endsWith('**')) || (sub.startsWith('__') && sub.endsWith('__'))) {
-        const res = calculateVisibleLengthWithNotes(sub.slice(2, -2), startNoteNumber + notesCount);
-        length += res.length;
-        notesCount += res.notesCount;
-      } else if ((sub.startsWith('*') && sub.endsWith('*')) || (sub.startsWith('_') && sub.endsWith('_'))) {
-        const res = calculateVisibleLengthWithNotes(sub.slice(1, -1), startNoteNumber + notesCount);
-        length += res.length;
-        notesCount += res.notesCount;
-      } else if (sub.startsWith('[[') && sub.endsWith(']]')) {
-        const res = calculateVisibleLengthWithNotes(sub, startNoteNumber + notesCount);
-        length += res.length;
-        notesCount += res.notesCount;
-      } else {
-        length += sub.length;
-      }
-    }
-    return { length, notesCount };
-  }
-
-  return { length: part.length, notesCount: 0 };
 }

@@ -105,7 +105,7 @@ export function useSearch(
 
         results.push({
           id: `search-p${p}-m${matchIdx}`,
-          title: `Pagina ${p}`,
+          title: `Pagina ${p}${documentName ? ` - ${documentName}` : ''}`,
           subtitle: `Occorrenza ${matchIdx + 1}`,
           snippet,
           page: p,

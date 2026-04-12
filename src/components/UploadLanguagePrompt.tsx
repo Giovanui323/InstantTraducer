@@ -1,11 +1,12 @@
 import React, { useState, useEffect } from 'react';
 import { X, Check, Tag } from 'lucide-react';
 import { InputLanguageSelector } from './InputLanguageSelector';
+import { Group } from '../types';
 
 interface UploadLanguagePromptProps {
   isOpen: boolean;
   defaultValue?: string;
-  availableGroups?: string[];
+  availableGroups?: Group[];
   defaultSelectedGroups?: string[];
   onConfirm: (language: string, selectedGroups: string[]) => void;
   onCancel: () => void;
@@ -22,30 +23,37 @@ export const UploadLanguagePrompt: React.FC<UploadLanguagePromptProps> = ({
   const [lang, setLang] = useState(defaultValue);
   const [selectedGroups, setSelectedGroups] = useState<string[]>(defaultSelectedGroups || []);
 
+  useEffect(() => {
+    if (isOpen) {
+      setLang(defaultValue);
+      setSelectedGroups(defaultSelectedGroups || []);
+    }
+  }, [isOpen, defaultValue, defaultSelectedGroups]);
+
   if (!isOpen) return null;
 
   const canConfirm = lang.trim().length > 0;
 
   const toggleGroup = (g: string) => {
-    setSelectedGroups(prev => 
+    setSelectedGroups(prev =>
       prev.includes(g) ? prev.filter(x => x !== g) : [...prev, g]
     );
   };
 
   return (
-    <div className="fixed inset-0 z-[300] flex items-center justify-center bg-black/80 backdrop-blur-sm p-4 animate-in fade-in duration-200">
-      <div className="bg-[#1a1a1a] w-full max-w-md rounded-2xl border border-white/10 shadow-2xl overflow-hidden animate-in zoom-in-95 duration-200 flex flex-col">
-        <div className="p-6 border-b border-white/5 flex items-center justify-between">
+    <div className="fixed inset-0 z-[300] flex items-center justify-center bg-black/60 backdrop-blur-sm p-4 animate-fade-in">
+      <div className="bg-surface-2 w-full max-w-md rounded-2xl border border-border-muted shadow-surface-2xl overflow-hidden animate-fade-in-scale flex flex-col">
+        <div className="px-5 py-4 border-b border-border-muted flex items-center justify-between">
           <div>
-            <h2 className="text-lg font-bold text-white">Configura nuovo progetto</h2>
-            <p className="text-xs text-gray-400">Lingua e Gruppi</p>
+            <h2 className="text-[14px] font-bold text-txt-primary">Configura nuovo progetto</h2>
+            <p className="text-[10px] text-txt-muted mt-0.5">Lingua e Gruppi</p>
           </div>
-          <button onClick={onCancel} className="p-2 hover:bg-white/5 rounded-lg text-gray-400 hover:text-white transition-colors">
-            <X size={20} />
+          <button onClick={onCancel} className="p-1.5 hover:bg-white/[0.04] rounded-lg text-txt-muted hover:text-txt-primary transition-all duration-200">
+            <X size={18} />
           </button>
         </div>
 
-        <div className="p-6 space-y-6">
+        <div className="p-5 space-y-5">
           <InputLanguageSelector
             value={lang}
             onChange={setLang}
@@ -54,47 +62,47 @@ export const UploadLanguagePrompt: React.FC<UploadLanguagePromptProps> = ({
 
           {availableGroups.length > 0 && (
             <div className="space-y-2">
-              <label className="text-xs font-bold text-gray-500 uppercase tracking-wider flex items-center gap-2">
-                <Tag size={12} />
+              <label className="text-[10px] font-bold text-txt-muted uppercase tracking-wider flex items-center gap-2">
+                <Tag size={11} />
                 Assegna Gruppi
               </label>
               <div className="flex flex-wrap gap-2 max-h-[120px] overflow-y-auto custom-scrollbar p-1">
                 {availableGroups.map(g => (
                   <button
-                    key={g}
-                    onClick={() => toggleGroup(g)}
-                    className={`px-3 py-1.5 rounded-lg text-xs font-medium border transition-all flex items-center gap-1.5 ${
-                      selectedGroups.includes(g)
-                        ? 'bg-[#007AFF]/20 border-[#007AFF]/50 text-[#007AFF]'
-                        : 'bg-white/5 border-white/10 text-gray-400 hover:bg-white/10'
+                    key={g.id}
+                    onClick={() => toggleGroup(g.id)}
+                    className={`px-3 py-1.5 rounded-lg text-[11px] font-medium border transition-all duration-200 flex items-center gap-1.5 active:scale-95 ${
+                      selectedGroups.includes(g.id)
+                        ? 'bg-accent/10 border-accent/25 text-accent'
+                        : 'bg-surface-3/50 border-border-muted text-txt-muted hover:bg-surface-4 hover:text-txt-secondary'
                     }`}
                   >
-                    {g}
-                    {selectedGroups.includes(g) && <Check size={12} />}
+                    {g.name}
+                    {selectedGroups.includes(g.id) && <Check size={12} />}
                   </button>
                 ))}
               </div>
             </div>
           )}
 
-          <div className="flex items-center gap-3 pt-2">
+          <div className="flex items-center gap-2 pt-2">
             <button
               onClick={() => onConfirm(lang.trim(), selectedGroups)}
               disabled={!canConfirm}
-              className={`flex-1 px-4 py-2 rounded-xl text-sm font-bold transition-colors ${
+              className={`flex-1 px-4 py-2.5 rounded-xl text-[11px] font-bold transition-all duration-200 active:scale-95 ${
                 canConfirm
-                  ? 'bg-blue-500 text-white hover:bg-blue-600'
-                  : 'bg-white/10 text-gray-500 cursor-not-allowed'
+                  ? 'bg-accent text-white hover:bg-accent-hover shadow-surface hover:shadow-glow-accent'
+                  : 'bg-surface-4/50 text-txt-faint cursor-not-allowed'
               }`}
             >
-              <span className="inline-flex items-center gap-2">
-                <Check size={16} />
+              <span className="inline-flex items-center justify-center gap-2">
+                <Check size={14} />
                 Conferma
               </span>
             </button>
             <button
               onClick={onCancel}
-              className="px-4 py-2 rounded-xl text-sm font-bold bg-white/5 text-gray-300 hover:text-white hover:bg-white/10 transition-colors"
+              className="px-4 py-2.5 rounded-xl text-[11px] font-bold bg-surface-3/50 text-txt-secondary hover:text-txt-primary hover:bg-surface-4 transition-all duration-200 active:scale-95"
             >
               Annulla
             </button>
@@ -104,4 +112,3 @@ export const UploadLanguagePrompt: React.FC<UploadLanguagePromptProps> = ({
     </div>
   );
 };
-

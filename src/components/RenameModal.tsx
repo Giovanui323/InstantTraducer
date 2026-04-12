@@ -1,16 +1,19 @@
 import React, { useState, useEffect } from 'react';
 import { X, Type, List, Check } from 'lucide-react';
+import { InputLanguageSelector } from './InputLanguageSelector';
 
 interface RenameModalProps {
     isOpen: boolean;
     onClose: () => void;
-    onRename: (newName: string) => Promise<void>;
+    onRename: (newName: string, newLanguage?: string) => Promise<void>;
     currentName: string;
+    currentLanguage?: string;
 }
 
-export const RenameModal: React.FC<RenameModalProps> = ({ isOpen, onClose, onRename, currentName }) => {
+export const RenameModal: React.FC<RenameModalProps> = ({ isOpen, onClose, onRename, currentName, currentLanguage }) => {
     const [mode, setMode] = useState<'simple' | 'structured'>('simple');
     const [simpleName, setSimpleName] = useState(currentName);
+    const [language, setLanguage] = useState(currentLanguage || 'tedesco');
 
     const [year, setYear] = useState('');
     const [author, setAuthor] = useState('');
@@ -21,7 +24,7 @@ export const RenameModal: React.FC<RenameModalProps> = ({ isOpen, onClose, onRen
     useEffect(() => {
         if (isOpen) {
             setSimpleName(currentName);
-            // Try to parse structured data from current name
+            setLanguage(currentLanguage || 'tedesco');
             const parts = currentName.split('_');
             if (parts.length >= 3 && /^\d{4}$/.test(parts[0])) {
                 setYear(parts[0]);
@@ -35,14 +38,14 @@ export const RenameModal: React.FC<RenameModalProps> = ({ isOpen, onClose, onRen
                 setMode('simple');
             }
         }
-    }, [isOpen, currentName]);
+    }, [isOpen, currentName, currentLanguage]);
 
     const getStructuredName = (y: string, a: string, t: string, isPreview = false) => {
         const clean = (s: string) => s.replace(/[^a-zA-Z0-9\s]/g, '').trim();
         const cy = clean(y).replace(/\s+/g, '');
         const ca = clean(a).replace(/\s+/g, '');
         const ct = clean(t).replace(/\s+/g, ' ');
-        
+
         if (isPreview) {
             return `${cy || 'YYYY'}_${ca || 'Autore'}_${ct || 'Titolo'}`;
         }
@@ -64,7 +67,7 @@ export const RenameModal: React.FC<RenameModalProps> = ({ isOpen, onClose, onRen
 
         setIsSubmitting(true);
         try {
-            await onRename(finalName);
+            await onRename(finalName, language);
             onClose();
         } finally {
             setIsSubmitting(false);
@@ -74,42 +77,48 @@ export const RenameModal: React.FC<RenameModalProps> = ({ isOpen, onClose, onRen
     if (!isOpen) return null;
 
     return (
-        <div className="fixed inset-0 z-[200] flex items-center justify-center bg-black/60 backdrop-blur-sm p-4">
-            <div className="bg-[#1e1e1e] border border-white/10 rounded-2xl shadow-2xl w-full max-w-md overflow-hidden animate-in fade-in zoom-in duration-200">
-                <div className="flex items-center justify-between p-4 border-b border-white/5 bg-white/5">
-                    <h3 className="font-bold text-white">Rinomina Progetto</h3>
-                    <button onClick={onClose} className="text-gray-400 hover:text-white transition-colors">
-                        <X size={20} />
+        <div className="fixed inset-0 z-[200] flex items-center justify-center bg-black/60 backdrop-blur-sm p-4 animate-fade-in">
+            <div className="bg-surface-2 border border-border-muted rounded-2xl shadow-surface-2xl w-full max-w-md overflow-hidden animate-fade-in-scale">
+                <div className="flex items-center justify-between px-5 py-4 border-b border-border-muted">
+                    <h3 className="text-[14px] font-bold text-txt-primary">Rinomina Progetto</h3>
+                    <button onClick={onClose} className="p-1.5 text-txt-muted hover:text-txt-primary hover:bg-white/[0.04] rounded-lg transition-all duration-200">
+                        <X size={18} />
                     </button>
                 </div>
 
-                <div className="p-4">
-                    <div className="flex bg-black/20 rounded-lg p-1 mb-6">
+                <div className="p-5">
+                    <div className="flex bg-surface-4/50 rounded-lg p-0.5 mb-5 border border-border-muted">
                         <button
                             onClick={() => setMode('simple')}
-                            className={`flex-1 flex items-center justify-center gap-2 py-1.5 text-xs font-medium rounded-md transition-all ${mode === 'simple' ? 'bg-indigo-500 text-white shadow-sm' : 'text-gray-400 hover:text-gray-200'
-                                }`}
+                            className={`flex-1 flex items-center justify-center gap-2 py-1.5 text-[10px] font-semibold rounded-md transition-all duration-200 ${
+                                mode === 'simple'
+                                    ? 'bg-accent text-white shadow-surface'
+                                    : 'text-txt-muted hover:text-txt-secondary'
+                            }`}
                         >
-                            <Type size={14} /> Semplice
+                            <Type size={13} /> Semplice
                         </button>
                         <button
                             onClick={() => setMode('structured')}
-                            className={`flex-1 flex items-center justify-center gap-2 py-1.5 text-xs font-medium rounded-md transition-all ${mode === 'structured' ? 'bg-indigo-500 text-white shadow-sm' : 'text-gray-400 hover:text-gray-200'
-                                }`}
+                            className={`flex-1 flex items-center justify-center gap-2 py-1.5 text-[10px] font-semibold rounded-md transition-all duration-200 ${
+                                mode === 'structured'
+                                    ? 'bg-accent text-white shadow-surface'
+                                    : 'text-txt-muted hover:text-txt-secondary'
+                            }`}
                         >
-                            <List size={14} /> Strutturato
+                            <List size={13} /> Strutturato
                         </button>
                     </div>
 
                     <form onSubmit={handleSubmit} className="space-y-4">
                         {mode === 'simple' ? (
                             <div>
-                                <label className="block text-xs font-medium text-gray-400 mb-1.5">Nuovo Nome</label>
+                                <label className="block text-[10px] font-bold text-txt-muted uppercase tracking-wider mb-1.5">Nuovo Nome</label>
                                 <input
                                     type="text"
                                     value={simpleName}
                                     onChange={(e) => setSimpleName(e.target.value)}
-                                    className="w-full bg-black/20 border border-white/10 rounded-lg px-3 py-2 text-sm text-white focus:outline-none focus:border-indigo-500/50 focus:ring-1 focus:ring-indigo-500/20 transition-all placeholder:text-gray-600"
+                                    className="w-full bg-surface-4/50 border border-border-muted rounded-lg px-3 py-2.5 text-[13px] text-txt-primary focus:outline-none focus:border-accent/40 focus:ring-1 focus:ring-accent/20 transition-all duration-200 placeholder:text-txt-faint"
                                     placeholder="Inserisci il nome..."
                                     autoFocus
                                 />
@@ -118,61 +127,69 @@ export const RenameModal: React.FC<RenameModalProps> = ({ isOpen, onClose, onRen
                             <div className="space-y-3">
                                 <div className="grid grid-cols-3 gap-3">
                                     <div className="col-span-1">
-                                        <label className="block text-xs font-medium text-gray-400 mb-1.5">Anno</label>
+                                        <label className="block text-[10px] font-bold text-txt-muted uppercase tracking-wider mb-1.5">Anno</label>
                                         <input
                                             type="text"
                                             value={year}
                                             onChange={(e) => setYear(e.target.value)}
-                                            className="w-full bg-black/20 border border-white/10 rounded-lg px-3 py-2 text-sm text-white focus:outline-none focus:border-indigo-500/50 focus:ring-1 focus:ring-indigo-500/20 transition-all placeholder:text-gray-600"
+                                            className="w-full bg-surface-4/50 border border-border-muted rounded-lg px-3 py-2.5 text-[13px] text-txt-primary focus:outline-none focus:border-accent/40 focus:ring-1 focus:ring-accent/20 transition-all duration-200 placeholder:text-txt-faint"
                                             placeholder="YYYY"
                                             maxLength={4}
                                         />
                                     </div>
                                     <div className="col-span-2">
-                                        <label className="block text-xs font-medium text-gray-400 mb-1.5">Autore</label>
+                                        <label className="block text-[10px] font-bold text-txt-muted uppercase tracking-wider mb-1.5">Autore</label>
                                         <input
                                             type="text"
                                             value={author}
                                             onChange={(e) => setAuthor(e.target.value)}
-                                            className="w-full bg-black/20 border border-white/10 rounded-lg px-3 py-2 text-sm text-white focus:outline-none focus:border-indigo-500/50 focus:ring-1 focus:ring-indigo-500/20 transition-all placeholder:text-gray-600"
+                                            className="w-full bg-surface-4/50 border border-border-muted rounded-lg px-3 py-2.5 text-[13px] text-txt-primary focus:outline-none focus:border-accent/40 focus:ring-1 focus:ring-accent/20 transition-all duration-200 placeholder:text-txt-faint"
                                             placeholder="Cognome Nome"
                                         />
                                     </div>
                                 </div>
                                 <div>
-                                    <label className="block text-xs font-medium text-gray-400 mb-1.5">Titolo</label>
+                                    <label className="block text-[10px] font-bold text-txt-muted uppercase tracking-wider mb-1.5">Titolo</label>
                                     <input
                                         type="text"
                                         value={title}
                                         onChange={(e) => setTitle(e.target.value)}
-                                        className="w-full bg-black/20 border border-white/10 rounded-lg px-3 py-2 text-sm text-white focus:outline-none focus:border-indigo-500/50 focus:ring-1 focus:ring-indigo-500/20 transition-all placeholder:text-gray-600"
+                                        className="w-full bg-surface-4/50 border border-border-muted rounded-lg px-3 py-2.5 text-[13px] text-txt-primary focus:outline-none focus:border-accent/40 focus:ring-1 focus:ring-accent/20 transition-all duration-200 placeholder:text-txt-faint"
                                         placeholder="Titolo del libro"
                                     />
                                 </div>
 
-                                <div className="p-3 rounded-lg bg-indigo-500/10 border border-indigo-500/20">
-                                    <div className="text-[10px] text-gray-400 mb-1">Anteprima nome file:</div>
-                                    <div className="text-xs font-mono text-indigo-300 break-all">
+                                <div className="p-3 rounded-lg bg-accent/5 border border-accent/15">
+                                    <div className="text-[9px] font-bold text-txt-muted uppercase tracking-wider mb-1">Anteprima nome file</div>
+                                    <div className="text-[11px] font-mono text-accent break-all">
                                         {getStructuredName(year, author, title, true)}
                                     </div>
                                 </div>
                             </div>
                         )}
 
-                        <div className="pt-2 flex justify-end gap-3">
+                        <div>
+                            <InputLanguageSelector
+                                value={language}
+                                onChange={setLanguage}
+                                label="Lingua Progetto (Bandiera)"
+                            />
+                        </div>
+
+                        <div className="pt-3 flex justify-end gap-2">
                             <button
                                 type="button"
                                 onClick={onClose}
-                                className="px-4 py-2 text-xs font-semibold text-gray-400 hover:text-white hover:bg-white/5 rounded-lg transition-colors"
+                                className="px-4 py-2 text-[10px] font-semibold text-txt-muted hover:text-txt-primary hover:bg-white/[0.04] rounded-lg transition-all duration-200"
                             >
                                 Annulla
                             </button>
                             <button
                                 type="submit"
                                 disabled={isSubmitting || (mode === 'structured' && (!year || !title))}
-                                className="flex items-center gap-2 px-6 py-2 bg-indigo-600 hover:bg-indigo-500 text-white text-xs font-semibold rounded-lg shadow-lg shadow-indigo-500/20 transition-all disabled:opacity-50"
+                                className="flex items-center gap-2 px-5 py-2 bg-accent hover:bg-accent-hover text-white text-[10px] font-bold rounded-lg shadow-surface hover:shadow-glow-accent transition-all duration-200 disabled:opacity-40 active:scale-95"
                             >
-                                {isSubmitting ? 'Salvataggio...' : <><Check size={14} /> Rinomina</>}
+                                {isSubmitting ? 'Salvataggio...' : <><Check size={13} /> Rinomina</>}
                             </button>
                         </div>
                     </form>

@@ -1,6 +1,8 @@
 const PAGE_CACHE_JPEG_QUALITY = 0.74;
 const PAGE_CACHE_MAX_EDGE = 1600;
 
+import { log } from '../services/logger';
+
 export const estimateBytesFromBase64 = (base64: string) => Math.floor((base64.length * 3) / 4);
 
 export const dataUrlToBase64 = (dataUrl: string) => {
@@ -62,7 +64,7 @@ export const downsampleCanvasToJpegBase64 = (canvas: HTMLCanvasElement) => {
 export const isProbablyBase64 = (value: string) => {
   const s = String(value || '').trim();
   if (!s) return false;
-  if (s.startsWith('data:')) return false;
+  if (s.startsWith('data:') || s.startsWith('blob:')) return false;
   if (s.length < 128) return false;
   return /^[A-Za-z0-9+/]+={0,2}$/.test(s);
 };
@@ -71,9 +73,44 @@ export const toDisplayableImageSrc = (value?: string) => {
   if (!value) return undefined;
   const s = String(value).trim();
   if (!s) return undefined;
-  if (s.startsWith('data:')) return s;
+  if (s.startsWith('data:') || s.startsWith('blob:')) return s;
   if (isProbablyBase64(s)) return buildJpegDataUrlFromBase64(s);
   return s;
+};
+
+export const canvasToBlob = (canvas: HTMLCanvasElement, quality: number = 0.8): Promise<Blob> => {
+  return new Promise((resolve, reject) => {
+    canvas.toBlob((blob) => {
+      if (blob) resolve(blob);
+      else reject(new Error('Canvas toBlob failed'));
+    }, 'image/jpeg', quality);
+  });
+};
+
+export const base64ToBlob = (base64: string, mime: string = 'image/jpeg'): Blob => {
+  try {
+    const binary = atob(base64);
+    const array = new Uint8Array(binary.length);
+    for (let i = 0; i < binary.length; i++) array[i] = binary.charCodeAt(i);
+    return new Blob([array], { type: mime });
+  } catch (e) {
+    log.error('Failed to convert base64 to blob', e);
+    throw e;
+  }
+};
+
+export const blobToObjectURL = (blob: Blob): string => {
+  return URL.createObjectURL(blob);
+};
+
+export const revokeObjectURL = (url: string) => {
+  if (url && url.startsWith('blob:')) {
+    try {
+      URL.revokeObjectURL(url);
+    } catch (e) {
+      log.warning('Failed to revoke object URL: ' + url, e);
+    }
+  }
 };
 
 export const rotateJpegBase64 = async (base64: string, degrees: number) => {

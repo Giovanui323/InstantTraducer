@@ -8,6 +8,21 @@ export function normalize(text: string) {
 }
 
 /**
+ * Normalizza il testo per il rendering, gestendo unhyphenation e newline.
+ * Questa logica deve essere CONDIVISA tra MarkdownText (schermo) e renderText (export)
+ * per garantire che gli offset degli highlight siano consistenti.
+ */
+export function normalizeTextForRendering(text: string, preserveLayout: boolean): string {
+  if (preserveLayout) {
+    return text.replace(/\r\n/g, '\n');
+  }
+  return text
+    .replace(/\r\n/g, '\n')
+    // Rimuove trattini di a capo unendo le parole (es. "pro-\nblema" -> "problema")
+    .replace(/([A-Za-zÀ-ÖØ-öø-ÿ])-\n\s*([A-Za-zÀ-ÖØ-öø-ÿ])/g, '$1$2');
+}
+
+/**
  * Sanifica un campo di metadati (titolo, autore, anno) per l'uso in un nome file.
  * Rimuove i caratteri illegali per il file system ma mantiene la leggibilità.
  */

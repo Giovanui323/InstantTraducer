@@ -33,15 +33,47 @@ export function wordHitScore(tokens: string[], wordSet: Set<string>): number {
 }
 
 export function looksLikeItalian(text: string, sourceLang?: string): boolean {
-  if (!text || text.trim().length < 10) return true; // Troppo corto per giudicare, assumiamo OK
+  if (!text || text.trim().length < 4) return true; // Troppo corto per giudicare (es. numeri, simboli)
+
+  // Whitelist per meta-testi comuni (es. "Pagina vuota")
+  const metaWords = ['PAGINA', 'VUOTA', 'BIANCA', 'IMMAGINE', 'FOTO', 'FIGURA', 'TABELLA'];
+  const upperText = text.toUpperCase();
+  if (metaWords.some(w => upperText.includes(w))) {
+      return true;
+  }
+
   const tokens = tokenizeForLangCheck(text);
   
   const itScore = wordHitScore(tokens, ITALIAN_COMMON_WORDS);
   const hasItalianAccents = /[àèéìòù]/i.test(text);
-  
-  // Aumentiamo la soglia per testi lunghi
-  const minScore = tokens.length < 20 ? 0.02 : 0.05;
   const itBias = itScore + (hasItalianAccents ? 0.02 : 0);
+  
+  // Per testi molto brevi (4-25 caratteri), applichiamo il "beneficio del dubbio"
+  if (text.length < 25) {
+    // Se sembra già italiano (ha stopword o accenti), bene.
+    if (itBias > 0) return true;
+
+    // Se c'è una lingua sorgente, controlliamo se sembra QUELLA in modo specifico.
+    if (sourceLang) {
+      const s = sourceLang.toLowerCase();
+      if (s.includes('tedesco') || s.includes('german')) {
+        const deScore = wordHitScore(tokens, GERMAN_COMMON_WORDS);
+        const hasGermanChars = /[äöüß]/i.test(text);
+        const deBias = deScore + (hasGermanChars ? 0.02 : 0);
+        
+        // Se ha caratteristiche tedesche esplicite E nessun segnale italiano, rifiutiamo
+        if (deBias > 0) return false;
+      }
+    }
+    
+    // Se non sembra né italiano né tedesco (neutro), accettiamo (beneficio del dubbio).
+    // Questo salva casi come "Pagina vuota..." che non hanno stopword.
+    return true;
+  }
+
+  // Soglia minima di "italianità" per testi più lunghi
+  const minScore = tokens.length < 20 ? 0.01 : 0.05;
+  // itBias calcolato sopra
 
   if (sourceLang) {
     const s = sourceLang.toLowerCase();

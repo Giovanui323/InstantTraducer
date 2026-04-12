@@ -1,41 +1,42 @@
 
 import { UserHighlight, UserNote } from '../types';
-import { PAGE_SPLIT, splitColumns } from './textUtils';
-
-export const escapeHtml = (value: any): string =>
-  String(value ?? "").replace(/[&<>"']/g, (ch) => {
-    switch (ch) {
-      case "&":
-        return "&amp;";
-      case "<":
-        return "&lt;";
-      case ">":
-        return "&gt;";
-      case '"':
-        return "&quot;";
-      case "'":
-        return "&#39;";
-      default:
-        return ch;
-    }
-  });
+import { PAGE_SPLIT, splitColumns, normalizeTextForRendering } from './textUtils';
+import { buildSelectableText, getSplitRegex } from './highlightSelectors';
+import { 
+  escapeHtml, 
+  createSafeElement, 
+  createSafeHighlightSpan, 
+  validateUserContent,
+  buildSafeInlineStyle
+} from './safeHtmlUtils';
+import { 
+  StringBuilder, 
+  memoizeStringOperation, 
+  globalStringCache, 
+  globalRegexCache,
+  StringUtils
+} from './performanceUtils';
+import { READER_STYLES, getReaderTheme } from './readerStyling';
+import { log } from '../services/logger';
 
 const normalizeHighlightColor = (value?: string) => {
   const fallback = 'rgba(250, 204, 21, 0.4)';
   const s = String(value ?? '').trim();
   if (!s) return fallback;
-  if (/^#[0-9a-fA-F]{3}$/.test(s)) return s;
-  if (/^#[0-9a-fA-F]{6}$/.test(s)) return s;
-  if (/^#[0-9a-fA-F]{8}$/.test(s)) return s;
-  if (/^rgba\(\s*\d{1,3}\s*,\s*\d{1,3}\s*,\s*\d{1,3}\s*,\s*(0(\.\d+)?|1(\.0+)?)\s*\)$/i.test(s)) return s;
-  if (/^rgb\(\s*\d{1,3}\s*,\s*\d{1,3}\s*,\s*\d{1,3}\s*\)$/i.test(s)) return s;
+  // Hex
+  if (/^#[0-9a-fA-F]{3,8}$/.test(s)) return s;
+  // RGB/RGBA/HSL/HSLA - loose check for valid CSS function syntax
+  if (/^(rgba?|hsla?)\([0-9\s,.%deg\/-]+\)$/i.test(s)) return s;
+  // Named colors (basic check)
+  if (/^[a-zA-Z]+$/.test(s)) return s;
+  
   return fallback;
 };
 
 /**
  * Applica gli highlight a un pezzo di testo piano, restituendo HTML escapato con i tag <span> per i colori.
  */
-const applyHighlightsToPlainText = (plainText: string, partStart: number, highlights?: UserHighlight[]) => {
+export const applyHighlightsToPlainText = (plainText: string, partStart: number, highlights?: UserHighlight[]) => {
   if (!highlights || highlights.length === 0) return escapeHtml(plainText);
   
   const originalLength = plainText.length;
@@ -44,7 +45,7 @@ const applyHighlightsToPlainText = (plainText: string, partStart: number, highli
   
   if (relevant.length === 0) return escapeHtml(plainText);
   
-  let result = '';
+  const builder = new StringBuilder();
   let cursor = 0;
   const sorted = [...relevant].sort((a, b) => a.start - b.start);
 
@@ -53,33 +54,42 @@ const applyHighlightsToPlainText = (plainText: string, partStart: number, highli
     const hEndInPart = Math.min(originalLength, h.end - partStart);
     
     if (hStartInPart > cursor) {
-      result += escapeHtml(plainText.slice(cursor, hStartInPart));
+      builder.append(escapeHtml(plainText.slice(cursor, hStartInPart)));
     }
     
     const chunk = plainText.slice(hStartInPart, hEndInPart);
-    // Usiamo uno stile inline sicuro che non verrà escapato perché lo aggiungiamo DOPO l'escape del testo contenuto
-    result += `<span style="background:${normalizeHighlightColor(h.color)}; border-radius: 2px;">${escapeHtml(chunk)}</span>`;
+    builder.append(createSafeHighlightSpan(chunk, h.color || 'rgba(250, 204, 21, 0.4)'));
     cursor = hEndInPart;
   }
   
   if (cursor < originalLength) {
-    result += escapeHtml(plainText.slice(cursor));
+    builder.append(escapeHtml(plainText.slice(cursor)));
   }
   
-  return result;
+  return builder.toString();
 };
 
-export const renderInlineHtml = (text: string, footnotes: string[], highlights?: UserHighlight[], blockOffset: number = 0) => {
-  // Regex per catturare grassetto, corsivo, note e figure
-  const parts = String(text ?? "").split(
-    /(\*\*.*?\*\*|\*.*?\*|\[\[.*?\]\]|\[FIGURA:.*?\])/g
-  );
+// Memoized version of renderInlineHtml for better performance
+const memoizedRenderInlineHtml = memoizeStringOperation((
+  text: string,
+  footnotesJson: string,
+  highlightsJson: string,
+  blockOffset: number,
+  themeName: string
+): string => {
+  const footnotes: string[] = JSON.parse(footnotesJson);
+  const highlights: UserHighlight[] = JSON.parse(highlightsJson);
+  const theme = getReaderTheme(themeName);
   
+  // Use centralized regex logic to ensure consistency with MarkdownText and highlightSelectors
+  const parts = StringUtils.split(text, getSplitRegex(), globalStringCache);
+  
+  const builder = new StringBuilder();
   let currentOffset = blockOffset;
 
-  return parts
-    .map((part) => {
-      if (!part) return "";
+  for (const part of parts) {
+    try {
+      if (!part) continue;
       const partLength = part.length;
       const partStart = currentOffset;
 
@@ -87,19 +97,19 @@ export const renderInlineHtml = (text: string, footnotes: string[], highlights?:
 
       if (part.startsWith("[FIGURA:") && part.endsWith("]")) {
         const description = part.slice(8, -1).trim();
-        rendered = `<div style="margin: 24px 0; padding: 16px; background: rgba(255,255,255,0.06); border-left: 4px solid #60a5fa; border-top-right-radius: 12px; border-bottom-right-radius: 12px; display: flex; align-items: flex-start; gap: 16px;">
-          <div style="margin-top: 4px; padding: 8px; background: rgba(96,165,250,0.18); color: #60a5fa; border-radius: 10px; flex: 0 0 auto;">
-            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-              <rect x="3" y="3" width="18" height="18" rx="2" ry="2"></rect>
-              <circle cx="8.5" cy="8.5" r="1.5"></circle>
-              <path d="M21 15l-5-5L5 21"></path>
-            </svg>
-          </div>
-          <div style="display:flex; flex-direction:column; gap:4px; min-width:0;">
-            <div style="font-size:10px; font-weight:800; letter-spacing:0.12em; text-transform:uppercase; color:#60a5fa;">Elemento Visivo Originale</div>
-            <div style="font-size:14px; font-style:italic; color:#cbd5e1;">${escapeHtml(description)}</div>
-          </div>
-        </div>`;
+        if (!validateUserContent(description)) {
+          rendered = escapeHtml(part);
+        } else {
+          const figureStyles = READER_STYLES.figure(theme);
+          const iconStyles = READER_STYLES.figureIcon(theme);
+          const contentStyles = READER_STYLES.figureContent(theme);
+          const labelStyles = READER_STYLES.figureLabel(theme);
+          const descStyles = READER_STYLES.figureDescription(theme);
+          
+          const svgContent = `<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="18" height="18" rx="2" ry="2"></rect><circle cx="8.5" cy="8.5" r="1.5"></circle><path d="M21 15l-5-5L5 21"></path></svg>`;
+          
+          rendered = `<div style="${figureStyles}"><div style="${iconStyles}">${svgContent}</div><div style="${contentStyles}"><div style="${labelStyles}">Elemento Visivo Originale</div><div style="${descStyles}">${escapeHtml(description)}</div></div></div>`;
+        }
       } else if (part.startsWith("[[") && part.endsWith("]]")) {
         const content = part.slice(2, -2);
         const sepIdx = content.indexOf("|");
@@ -107,56 +117,125 @@ export const renderInlineHtml = (text: string, footnotes: string[], highlights?:
         const comment = sepIdx >= 0 ? content.slice(sepIdx + 1) : "";
         if (comment.trim().length > 0) {
           const number = footnotes.push(comment.trim());
-          rendered = `${applyHighlightsToPlainText(word, partStart + 2, highlights)}<sup style="font-size:0.8em; vertical-align:super; color:#94a3b8; cursor:help;" title="${escapeHtml(comment.trim())}">${escapeHtml(number)}</sup>`;
+          const supStyles = READER_STYLES.superscript(theme);
+          rendered = `${applyHighlightsToPlainText(word, partStart + 2, highlights)}<sup style="${supStyles}" title="${escapeHtml(comment.trim())}">${escapeHtml(String(number))}</sup>`;
         } else {
           rendered = applyHighlightsToPlainText(word, partStart + 2, highlights);
         }
       } else if (part.startsWith("**") && part.endsWith("**")) {
         const inner = part.slice(2, -2);
-        rendered = `<strong>${applyHighlightsToPlainText(inner, partStart + 2, highlights)}</strong>`;
+        rendered = createSafeElement('strong', {}, applyHighlightsToPlainText(inner, partStart + 2, highlights));
       } else if (part.startsWith("*") && part.endsWith("*")) {
         const inner = part.slice(1, -1);
-        rendered = `<em>${applyHighlightsToPlainText(inner, partStart + 1, highlights)}</em>`;
+        rendered = createSafeElement('em', {}, applyHighlightsToPlainText(inner, partStart + 1, highlights));
       } else {
         rendered = applyHighlightsToPlainText(part, partStart, highlights);
       }
 
       currentOffset += partLength;
-      return rendered;
-    })
-    .join("");
+      builder.append(rendered);
+    } catch (error) {
+      log.error('Error processing text part in memoizedRenderInlineHtml', {
+        error: error instanceof Error ? error.message : String(error),
+        stack: error instanceof Error ? error.stack : undefined,
+        part: part ? part.slice(0, 100) : 'empty' // Limit part length for logging
+      });
+      builder.append(escapeHtml(part || ''));
+    }
+  }
+  
+  return builder.toString();
+});
+
+export const renderInlineHtml = (text: string, footnotes: string[], highlights: UserHighlight[] | undefined, blockOffset: number = 0, themeName: string = 'dark') => {
+  try {
+    // Validate input
+    if (typeof text !== 'string') {
+      log.warning('renderInlineHtml received non-string input', { 
+        inputType: typeof text,
+        inputValue: String(text ?? '').slice(0, 100) // Limit for logging
+      });
+      return escapeHtml(String(text ?? ''));
+    }
+    
+    if (!Array.isArray(footnotes)) {
+      log.warning('renderInlineHtml received non-array footnotes', { 
+        footnotesType: typeof footnotes,
+        footnotesValue: String(footnotes ?? '').slice(0, 100)
+      });
+      footnotes = [];
+    }
+    
+    return memoizedRenderInlineHtml(
+      text,
+      JSON.stringify(footnotes),
+      JSON.stringify(highlights || []),
+      blockOffset,
+      themeName
+    );
+  } catch (error) {
+    log.error('Error in renderInlineHtml', {
+      error: error instanceof Error ? error.message : String(error),
+      stack: error instanceof Error ? error.stack : undefined,
+      inputText: text ? text.slice(0, 100) : 'empty'
+    });
+    return escapeHtml(String(text ?? ''));
+  }
 };
+
+const HEADING_LEVEL_1_REGEX = /^\d+\.\s+[A-ZÀ-ÖØ-Ý0-9][A-ZÀ-ÖØ-Ý0-9\s\-–—.,:;()]+$/;
+const HEADING_LEVEL_2_REGEX = /^[A-Z]\.\s+[A-ZÀ-ÖØ-Ý0-9][A-ZÀ-ÖØ-Ý0-9\s\-–—.,:;()]+$/;
+const HEADING_LEVEL_3_REGEX = /^[IVXLCDM]+\.\s+/;
+const HASH_HEADING_REGEX = /^#{1,3}\s+/;
+const HASH_ONLY_REGEX = /^#+/;
 
 export const detectHeadingLevel = (block: string): number => {
   const line = String(block ?? "").trim();
   if (!line) return 0;
-  if (/^\d+\.\s+[A-ZÀ-ÖØ-Ý0-9][A-ZÀ-ÖØ-Ý0-9\s\-–—.,:;()]+$/.test(line)) return 1;
-  if (/^[A-Z]\.\s+[A-ZÀ-ÖØ-Ý0-9][A-ZÀ-ÖØ-Ý0-9\s\-–—.,:;()]+$/.test(line)) return 2;
-  if (/^[IVXLCDM]+\.\s+/.test(line)) return 3;
-  if (/^#{1,3}\s+/.test(line)) {
-    const hashes = (line.match(/^#+/) || [""])[0].length;
+  
+  if (HEADING_LEVEL_1_REGEX.test(line)) return 1;
+  if (HEADING_LEVEL_2_REGEX.test(line)) return 2;
+  if (HEADING_LEVEL_3_REGEX.test(line)) return 3;
+  
+  if (HASH_HEADING_REGEX.test(line)) {
+    const hashes = (line.match(HASH_ONLY_REGEX) || [""])[0].length;
     return Math.min(3, Math.max(1, hashes));
   }
   return 0;
 };
 
-export const renderReaderBlocksHtml = (text: string, highlights?: UserHighlight[], sharedFootnotes?: string[], baseOffset: number = 0) => {
-  const footnotes: string[] = sharedFootnotes ?? [];
-  const normalized = String(text ?? "").replace(/\r\n/g, "\n");
-  
-  // Dividiamo in blocchi mantenendo traccia dell'offset originale
-  // Usiamo una regex che cattura anche i delimitatori per non perdere la posizione
-  const blockParts = normalized.split(/(\n{2,})/g);
+export const renderReaderBlocksHtml = (text: string, highlights?: UserHighlight[], sharedFootnotes?: string[], baseOffset: number = 0, themeName: string = 'dark') => {
+  try {
+    // Validate input
+    if (typeof text !== 'string') {
+      console.warn('renderReaderBlocksHtml received non-string input:', text);
+      text = String(text ?? '');
+    }
+    
+    if (sharedFootnotes && !Array.isArray(sharedFootnotes)) {
+      console.warn('renderReaderBlocksHtml received non-array sharedFootnotes:', sharedFootnotes);
+      sharedFootnotes = undefined;
+    }
+    
+    const footnotes: string[] = sharedFootnotes ?? [];
+    // Use unified normalization logic (unhyphenation) to match MarkdownText behavior
+    const normalized = normalizeTextForRendering(String(text ?? ""), false); // preserveLayout=false by default for reader
+    const theme = getReaderTheme(themeName);
+    
+    // Dividiamo in blocchi mantenendo traccia dell'offset originale
+    // Usiamo una regex che cattura anche i delimitatori per non perdere la posizione
+    const blockParts = normalized.split(/(\n{2,})/g);
 
-  let currentOffset = baseOffset;
-  let firstParagraph = true;
-  let previousWasHeading = false;
+    let currentOffset = baseOffset;
+    let firstParagraph = true;
+    let previousWasHeading = false;
 
-  const html = blockParts
-    .map((raw) => {
-      const partLength = raw.length;
-      const partStart = currentOffset;
-      currentOffset += partLength;
+    const html = blockParts
+      .map((raw) => {
+        try {
+          const partLength = buildSelectableText(raw, false).length; // Use selectable length to match highlight offsets
+          const partStart = currentOffset;
+          currentOffset += partLength;
 
       if (raw.match(/^\n{2,}$/)) return ""; // Saltiamo i delimitatori di blocco nel rendering ma non nell'offset
 
@@ -170,13 +249,10 @@ export const renderReaderBlocksHtml = (text: string, highlights?: UserHighlight[
         
         previousWasHeading = true;
         firstParagraph = false;
-        return `<h${headingLevel} style="margin:0; ${
-          headingLevel === 1
-            ? "text-transform:uppercase; font-weight:700; letter-spacing:0.02em; padding-bottom:8px; border-bottom:1px solid rgba(255,255,255,0.08); margin-top:24px; margin-bottom:16px;"
-            : headingLevel === 2
-            ? "text-transform:uppercase; font-weight:700; letter-spacing:0.02em; margin-top:20px; margin-bottom:12px;"
-            : "font-weight:700; margin-top:16px; margin-bottom:8px;"
-        } color:#e5e7eb;">${renderInlineHtml(clean, footnotes, highlights, headingOffset)}</h${headingLevel}>`;
+        
+        const headingStyles = READER_STYLES.heading(theme, headingLevel);
+        
+        return createSafeElement(`h${headingLevel}`, { style: headingStyles }, renderInlineHtml(clean, footnotes, highlights, headingOffset, themeName));
       }
 
       const noIndent = firstParagraph || previousWasHeading;
@@ -184,40 +260,110 @@ export const renderReaderBlocksHtml = (text: string, highlights?: UserHighlight[
       firstParagraph = false;
       previousWasHeading = false;
       
-      return `<p style="margin:0; color:#e5e7eb; ${
-        noIndent ? "text-indent:0;" : "text-indent:1.25em;"
-      }">${renderInlineHtml(block, footnotes, highlights, paragraphOffset)}</p>`;
-    })
-    .join("");
+      const pStyles = READER_STYLES.paragraph(theme, noIndent);
+      
+      return createSafeElement('p', { style: pStyles }, renderInlineHtml(block, footnotes, highlights, paragraphOffset, themeName));
+        } catch (error) {
+          log.error('Error processing block in renderReaderBlocksHtml', {
+            error: error instanceof Error ? error.message : String(error),
+            stack: error instanceof Error ? error.stack : undefined,
+            rawText: raw ? raw.slice(0, 100) : 'empty'
+          });
+          const safePStyles = buildSafeInlineStyle({
+            'margin': '0',
+            'color': theme.text.primary
+          });
+          return createSafeElement('p', { style: safePStyles }, escapeHtml(String(raw ?? '')));
+        }
+      })
+      .join("");
 
-  const footnotesHtml =
-    footnotes.length > 0
-      ? `<div style="margin-top:22px;">
-           <div style="width:180px; border-top:1px solid rgba(255,255,255,0.18); margin-bottom:10px;"></div>
-           ${footnotes
-             .map((note, i) => {
-               const number = i + 1;
-               return `<div style="display:flex; gap:8px; font-size:0.9em; line-height:1.5; color:#cbd5e1; margin-bottom:6px;">
-                         <span style="min-width:16px; text-align:right;">${escapeHtml(number)}</span>
-                         <span style="flex:1 1 auto; padding-left:8px; text-indent:-16px; display:block;">${escapeHtml(note)}</span>
-                       </div>`;
-             })
-             .join("")}
-         </div>`
-      : "";
+    const footnotesHtml =
+      footnotes.length > 0
+        ? (() => {
+            const containerStyles = READER_STYLES.footnotesContainer(theme);
+            const dividerStyles = READER_STYLES.footnotesDivider(theme);
+            const noteStyles = READER_STYLES.footnoteItem(theme);
+            const numberStyles = READER_STYLES.footnoteNumber(theme);
+            const contentStyles = READER_STYLES.footnoteContent(theme);
+            
+            const notesHtml = footnotes
+              .map((note, i) => {
+                const number = i + 1;
+                return `<div style="${noteStyles}"><span style="${numberStyles}">${escapeHtml(String(number))}</span><span style="${contentStyles}">${escapeHtml(note)}</span></div>`;
+              })
+              .join("");
+            
+            return `<div style="${containerStyles}"><div style="${dividerStyles}"></div>${notesHtml}</div>`;
+          })()
+        : "";
 
-  return { html, footnotesHtml };
+    return { html, footnotesHtml };
+  } catch (error) {
+    log.error('Error in renderReaderBlocksHtml', {
+      error: error instanceof Error ? error.message : String(error),
+      stack: error instanceof Error ? error.stack : undefined,
+      inputText: text ? text.slice(0, 100) : 'empty'
+    });
+    const theme = getReaderTheme(themeName);
+    return { 
+      html: createSafeElement('p', { style: buildSafeInlineStyle({ 'color': theme.text.primary }) }, escapeHtml(String(text ?? ''))), 
+      footnotesHtml: '' 
+    };
+  }
 };
 
-export const buildReaderHtml = (text: string, highlights?: UserHighlight[], userNotes?: UserNote[]) => {
-  const hasSplit = String(text || '').includes(PAGE_SPLIT);
-  const baseStyle = "color:#e5e7eb; font-family: ui-serif, Georgia, 'Times New Roman', Times, serif; font-size:15px; line-height:1.6;";
+/**
+ * Renderizza le note utente in HTML sicuro
+ */
+const renderUserNotesHtml = (userNotes: UserNote[] | undefined, themeName: string) => {
+  if (!userNotes || userNotes.length === 0) return '';
+  
+  try {
+    const theme = getReaderTheme(themeName);
+    const containerStyles = READER_STYLES.userNotesContainer(theme);
+    const noteStyles = READER_STYLES.userNoteItem(theme);
+    const numberStyles = READER_STYLES.userNoteNumber(theme);
+    const contentStyles = READER_STYLES.userNoteContent(theme);
+    
+    const notesHtml = userNotes.map((n, idx) => {
+      if (!validateUserContent(n.text) || !validateUserContent(n.content)) {
+        return '';
+      }
+      return `<div style="${noteStyles}"><span style="${numberStyles}">${escapeHtml(String(idx + 1))}</span><span style="${contentStyles}"><em>${escapeHtml(n.text)}</em> — ${escapeHtml(n.content)}</span></div>`;
+    }).join('');
+    
+    return `<div style="${containerStyles}">${notesHtml}</div>`;
+  } catch (error) {
+    log.error('Error in renderUserNotesHtml', {
+      error: error instanceof Error ? error.message : String(error),
+      stack: error instanceof Error ? error.stack : undefined
+    });
+    return '';
+  }
+};
+
+/**
+ * Genera l'HTML finale per il reader, supportando temi e colonne
+ */
+export const buildReaderHtml = (text: string, highlights?: UserHighlight[], userNotes?: UserNote[], themeName: string = 'dark') => {
+  try {
+    // Validate input
+    if (typeof text !== 'string') {
+      log.warning('buildReaderHtml received non-string input', { 
+        inputType: typeof text,
+        inputValue: String(text ?? '').slice(0, 100) // Limit for logging
+      });
+      text = String(text ?? '');
+    }
+    
+    const theme = getReaderTheme(themeName);
+    const baseStyle = READER_STYLES.container(theme);
+    const hasSplit = String(text || '').includes(PAGE_SPLIT);
   
   if (!hasSplit) {
-    const { html, footnotesHtml } = renderReaderBlocksHtml(text, highlights);
-    const userNotesHtml = (userNotes && userNotes.length > 0)
-      ? `<div style="margin-top:14px;">${userNotes.map((n, idx) => `<div style="display:flex; gap:8px; font-size:0.9em; line-height:1.5; color:#cbd5e1; margin-bottom:6px;"><span style="min-width:16px; text-align:right;">${idx + 1}</span><span style="flex:1 1 auto; padding-left:8px; display:block;"><em>${escapeHtml(n.text)}</em> — ${escapeHtml(n.content)}</span></div>`).join('')}</div>`
-      : '';
+    const { html, footnotesHtml } = renderReaderBlocksHtml(text, highlights, undefined, 0, themeName);
+    const userNotesHtml = renderUserNotesHtml(userNotes, themeName);
     const body = `${html}${footnotesHtml}${userNotesHtml}`;
     return `<div style="${baseStyle}">${body}</div>`;
   }
@@ -225,19 +371,78 @@ export const buildReaderHtml = (text: string, highlights?: UserHighlight[], user
   const [leftRaw, rightRaw] = splitColumns(String(text || ''));
   const sharedFootnotes: string[] = [];
   
-  // Per la pagina destra, dobbiamo aggiungere l'offset della pagina sinistra + la lunghezza del marker PAGE_SPLIT
-  const rightOffset = leftRaw.length + PAGE_SPLIT.length;
+  // Safe offset calculation
+  let rightOffset = 0;
+  try {
+    const leftSelectable = buildSelectableText(leftRaw || '', false);
+    rightOffset = leftSelectable.length + 1; // +1 per lo split character implicito
+  } catch (e) {
+    log.error('Error calculating right column offset', {
+      error: e instanceof Error ? e.message : String(e),
+      stack: e instanceof Error ? e.stack : undefined
+    });
+    // Fallback: stima basata sulla lunghezza grezza
+    rightOffset = (leftRaw || '').length; 
+  }
   
-  const left = renderReaderBlocksHtml(leftRaw || '', highlights, sharedFootnotes, 0);
-  const right = renderReaderBlocksHtml(rightRaw || '', highlights, sharedFootnotes, rightOffset);
+  // Usiamo lo stesso array sharedFootnotes per entrambe le colonne
+  const left = renderReaderBlocksHtml(leftRaw || '', highlights, sharedFootnotes, 0, themeName);
+  const right = renderReaderBlocksHtml(rightRaw || '', highlights, sharedFootnotes, rightOffset, themeName);
+  
+  // Generiamo l'HTML delle note una sola volta usando l'array condiviso popolato da entrambe le colonne
+  const unifiedFootnotesHtml = sharedFootnotes.length > 0
+      ? (() => {
+          const containerStyles = READER_STYLES.footnotesContainer(theme);
+          const dividerStyles = READER_STYLES.footnotesDivider(theme);
+          const noteStyles = READER_STYLES.footnoteItem(theme);
+          const numberStyles = READER_STYLES.footnoteNumber(theme);
+          const contentStyles = READER_STYLES.footnoteContent(theme);
+          
+          const notesHtml = sharedFootnotes
+            .map((note, i) => {
+              const number = i + 1;
+              return `<div style="${noteStyles}"><span style="${numberStyles}">${escapeHtml(String(number))}</span><span style="${contentStyles}">${escapeHtml(note)}</span></div>`;
+            })
+            .join("");
+          
+          return `<div style="${containerStyles}"><div style="${dividerStyles}"></div>${notesHtml}</div>`;
+        })()
+      : "";
+
+  const userNotesHtml = renderUserNotesHtml(userNotes, themeName);
+  const gridStyles = READER_STYLES.twoColumnGrid(theme);
   
   const body = `
-    <div style="display:grid; grid-template-columns: 1fr 1fr; gap: 24px;">
-      <div>${left.html}</div>
-      <div>${right.html}</div>
-    </div>
-    ${(left.footnotesHtml || right.footnotesHtml || '')}
-    ${(userNotes && userNotes.length > 0) ? `<div style="margin-top:14px;">${userNotes.map((n, idx) => `<div style="display:flex; gap:8px; font-size:0.9em; line-height:1.5; color:#cbd5e1; margin-bottom:6px;"><span style="min-width:16px; text-align:right;">${idx + 1}</span><span style="flex:1 1 auto; padding-left:8px; display:block;"><em>${escapeHtml(n.text)}</em> — ${escapeHtml(n.content)}</span></div>`).join('')}</div>` : ''}
-  `;
-  return `<div style="${baseStyle}">${body}</div>`;
+      <div style="${gridStyles}">
+        <div>${left.html}</div>
+        <div>${right.html}</div>
+      </div>
+      ${unifiedFootnotesHtml}
+      ${userNotesHtml}
+    `;
+    return `<div style="${baseStyle}">${body}</div>`;
+  } catch (error) {
+    log.error('Error in buildReaderHtml', {
+      error: error instanceof Error ? error.message : String(error),
+      stack: error instanceof Error ? error.stack : undefined,
+      inputText: text ? text.slice(0, 100) : 'empty'
+    });
+    const theme = getReaderTheme(themeName);
+    const safeStyle = buildSafeInlineStyle({ 
+      'color': theme.text.primary, 
+      'font-family': 'ui-serif, Georgia, Times New Roman, Times, serif',
+      'font-size': '15px',
+      'line-height': '1.6'
+    });
+    return createSafeElement('div', { style: safeStyle }, escapeHtml(String(text ?? '')));
+  }
+};
+
+/**
+ * Clears global caches used by the rendering engine.
+ * Should be called when unmounting the reader or switching books.
+ */
+export const clearRenderCaches = () => {
+  globalStringCache.clear();
+  globalRegexCache.clear();
 };

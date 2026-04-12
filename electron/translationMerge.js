@@ -141,5 +141,16 @@ export const normalizeLoadedProjectData = (raw) => {
 
   if (!data.translations || typeof data.translations !== 'object') data.translations = {};
 
+  // Se mancano le pagine totali o sono 0, proviamo a recuperarle dalle traduzioni o impostiamo un minimo di 1
+  const currentTotalPages = Number(data.totalPages);
+  if (!Number.isFinite(currentTotalPages) || currentTotalPages <= 0) {
+    const translationKeys = Object.keys(data.translations).map(Number).filter(n => !isNaN(n));
+    if (translationKeys.length > 0) {
+      data.totalPages = Math.max(...translationKeys);
+    } else {
+      data.totalPages = 1; // Minimo 1 per evitare schermata nera e permettere ricollegamento PDF
+    }
+  }
+
   return data;
 };

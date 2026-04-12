@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
-import { getTranslateSystemPrompt, getTranslateUserInstruction, getVerifyQualitySystemPrompt } from "../src/services/prompts";
+import { getGeminiTranslateSystemPrompt as getTranslateSystemPrompt, getGeminiTranslateUserInstruction as getTranslateUserInstruction } from "../src/services/prompts/gemini";
+import { getVerifyQualitySystemPrompt } from "../src/services/verifierPrompts";
 
 describe("prompts (colonne)", () => {
   it("include regola [[PAGE_SPLIT]] nel prompt di traduzione", () => {

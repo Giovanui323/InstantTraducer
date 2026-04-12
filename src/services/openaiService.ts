@@ -3,14 +3,23 @@ import { TranslationResult, OpenAIModel, ReasoningEffort, VerbosityLevel, PDFMet
 import { log } from "./logger";
 import { cleanTranslationText } from "./textClean";
 import { looksLikeItalian } from "./aiUtils";
-import { retry } from "../utils/async";
+import { retry, withTimeout } from "../utils/async";
 import { safeParseJsonObject } from "../utils/json";
-import { 
-  getTranslateSystemPrompt, 
-  getTranslateUserInstruction, 
-  getVerifyQualitySystemPrompt, 
-  getMetadataExtractionPrompt 
-} from "./prompts";
+import { getOpenAITranslateSystemPrompt, getOpenAITranslateUserInstruction } from './prompts/openai';
+import { getMetadataExtractionPrompt, buildRetryInstruction } from './prompts/shared';
+import { getVerifyQualitySystemPrompt } from "./verifierPrompts";
+import { AI_VERIFICATION_TIMEOUT_MS } from "../constants";
+import { trackUsage } from "./usageTracker";
+
+const normalizeOpenAIError = (e: any): Error => {
+  if (e?.name === 'AbortError' || e?.message?.includes('aborted')) {
+    return new Error("Operazione annullata");
+  }
+  if (e?.message?.includes('429') || e?.message?.includes('Quota')) {
+    return new Error("Quota OpenAI esaurita");
+  }
+  return e instanceof Error ? e : new Error(String(e));
+};
 
 export const translateWithOpenAI = async (
   imageBase64: string,
@@ -28,15 +37,18 @@ export const translateWithOpenAI = async (
   extraInstruction?: string,
   onProgress?: (text: string) => void,
   signal?: AbortSignal,
-  legalContext?: boolean
+  legalContext?: boolean,
+  customPrompt?: string,
+  skipPostProcessing?: boolean
 ): Promise<TranslationResult> => {
   if (!apiKey) throw new Error("API Key mancante");
   const startedAt = performance.now();
   const imageBytesApprox = Math.floor((imageBase64.length * 3) / 4);
-  const systemPrompt = getTranslateSystemPrompt(sourceLanguage, previousContext, legalContext ?? true);
+  const isRetry = Boolean(extraInstruction && extraInstruction.trim().length > 0);
+  const systemPrompt = getOpenAITranslateSystemPrompt(sourceLanguage, previousContext, legalContext ?? true, isRetry, customPrompt);
 
-  if (onProgress) onProgress(`Preparazione richiesta OpenAI (effort: ${effort}, verbosity: ${verbosity})`);
-  log.wait(`Richiesta OpenAI (${model})...`, {
+  if (onProgress) onProgress(`Preparazione richiesta OpenAI (${model})`);
+  log.wait(`[OPENAI-TRANSLATION] Richiesta (${model})...`, {
     effort,
     verbosity,
     imageKB: Math.round(imageBytesApprox / 1024),
@@ -122,37 +134,45 @@ export const translateWithOpenAI = async (
 
     const data = await response.json();
     const text = data.choices?.[0]?.message?.content || "";
+    
+    // Track usage
+    if (data.usage) {
+      const { prompt_tokens, completion_tokens } = data.usage;
+      trackUsage(model, prompt_tokens || 0, completion_tokens || 0);
+    }
+    
+    if (!text) throw new Error("Risposta vuota");
     return { text, requestId };
   };
 
-  const baseInstruction = getTranslateUserInstruction(pageNumber, sourceLanguage);
+  const baseInstruction = getOpenAITranslateUserInstruction(pageNumber, sourceLanguage);
   const effectiveInstruction = extraInstruction?.trim() 
     ? `${baseInstruction}\n\n${extraInstruction.trim()}`
     : baseInstruction;
 
-  const attempt1 = await retry(
-    () => runAttempt(effectiveInstruction),
-    2,
-    3000,
-    (err, attempt) => {
-      if (onProgress) onProgress(`Errore temporaneo (OpenAI), tentativo ${attempt}/2 in corso...`);
-      log.warning(`Ritento OpenAI (attempt ${attempt}) causa errore transiente`, err);
-    },
-    (err) => {
-      const name = String((err as any)?.name || "");
-      const msg = String((err as any)?.message || "");
-      return name !== "AbortError" && !msg.includes("aborted") && !msg.includes("annullat");
-    }
-  );
-  const elapsedMs = Math.round(performance.now() - startedAt);
-  log.recv(`Ricevuta traduzione OpenAI (${attempt1.text.length} caratteri)`, { elapsedMs, requestId: attempt1.requestId });
-  if (onProgress) onProgress(`Output pronto: ${attempt1.text.length} caratteri (tempo: ${elapsedMs}ms)`);
+  try {
+    const data = await retry(
+      () => runAttempt(effectiveInstruction),
+      3,
+      2000,
+      (err, attempt) => {
+        log.warning(`[OPENAI] Errore temporaneo pagina ${pageNumber}, tentativo ${attempt}/3...`, err);
+      }
+    );
+    
+    if (onProgress) onProgress(`Output pronto: ${data.text.length} caratteri (tempo: ${Math.round(performance.now() - startedAt)}ms)`);
 
-  const cleaned1 = cleanTranslationText(attempt1.text || "");
-  if (attempt1.text.length !== cleaned1.length) {
-    log.info(`Post-processing OpenAI: Testo pulito di ${attempt1.text.length - cleaned1.length} caratteri.`);
+    if (skipPostProcessing) {
+      return { text: data.text || "", annotations: [], modelUsed: model };
+    }
+
+    const cleaned1 = cleanTranslationText(data.text || "");
+    const cleaned2 = cleaned1.replace(/^(Ecco la traduzione della pagina \d+:?\s*)/i, '');
+    
+    return { text: cleaned2, annotations: [], modelUsed: model };
+  } catch (error) {
+    throw normalizeOpenAIError(error);
   }
-  return { text: cleaned1, annotations: [] };
 };
 
 export const verifyTranslationQualityWithOpenAI = async (params: {
@@ -167,20 +187,25 @@ export const verifyTranslationQualityWithOpenAI = async (params: {
   nextPageNumber?: number;
   signal?: AbortSignal;
   legalContext?: boolean;
+  sourceLanguage?: string;
+  customPrompt?: string;
 }): Promise<any> => {
-  const { apiKey, verifierModel, pageNumber, imageBase64, translatedText, prevPageImageBase64, prevPageNumber, nextPageImageBase64, nextPageNumber, signal, legalContext = true } = params;
+  const { apiKey, verifierModel, pageNumber, imageBase64, translatedText, prevPageImageBase64, prevPageNumber, nextPageImageBase64, nextPageNumber, signal, legalContext = true, sourceLanguage = "Tedesco", customPrompt } = params;
   if (!apiKey) throw new Error("API Key mancante");
 
-  const prompt = getVerifyQualitySystemPrompt(legalContext);
+  const prompt = customPrompt && customPrompt.trim().length > 0 
+    ? customPrompt 
+    : getVerifyQualitySystemPrompt(legalContext, sourceLanguage);
 
+  const isO1 = verifierModel.startsWith('o1-') || verifierModel.startsWith('o3-');
   const messages = [
-    { role: 'system', content: prompt },
+    { role: isO1 ? 'developer' : 'system', content: prompt },
     {
       role: 'user',
       content: [
         ...(prevPageImageBase64 && prevPageNumber
           ? [
-              { type: 'text', text: `CONTESTO: Pagina precedente ${prevPageNumber}` },
+              { type: 'text', text: `CONTESTO (NON TRADURRE): Pagina precedente ${prevPageNumber}` },
               { type: 'image_url', image_url: { url: `data:image/jpeg;base64,${prevPageImageBase64}` } }
             ]
           : []),
@@ -188,34 +213,66 @@ export const verifyTranslationQualityWithOpenAI = async (params: {
         { type: 'image_url', image_url: { url: `data:image/jpeg;base64,${imageBase64}` } },
         ...(nextPageImageBase64 && nextPageNumber
           ? [
-              { type: 'text', text: `CONTESTO: Pagina successiva ${nextPageNumber}` },
+              { type: 'text', text: `CONTESTO (NON TRADURRE): Pagina successiva ${nextPageNumber}` },
               { type: 'image_url', image_url: { url: `data:image/jpeg;base64,${nextPageImageBase64}` } }
             ]
           : []),
-        { type: 'text', text: `TRADUZIONE DA REVISIONARE:\n"""\n${translatedText.slice(0, 10000)}\n"""` }
+        { type: 'text', text: `TRADUZIONE DA REVISIONARE (DEVE CONTENERE SOLO LA PAGINA ${pageNumber}):\n"""\n${translatedText.slice(0, 10000)}\n"""` }
       ]
     }
   ];
 
-  const response = await fetch('https://api.openai.com/v1/chat/completions', {
-    method: 'POST',
-    headers: {
-      'Content-Type': 'application/json',
-      'Authorization': `Bearer ${apiKey}`
-    },
-    signal,
-    body: JSON.stringify({
-      model: verifierModel,
-      messages,
-      response_format: { type: "json_object" }
-    })
-  });
+  // Handshake & Stalled Detection
+  const STALLED_TIMEOUT_MS = 30000;
+  const stalledTimer = setTimeout(() => {
+    log.warning(`[OPENAI-STALLED] QUALITY_CHECK_STALLED: Nessuna risposta da ${STALLED_TIMEOUT_MS/1000}s per pagina ${pageNumber}`);
+  }, STALLED_TIMEOUT_MS);
 
-  if (!response.ok) {
-    throw new Error(`Errore API OpenAI: ${response.statusText}`);
+  log.info(`[OPENAI-HANDSHAKE] Invio richiesta verifica pagina ${pageNumber}...`);
+
+  let data;
+  try {
+    data = await withTimeout(
+      (async () => {
+        const response = await fetch('https://api.openai.com/v1/chat/completions', {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            'Authorization': `Bearer ${apiKey}`
+          },
+          signal,
+          body: JSON.stringify({
+            model: verifierModel,
+            messages,
+            ...(isO1 ? {} : { response_format: { type: "json_object" } })
+          })
+        });
+
+        if (!response.ok) {
+          const errorData = await response.json().catch(() => ({}));
+          throw new Error(`Errore API OpenAI: ${errorData?.error?.message || response.statusText}`);
+        }
+
+        const resData = await response.json();
+        
+        // Track usage
+        if (resData.usage) {
+          const { prompt_tokens, completion_tokens } = resData.usage;
+          trackUsage(verifierModel, prompt_tokens || 0, completion_tokens || 0);
+        }
+        
+        return resData;
+      })(),
+      AI_VERIFICATION_TIMEOUT_MS,
+      () => log.warning(`Timeout verifica qualità OpenAI per pagina ${pageNumber} (${AI_VERIFICATION_TIMEOUT_MS}ms)`)
+    );
+    log.info(`[OPENAI-HANDSHAKE] Risposta ricevuta per pagina ${pageNumber}.`);
+  } catch (error) {
+    throw normalizeOpenAIError(error);
+  } finally {
+    clearTimeout(stalledTimer);
   }
 
-  const data = await response.json();
   const rawJson = data.choices?.[0]?.message?.content || "{}";
   const parsed = safeParseJsonObject(rawJson);
 
@@ -228,31 +285,39 @@ export const verifyTranslationQualityWithOpenAI = async (params: {
   };
 };
 
-export const testOpenAIConnection = async (apiKey: string, model: OpenAIModel, signal?: AbortSignal): Promise<boolean> => {
+export const testOpenAIConnection = async (apiKey: string, model: OpenAIModel, signal?: AbortSignal): Promise<{ success: boolean; message: string }> => {
   if (!apiKey) throw new Error("API Key mancante");
 
   try {
     log.info(`Test funzionalità OpenAI (${model})...`);
-    const response = await fetch('https://api.openai.com/v1/chat/completions', {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        'Authorization': `Bearer ${apiKey}`
-      },
-      signal,
-      body: JSON.stringify({
+      const isO1 = model.startsWith('o1-') || model.startsWith('o3-');
+      const body: any = {
         model: model,
         messages: [
           { role: 'user', content: "Traduci 'Hello World' in Italiano. Rispondi SOLO con la traduzione." }
-        ],
-        max_tokens: 10
-      })
-    });
+        ]
+      };
+
+      if (isO1) {
+        body.max_completion_tokens = 10;
+      } else {
+        body.max_tokens = 10;
+      }
+
+      const response = await fetch('https://api.openai.com/v1/chat/completions', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${apiKey}`
+        },
+        signal,
+        body: JSON.stringify(body)
+      });
 
     if (!response.ok) {
       const errorData = await response.json().catch(() => ({}));
       const errorMsg = errorData?.error?.message || response.statusText || "Errore sconosciuto";
-      throw new Error(`Errore API OpenAI: ${errorMsg} (status ${response.status})`);
+      return { success: false, message: `Errore OpenAI: ${errorMsg}` };
     }
 
     const data = await response.json();
@@ -260,12 +325,12 @@ export const testOpenAIConnection = async (apiKey: string, model: OpenAIModel, s
 
     if (text && text.trim().length > 0) {
       log.success(`Test OpenAI riuscito: "${text.trim()}"`);
-      return true;
+      return { success: true, message: `Connessione riuscita: "${text.trim()}"` };
     }
-    return false;
-  } catch (error) {
+    return { success: false, message: "Risposta vuota o non valida dall'API." };
+  } catch (error: any) {
     log.error("Test connessione OpenAI fallito", error);
-    throw error;
+    return { success: false, message: error.message || "Errore sconosciuto durante il test." };
   }
 };
 
@@ -277,13 +342,15 @@ export const extractPdfMetadataWithOpenAI = async (
   model: OpenAIModel,
   imagesBase64: string[],
   signal?: AbortSignal,
-  targetLanguage?: string
+  targetLanguage?: string,
+  customPrompt?: string
 ): Promise<Partial<PDFMetadata>> => {
   if (!apiKey) throw new Error("API Key mancante");
 
-  const prompt = getMetadataExtractionPrompt(targetLanguage);
+  const prompt = customPrompt && customPrompt.trim().length > 0 ? customPrompt : getMetadataExtractionPrompt(targetLanguage);
+  const isO1 = model.startsWith('o1-') || model.startsWith('o3-');
   const messages = [
-    { role: 'system', content: prompt },
+    { role: isO1 ? 'developer' : 'system', content: prompt },
     {
       role: 'user',
       content: imagesBase64.map((img, i) => ([
@@ -294,6 +361,7 @@ export const extractPdfMetadataWithOpenAI = async (
   ];
 
   try {
+    log.info(`[OPENAI-METADATA] Estrazione info PDF (${model})...`);
     const response = await fetch('https://api.openai.com/v1/chat/completions', {
       method: 'POST',
       headers: {
@@ -304,15 +372,23 @@ export const extractPdfMetadataWithOpenAI = async (
       body: JSON.stringify({
         model: model,
         messages,
-        response_format: { type: "json_object" }
+        ...(isO1 ? {} : { response_format: { type: "json_object" } })
       })
     });
 
     if (!response.ok) {
-      throw new Error(`Errore API OpenAI: ${response.statusText}`);
+      const errorData = await response.json().catch(() => ({}));
+      throw new Error(`Errore API OpenAI: ${errorData?.error?.message || response.statusText}`);
     }
 
     const data = await response.json();
+
+    // Track usage
+    if (data.usage) {
+      const { prompt_tokens, completion_tokens } = data.usage;
+      trackUsage(model, prompt_tokens || 0, completion_tokens || 0);
+    }
+
     const rawJson = data.choices?.[0]?.message?.content || "{}";
     const parsed = safeParseJsonObject(rawJson);
 

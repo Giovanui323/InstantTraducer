@@ -53,7 +53,7 @@ export const IndexView: React.FC<IndexViewProps> = ({ text, onPageClick }) => {
   if (!isIndex) {
     return (
       <div className="mx-auto max-w-[70ch]">
-        <div className="text-gray-900 leading-relaxed book-text" style={{ 
+        <div className="text-stone-900 leading-relaxed book-text" style={{
           fontFamily: 'Iowan Old Style, Palatino, "Palatino Linotype", "Book Antiqua", Georgia, Cambria, "Times New Roman", Times, serif',
           lineHeight: 1.28
         }}>
@@ -82,9 +82,9 @@ export const IndexView: React.FC<IndexViewProps> = ({ text, onPageClick }) => {
                   const pNum = parseInt(e.page, 10);
                   return (
                     <div key={idx} className="grid grid-cols-[auto_1fr_auto] items-baseline gap-2 group cursor-pointer" onClick={() => !isNaN(pNum) && onPageClick?.(pNum)}>
-                      <span className="truncate group-hover:text-blue-700 transition-colors">{e.label}</span>
+                      <span className="truncate group-hover:text-accent transition-colors duration-200">{e.label}</span>
                       <div className="border-t border-dotted border-stone-400 translate-y-[0.25em]" />
-                      <span className="tabular-nums font-medium group-hover:text-blue-700 transition-colors underline decoration-dotted underline-offset-4">{e.page}</span>
+                      <span className="tabular-nums font-medium group-hover:text-accent transition-colors duration-200 underline decoration-dotted underline-offset-4">{e.page}</span>
                     </div>
                   );
                 }

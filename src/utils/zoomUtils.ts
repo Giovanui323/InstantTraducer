@@ -18,7 +18,8 @@ export const getNextScaleFromWheel = (
   const max = opts.max;
   const intensity = Number.isFinite(opts.intensity) ? (opts.intensity as number) : 0.002;
   const maxDelta = Number.isFinite(opts.maxDelta) ? (opts.maxDelta as number) : 50;
-  const precisionRaw = Number.isFinite(opts.precision) ? (opts.precision as number) : 3;
+  // Default precision to 2 to match UI requirements and avoid micro-fluctuations
+  const precisionRaw = Number.isFinite(opts.precision) ? (opts.precision as number) : 2;
   const precision = clamp(Math.round(precisionRaw), 0, 6);
 
   const s = Number.isFinite(currentScale) ? currentScale : 1;

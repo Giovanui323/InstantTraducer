@@ -1,13 +1,18 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+/* ─── Electron drag regions ─── */
 .app-region-drag {
   -webkit-app-region: drag;
   user-select: none;
   -webkit-user-select: none;
 }
-
 .app-region-no-drag {
   -webkit-app-region: no-drag;
 }
 
+/* ─── Typography ─── */
 .book-text {
   hyphens: auto;
   -webkit-hyphens: auto;
@@ -18,7 +23,167 @@
   -webkit-hyphenate-limit-after: 3;
   -webkit-hyphenate-limit-lines: 2;
 }
-
 .tabular-nums {
   font-variant-numeric: tabular-nums;
+}
+
+/* ─── Scrollbar — Dark Pro ─── */
+::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+}
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+::-webkit-scrollbar-thumb {
+  background: rgba(139, 148, 158, 0.2);
+  border-radius: 999px;
+}
+::-webkit-scrollbar-thumb:hover {
+  background: rgba(139, 148, 158, 0.35);
+}
+::-webkit-scrollbar-corner {
+  background: transparent;
+}
+
+.custom-scrollbar::-webkit-scrollbar {
+  width: 5px;
+  height: 5px;
+}
+.custom-scrollbar::-webkit-scrollbar-thumb {
+  background: rgba(139, 148, 158, 0.15);
+  border-radius: 999px;
+}
+.custom-scrollbar::-webkit-scrollbar-thumb:hover {
+  background: rgba(139, 148, 158, 0.3);
+}
+
+.custom-scrollbar-dark::-webkit-scrollbar {
+  width: 4px;
+}
+.custom-scrollbar-dark::-webkit-scrollbar-thumb {
+  background: rgba(139, 148, 158, 0.12);
+}
+
+.custom-scrollbar-light::-webkit-scrollbar {
+  width: 5px;
+}
+.custom-scrollbar-light::-webkit-scrollbar-thumb {
+  background: rgba(0, 0, 0, 0.12);
+  border-radius: 999px;
+}
+.custom-scrollbar-light::-webkit-scrollbar-thumb:hover {
+  background: rgba(0, 0, 0, 0.22);
+}
+
+.hide-scrollbar::-webkit-scrollbar {
+  display: none;
+}
+.hide-scrollbar {
+  -ms-overflow-style: none;
+  scrollbar-width: none;
+}
+
+/* ─── Focus ring — accessible & elegant ─── */
+*:focus-visible {
+  outline: none;
+  box-shadow: 0 0 0 2px #0d1117, 0 0 0 4px rgba(88, 166, 255, 0.5);
+  border-radius: 4px;
+}
+button:focus-visible,
+[role="button"]:focus-visible,
+a:focus-visible {
+  box-shadow: 0 0 0 2px #0d1117, 0 0 0 3px rgba(88, 166, 255, 0.5);
+}
+
+/* ─── Range input ─── */
+input[type="range"] {
+  -webkit-appearance: none;
+  appearance: none;
+  height: 3px;
+  border-radius: 999px;
+  background: #30363d;
+  outline: none;
+}
+input[type="range"]::-webkit-slider-thumb {
+  -webkit-appearance: none;
+  appearance: none;
+  width: 14px;
+  height: 14px;
+  border-radius: 50%;
+  background: #58a6ff;
+  cursor: pointer;
+  border: 2px solid #0d1117;
+  box-shadow: 0 1px 4px rgba(0,0,0,0.4);
+  transition: transform 120ms ease-out, box-shadow 120ms ease-out;
+}
+input[type="range"]::-webkit-slider-thumb:hover {
+  transform: scale(1.15);
+  box-shadow: 0 2px 8px rgba(88, 166, 255, 0.3);
+}
+input[type="range"]::-webkit-slider-thumb:active {
+  transform: scale(1.25);
+}
+
+/* ─── Checkbox / Toggle ─── */
+input[type="checkbox"] {
+  accent-color: #58a6ff;
+}
+
+/* ─── Select ─── */
+select {
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 12 12' fill='none'%3E%3Cpath d='M3 4.5L6 7.5L9 4.5' stroke='%238b949e' stroke-width='1.5' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E");
+  background-repeat: no-repeat;
+  background-position: right 8px center;
+  padding-right: 28px;
+  -webkit-appearance: none;
+  appearance: none;
+}
+
+/* ─── Glass panel mixin ─── */
+@layer components {
+  .glass-panel {
+    background: rgba(22, 27, 34, 0.85);
+    backdrop-filter: blur(20px) saturate(1.2);
+    -webkit-backdrop-filter: blur(20px) saturate(1.2);
+    border: 1px solid rgba(48, 54, 61, 0.6);
+    box-shadow: 0 4px 24px rgba(0, 0, 0, 0.35), inset 0 1px 0 rgba(255,255,255,0.03);
+  }
+  .glass-panel-sm {
+    background: rgba(22, 27, 34, 0.7);
+    backdrop-filter: blur(12px);
+    -webkit-backdrop-filter: blur(12px);
+    border: 1px solid rgba(48, 54, 61, 0.4);
+  }
+}
+
+/* ─── Smooth page transitions ─── */
+@keyframes page-enter {
+  from {
+    opacity: 0;
+    transform: translateY(6px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+.animate-page-enter {
+  animation: page-enter 200ms cubic-bezier(0.16, 1, 0.3, 1) both;
+}
+
+/* ─── Shimmer skeleton ─── */
+.skeleton {
+  background: linear-gradient(
+    90deg,
+    rgba(48, 54, 61, 0.3) 25%,
+    rgba(48, 54, 61, 0.6) 50%,
+    rgba(48, 54, 61, 0.3) 75%
+  );
+  background-size: 200% 100%;
+  animation: shimmer 1.8s ease-in-out infinite;
+}
+@keyframes shimmer {
+  0% { background-position: 200% 0; }
+  100% { background-position: -200% 0; }
 }

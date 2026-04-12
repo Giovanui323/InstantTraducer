@@ -22,13 +22,69 @@ const detectHeadingLevel = (block) => {
   return 0;
 };
 
-const renderInlineHtml = (text, footnotes) => {
-  const parts = String(text ?? '').split(/(\*\*.*?\*\*|\*.*?\*|\[\[.*?\]\]|\[FIGURA:.*?\])/g);
+const normalizeHighlightColor = (value) => {
+  const fallback = 'rgba(250, 204, 21, 0.4)';
+  const s = String(value ?? '').trim();
+  if (!s) return fallback;
+  if (/^#[0-9a-fA-F]{3,8}$/.test(s)) return s;
+  if (/^(rgba?|hsla?)\([0-9\s,.%deg\/-]+\)$/i.test(s)) return s;
+  if (/^[a-zA-Z]+$/.test(s)) return s;
+  return fallback;
+};
+
+const applyHighlightsToPlainText = (plainText, partStart, highlights) => {
+  if (!highlights || highlights.length === 0) return escapeHtml(plainText);
+  
+  const originalLength = plainText.length;
+  const partEnd = partStart + originalLength;
+  const relevant = highlights.filter(h => h.start < partEnd && h.end > partStart);
+  
+  if (relevant.length === 0) return escapeHtml(plainText);
+  
+  let result = '';
+  let cursor = 0;
+  const sorted = [...relevant].sort((a, b) => a.start - b.start);
+
+  for (const h of sorted) {
+    const hStartInPart = Math.max(0, h.start - partStart);
+    const hEndInPart = Math.min(originalLength, h.end - partStart);
+    
+    if (hStartInPart > cursor) {
+      result += escapeHtml(plainText.slice(cursor, hStartInPart));
+    }
+    
+    const chunk = plainText.slice(hStartInPart, hEndInPart);
+    const color = normalizeHighlightColor(h.color);
+    result += `<span class="highlight" style="background-color:${color}; border-radius: 2px; box-decoration-break: clone; -webkit-box-decoration-break: clone;">${escapeHtml(chunk)}</span>`;
+    cursor = hEndInPart;
+  }
+  
+  if (cursor < originalLength) {
+    result += escapeHtml(plainText.slice(cursor));
+  }
+  
+  return result;
+};
+
+const renderInlineHtml = (text, footnotes, highlights, blockOffset = 0) => {
+  // Regex aligned with src/utils/highlightSelectors.ts
+  const SPLIT_REGEX = /(\*\*[\s\S]*?\*\*|\*[\s\S]*?\*|__[\s\S]*?__|_[\s\S]*?_|\[\[.*?\|.*?\]\]|\[FIGURA:.*?\]|§H_START§|§H_END§)/g;
+  const parts = String(text ?? '').split(SPLIT_REGEX);
+  
+  let currentOffset = blockOffset;
+
   return parts.map((part) => {
     if (!part) return '';
-    if (part.startsWith('[FIGURA:') && part.endsWith(']')) {
+    const partLength = part.length;
+    const partStart = currentOffset;
+
+    let rendered;
+
+    if (part === '§H_START§') { rendered = '<span class="highlight">'; }
+    else if (part === '§H_END§') { rendered = '</span>'; }
+    else if (part.startsWith('[FIGURA:') && part.endsWith(']')) {
       const description = part.slice(8, -1).trim();
-      return `<div class="figure">
+      rendered = `<div class="figure">
         <div class="figureIcon" aria-hidden="true">
           <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
             <rect x="3" y="3" width="18" height="18" rx="2" ry="2"></rect>
@@ -42,36 +98,59 @@ const renderInlineHtml = (text, footnotes) => {
         </div>
       </div>`;
     }
-    if (part.startsWith('[[') && part.endsWith(']]')) {
+    else if (part.startsWith('[[') && part.endsWith(']]')) {
       const content = part.slice(2, -2);
       const sepIdx = content.indexOf('|');
       const word = sepIdx >= 0 ? content.slice(0, sepIdx) : content;
       const comment = sepIdx >= 0 ? content.slice(sepIdx + 1) : '';
       if (comment.trim().length > 0) {
         const number = footnotes.push(comment.trim());
-        return `${escapeHtml(word)}<sup class="footnoteRef">${escapeHtml(number)}</sup>`;
+        rendered = `${applyHighlightsToPlainText(word, partStart + 2, highlights)}<sup class="footnoteRef">${escapeHtml(number)}</sup>`;
+      } else {
+        rendered = applyHighlightsToPlainText(word, partStart + 2, highlights);
       }
-      return escapeHtml(word);
     }
-    if (part.startsWith('**') && part.endsWith('**')) {
-      return `<strong class="bold">${escapeHtml(part.slice(2, -2))}</strong>`;
+    else if (part.startsWith('**') && part.endsWith('**')) {
+      rendered = `<strong class="bold">${applyHighlightsToPlainText(part.slice(2, -2), partStart + 2, highlights)}</strong>`;
     }
-    if (part.startsWith('*') && part.endsWith('*')) {
-      return `<em class="italic">${escapeHtml(part.slice(1, -1))}</em>`;
+    else if (part.startsWith('__') && part.endsWith('__')) {
+      rendered = `<strong class="bold">${applyHighlightsToPlainText(part.slice(2, -2), partStart + 2, highlights)}</strong>`;
     }
-    return escapeHtml(part);
+    else if (part.startsWith('*') && part.endsWith('*')) {
+      rendered = `<em class="italic">${applyHighlightsToPlainText(part.slice(1, -1), partStart + 1, highlights)}</em>`;
+    }
+    else if (part.startsWith('_') && part.endsWith('_')) {
+      rendered = `<em class="italic">${applyHighlightsToPlainText(part.slice(1, -1), partStart + 1, highlights)}</em>`;
+    }
+    else {
+      rendered = applyHighlightsToPlainText(part, partStart, highlights);
+    }
+    
+    currentOffset += partLength;
+    return rendered;
   }).join('');
 };
 
-const renderExportBlocksHtml = (text, sharedFootnotes) => {
+const renderExportBlocksHtml = (text, highlights, sharedFootnotes) => {
   const footnotes = Array.isArray(sharedFootnotes) ? sharedFootnotes : [];
   const normalized = String(text ?? '').replace(/\r\n/g, '\n');
-  const blocks = normalized.split(/\n{2,}/g);
+  const blocks = normalized.split(/(\n{2,})/g); // Keep delimiters to track offset
 
   let firstParagraph = true;
   let previousWasHeading = false;
+  let currentOffset = 0;
+
+  // Note: We are now passing highlights down to renderInlineHtml instead of pre-processing
+  // This avoids the complex split/join logic for highlights across blocks, as each block handles its own highlights via offsets.
+  
   const html = blocks.map((raw) => {
-    const block = String(raw ?? '').trim();
+    const partLength = raw.length;
+    const partStart = currentOffset;
+    currentOffset += partLength;
+
+    if (raw.match(/^\n{2,}$/)) return ''; // Skip delimiters
+
+    const block = raw.trim();
     if (!block) return '';
 
     const headingLevel = detectHeadingLevel(block);
@@ -79,34 +158,30 @@ const renderExportBlocksHtml = (text, sharedFootnotes) => {
       const clean = headingLevel <= 3 && block.startsWith('#')
         ? block.replace(/^#{1,3}\s+/, '')
         : block;
+      const headingOffset = partStart + (raw.indexOf(clean));
       previousWasHeading = true;
       firstParagraph = false;
-      return `<h${headingLevel} class="h${headingLevel}">${renderInlineHtml(clean, footnotes)}</h${headingLevel}>`;
+      return `<h${headingLevel} class="h${headingLevel}">${renderInlineHtml(clean, footnotes, highlights, headingOffset)}</h${headingLevel}>`;
     }
 
     const className = (firstParagraph || previousWasHeading) ? 'noIndent' : '';
+    const paragraphOffset = partStart + (raw.indexOf(block));
     firstParagraph = false;
     previousWasHeading = false;
-    return `<p class="${className}">${renderInlineHtml(block, footnotes)}</p>`;
+    return `<p class="${className}">${renderInlineHtml(block, footnotes, highlights, paragraphOffset)}</p>`;
   }).join('');
 
   return { html, footnotes };
 };
 
-const applyHtmlHighlights = (plain, highlights) => {
-  const hs = Array.isArray(highlights) ? highlights.filter(h => Number.isFinite(h?.start) && Number.isFinite(h?.end) && h.end > h.start).sort((a, b) => a.start - b.start) : [];
-  if (hs.length === 0) return plain;
-  let out = '';
-  let cursor = 0;
-  for (const h of hs) {
-    const start = Math.max(0, Math.min(Number(h.start), plain.length));
-    const end = Math.max(start, Math.min(Number(h.end), plain.length));
-    if (start > cursor) out += plain.slice(cursor, start);
-    out += `<span class="highlight">${escapeHtml(plain.slice(start, end))}</span>`;
-    cursor = end;
-  }
-  if (cursor < plain.length) out += plain.slice(cursor);
-  return out;
+// Deprecated: applyHtmlHighlights is no longer needed as we handle highlights inline
+const applyHtmlHighlights = (plain, highlights) => plain;
+
+const postProcessHtml = (html) => {
+  // Già gestito da renderInlineHtml ora, ma lo lasciamo per compatibilità
+  return String(html ?? '')
+    .replace(/§H_START§/g, '<span class="highlight">')
+    .replace(/§H_END§/g, '</span>');
 };
 
 export const buildExportHtml = ({ bookName, pages, options = {}, pageDims = {} }) => {
@@ -135,7 +210,7 @@ export const buildExportHtml = ({ bookName, pages, options = {}, pageDims = {} }
       return `
         <div class="page" style="break-after: page; page-break-after: always;">
           <div class="pageInner">
-            <div class="content">${contentHtml}</div>
+            <div class="content">${postProcessHtml(contentHtml)}</div>
             ${footnotesHtml}
             <div class="pageNumber">${escapeHtml(pageNumber)}</div>
           </div>
@@ -149,8 +224,8 @@ export const buildExportHtml = ({ bookName, pages, options = {}, pageDims = {} }
       const rightRaw = parts.slice(1).join(PAGE_SPLIT);
       if (makeSinglePage) {
         const shared = [];
-        const left = renderExportBlocksHtml(applyHtmlHighlights(leftRaw || '', highlights), shared);
-        const right = renderExportBlocksHtml(applyHtmlHighlights(rightRaw || '', highlights), shared);
+        const left = renderExportBlocksHtml(leftRaw || '', highlights, shared);
+        const right = renderExportBlocksHtml(rightRaw || '', highlights, shared);
         const userNotesHtml = (userNotes && userNotes.length)
           ? `<div class="footnotes"><div class="footnoteSeparator"></div><div class="footnoteList">${userNotes.map((n, i) => `<div class="footnote"><span class="footnoteNumber">${escapeHtml(i + 1)}</span><span class="footnoteText"><em>${escapeHtml(n.text || '')}</em> — ${escapeHtml(n.content || '')}</span></div>`).join('')}</div></div>`
           : '';
@@ -159,8 +234,8 @@ export const buildExportHtml = ({ bookName, pages, options = {}, pageDims = {} }
       }
       const leftShared = [];
       const rightShared = [];
-      const left = renderExportBlocksHtml(applyHtmlHighlights(leftRaw || '', highlights), leftShared);
-      const right = renderExportBlocksHtml(applyHtmlHighlights(rightRaw || '', highlights), rightShared);
+      const left = renderExportBlocksHtml(leftRaw || '', highlights, leftShared);
+      const right = renderExportBlocksHtml(rightRaw || '', highlights, rightShared);
       const leftEmpty = !String(leftRaw || '').trim();
       const rightEmpty = !String(rightRaw || '').trim();
       const pagesOut = [];
@@ -180,7 +255,7 @@ export const buildExportHtml = ({ bookName, pages, options = {}, pageDims = {} }
       }
       return pagesOut.join('');
     } else {
-      const single = renderExportBlocksHtml(applyHtmlHighlights(text, highlights));
+      const single = renderExportBlocksHtml(text, highlights);
       const userNotesHtml = (userNotes && userNotes.length)
         ? `<div class="footnotes"><div class="footnoteSeparator"></div><div class="footnoteList">${userNotes.map((n, i) => `<div class="footnote"><span class="footnoteNumber">${escapeHtml(i + 1)}</span><span class="footnoteText"><em>${escapeHtml(n.text || '')}</em> — ${escapeHtml(n.content || '')}</span></div>`).join('')}</div></div>`
         : '';
@@ -224,14 +299,14 @@ export const buildExportHtml = ({ bookName, pages, options = {}, pageDims = {} }
       h3 { font-weight: 700; margin-top: 10mm; margin-bottom: 4mm; font-size: 1.2em; }
       .bold { font-weight: 700; }
       .italic { font-style: italic; }
-      .highlight { background: rgba(250, 204, 21, 0.25); }
+      .highlight { background: rgba(250, 204, 21, 0.25); print-color-adjust: exact; -webkit-print-color-adjust: exact; }
       .footnoteRef { font-size: 0.75em; vertical-align: super; }
       .footnotes { position: absolute; left: 0; right: 0; bottom: 0; }
       .footnoteSeparator { width: 45mm; border-top: 0.6pt solid rgba(0,0,0,0.6); margin-bottom: 3mm; }
       .footnoteList { display: flex; flex-direction: column; gap: 0mm; padding-bottom: 8mm; }
       .footnote { display: flex; gap: 3mm; font-size: 9pt; line-height: 1.3; color: rgba(0,0,0,0.85); margin-bottom: 2mm; }
       .footnoteNumber { min-width: 5mm; text-align: right; font-weight: bold; }
-      .footnoteText { flex: 1 1 auto; padding-left: 3mm; text-indent: -5mm; display: block; }
+      .footnoteText { flex: 1 1 auto; padding-left: 3mm; text-indent: -5mm; display: block; text-align: justify; hyphens: auto; }
       .pageNumber { position: absolute; right: 0; bottom: 0; font-size: 9pt; color: rgba(0,0,0,0.6); }
       .figure {
         margin: 24pt 0;
@@ -243,6 +318,8 @@ export const buildExportHtml = ({ bookName, pages, options = {}, pageDims = {} }
         align-items: flex-start;
         gap: 16pt;
         page-break-inside: avoid;
+        print-color-adjust: exact; 
+        -webkit-print-color-adjust: exact;
       }
       .figureIcon {
         margin-top: 4pt;
@@ -251,6 +328,8 @@ export const buildExportHtml = ({ bookName, pages, options = {}, pageDims = {} }
         color: #007AFF;
         border-radius: 4pt;
         flex: 0 0 auto;
+        print-color-adjust: exact; 
+        -webkit-print-color-adjust: exact;
       }
       .figureBody { display: flex; flex-direction: column; gap: 4pt; min-width: 0; }
       .figureLabel {

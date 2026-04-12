@@ -1,18 +1,16 @@
 import React, { useState, useCallback, useRef, useEffect } from 'react';
-import { AISettings, PDFMetadata, PageAnnotation, PageStatus } from '../types';
+import { AISettings, GeminiModel, PDFMetadata, PageAnnotation, PageStatus, PageVerification } from '../types';
 import { log } from '../services/logger';
-import { translatePage } from '../services/aiService';
-import { useTranslationQueue } from './useTranslationQueue';
-import { withTimeout } from '../utils/async';
-import { buildJpegDataUrlFromBase64, estimateBytesFromBase64, downscaleDataUrlToJpeg } from '../utils/imageUtils';
-import { AI_TRANSLATION_TIMEOUT_MS, PAGE_RENDER_TIMEOUT_MS, PAGE_CACHE_MAX_EDGE, PAGE_CACHE_JPEG_QUALITY } from '../constants';
+import { DEFAULT_CONCURRENT_TRANSLATIONS, MAX_ALLOWED_CONCURRENCY } from '../constants';
+import { executePageTranslation, TranslationExecutionContext, TranslationExecutionServices, TranslationExecutionStateSetters } from '../services/translation/TranslationExecutor';
+import { ConcurrencyControl, useTranslationQueue } from './useTranslationQueue';
 
 interface UseAppTranslationProps {
   pdfDoc: any;
   metadata: PDFMetadata | null;
   aiSettings: AISettings;
   docInputLanguage: string;
-  updateLibrary: (fileName: string, data: any) => Promise<string>;
+  updateLibrary: (fileId: string, data: any, priority?: 'CRITICAL' | 'BACKGROUND' | 'BATCH') => Promise<string>;
   appendPageConsole: (page: number, msg: string, data?: any) => void;
   verifyAndMaybeFixTranslation: (args: any) => Promise<void>;
   setAnnotationMap: React.Dispatch<React.SetStateAction<Record<number, PageAnnotation[]>>>;
@@ -34,7 +32,9 @@ interface UseAppTranslationProps {
   sessionId: string;
   verboseLogs: boolean;
   isPaused: boolean;
+  isConsultationMode: boolean;
   currentProjectFileId: string | null;
+  verificationMapRef: React.MutableRefObject<Record<number, PageVerification>>;
 }
 
 export const useAppTranslation = ({
@@ -64,7 +64,9 @@ export const useAppTranslation = ({
   sessionId,
   verboseLogs,
   isPaused,
-  currentProjectFileId
+  isConsultationMode,
+  currentProjectFileId,
+  verificationMapRef
 }: UseAppTranslationProps) => {
   const [translationMap, _setTranslationMap] = useState<Record<number, string>>({});
   const [translationsMeta, setTranslationsMeta] = useState<Record<number, { model: string; savedAt: number }>>({});
@@ -73,7 +75,12 @@ export const useAppTranslation = ({
 
   const translationMapRef = useRef<Record<number, string>>(translationMap);
   const pageStatusRef = useRef<Record<number, PageStatus>>(pageStatus);
+  const partialTranslationsRef = useRef<Record<number, string>>(partialTranslations);
   const inFlightTranslationRef = useRef<Record<number, AbortController>>({});
+
+  useEffect(() => {
+    partialTranslationsRef.current = partialTranslations;
+  }, [partialTranslations]);
 
   const setTranslationMap = useCallback((updater: React.SetStateAction<Record<number, string>>) => {
     _setTranslationMap(prev => {
@@ -115,7 +122,8 @@ export const useAppTranslation = ({
     loadReplacementPdfDoc,
     renderDocPageToJpeg,
     getContextImageBase64,
-    verboseLogs
+    verboseLogs,
+    verificationMapRef
   });
 
   useEffect(() => {
@@ -129,7 +137,8 @@ export const useAppTranslation = ({
       loadReplacementPdfDoc,
       renderDocPageToJpeg,
       getContextImageBase64,
-      verboseLogs
+      verboseLogs,
+      verificationMapRef
     };
   }, [
     appendPageConsole,
@@ -141,370 +150,169 @@ export const useAppTranslation = ({
     loadReplacementPdfDoc,
     renderDocPageToJpeg,
     getContextImageBase64,
-    verboseLogs
+    verboseLogs,
+    verificationMapRef
   ]);
 
   useEffect(() => { translationMapRef.current = translationMap; }, [translationMap]);
 
   const shouldSkipTranslation = useCallback((page: number) => {
-    const s = translationMap[page];
-    return typeof s === 'string' && s.trim().length > 0;
-  }, [translationMap]);
-
-  const processPage = useCallback(async (targetPage: number, signal?: AbortSignal, extraInstruction?: string) => {
-    const totalPages = pdfDoc?.numPages || metadata?.totalPages || 0;
-    if (targetPage < 1 || (totalPages > 0 && targetPage > totalPages)) return;
+    const s = translationMapRef.current[page];
+    if (typeof s === 'string' && s.trim().length > 0) return true;
     
-    // If extraInstruction is present, we DON'T skip (it's a retry)
-    if (shouldSkipTranslation(targetPage) && !extraInstruction) return;
+    // Check if currently in progress (loading/processing) to prevent redundant queueing
+    const status = pageStatusRef.current[page];
+    if (status?.loading || status?.processing) return true;
+    
+    return false;
+  }, [translationMapRef, pageStatusRef]);
 
-    const startedAt = performance.now();
-    const traceId = `${sessionId}-p${targetPage}-${Date.now().toString(36).slice(2, 6)}`;
-    pageTraceRef.current[targetPage] = { t0: performance.now(), seq: 0, traceId };
-
-    let pdfTimeout = false;
-    let aiTimeout = false;
-    let canvas: HTMLCanvasElement | null = null;
-    const providerLabel = aiSettings.provider === 'gemini' ? 'Gemini' : 'OpenAI';
-
-    try {
-      const isRetry = Boolean(extraInstruction);
-      const preferFullImage = isRetry;
-      log.info(`${isRetry ? 'Riacquisizione/Ritraduzione' : 'Inizio traduzione'} AI per Pagina ${targetPage}...`);
-
-      const apiKey = (aiSettings.provider === 'gemini' ? aiSettings.gemini.apiKey : aiSettings.openai.apiKey) || '';
-      if (apiKey.trim().length === 0) {
-        updatePageStatus(targetPage, {
-          error: true,
-          loading: `API non configurate: apri Impostazioni per usare ${providerLabel}.`,
-          processing: 'Bloccato'
-        });
-        propsRef.current.appendPageConsole(targetPage, `API key mancante: impossibile avviare ${providerLabel}.`);
+  const processPage = useCallback(async (targetPage: number, signal?: AbortSignal, extraInstruction?: string, translationModelOverride?: GeminiModel, concurrencyControl?: ConcurrencyControl) => {
+    // REDUNDANCY GUARD: Prevent processing if already translated (unless forced via extraInstruction)
+    // This acts as a second layer of defense against race conditions in the queue
+    if (translationMapRef.current[targetPage] && (!extraInstruction || extraInstruction.trim().length === 0)) {
+        log.info(`[PROCESS] Skipping page ${targetPage} - Already translated (Guard Layer).`);
         return;
-      }
-      
-      updatePageStatus(targetPage, { 
-        processing: isRetry ? "Rielaborazione" : "Elaborazione",
-        error: false 
-      });
-
-      propsRef.current.appendPageConsole(targetPage, `${isRetry ? 'Retry' : 'Trace'} avviato (provider=${aiSettings.provider}, verbose=${propsRef.current.verboseLogs ? 'ON' : 'OFF'})`, {
-        sessionId,
-        traceId,
-        page: targetPage,
-        isRetry,
-        extraInstruction,
-        translationMapSize: Object.keys(translationMapRef.current).length
-      });
-      
-      let imageData: string | undefined;
-
-      if (pdfDoc) {
-        const fileName = metadata?.name;
-        const fileId = currentProjectFileId || null;
-        const replacement = pageReplacementsRef.current?.[targetPage];
-
-        if (replacement?.filePath) {
-          updatePageStatus(targetPage, { loading: "Rendering pagina sostituita..." });
-          propsRef.current.appendPageConsole(targetPage, `Sostituzione rilevata: PDF esterno ${replacement.filePath}`);
-
-          const renderScale = aiSettings.provider === 'gemini' ? 2.8 : 2.5;
-          const jpegQuality = aiSettings.provider === 'gemini' ? 0.92 : 0.9;
-          const userRotation = pageRotationsRef.current?.[targetPage] || 0;
-          const doc = await propsRef.current.loadReplacementPdfDoc(replacement.filePath);
-          const result = await propsRef.current.renderDocPageToJpeg(doc, replacement.sourcePage, { scale: renderScale, jpegQuality, extraRotation: userRotation, signal });
-          imageData = result.base64;
-
-          propsRef.current.appendPageConsole(targetPage, `Render sostituzione completato - ${Math.round(result.width)}x${Math.round(result.height)}`, { scale: renderScale });
-
-          let sourceDataUrl = result.dataUrl;
-          try {
-            sourceDataUrl = await downscaleDataUrlToJpeg(result.dataUrl, { maxSide: PAGE_CACHE_MAX_EDGE, jpegQuality: PAGE_CACHE_JPEG_QUALITY });
-          } catch { }
-          setOriginalImages(prev => ({ ...prev, [targetPage]: sourceDataUrl }));
-          if (metadata?.name) {
-            try { await propsRef.current.saveSourceForPage({ page: targetPage, sourceDataUrl }); } catch { }
-          }
-        }
-
-        const cropRel = fileId ? pageImagesIndexRef.current?.crops?.[targetPage] : undefined;
-        const sourceRel = fileId ? pageImagesIndexRef.current?.sources?.[targetPage] : undefined;
-        const preferredRel = cropRel || sourceRel;
-
-        if (!imageData && preferredRel && fileId) {
-          try {
-            updatePageStatus(targetPage, { loading: cropRel ? "Caricamento immagine ritagliata salvata..." : "Caricamento immagine originale salvata..." });
-            imageData = await propsRef.current.readProjectImageBase64({ fileId, relPath: preferredRel });
-            if (!originalImagesRef.current?.[targetPage]) {
-              try {
-                const sourceDataUrl = await propsRef.current.readProjectImageDataUrl({ fileId, relPath: preferredRel });
-                setOriginalImages(prev => ({ ...prev, [targetPage]: sourceDataUrl }));
-              } catch {
-                setOriginalImages(prev => ({ ...prev, [targetPage]: buildJpegDataUrlFromBase64(imageData!) }));
-              }
-            }
-            propsRef.current.appendPageConsole(targetPage, `Immagine originale caricata (base64 ~${Math.round(estimateBytesFromBase64(imageData) / 1024)}KB)`);
-          } catch { imageData = undefined; }
-        }
-
-        if (!imageData) {
-          propsRef.current.appendPageConsole(targetPage, "Caricamento pagina da PDF originale...");
-          const page: any = await withTimeout<any>(pdfDoc.getPage(targetPage), PAGE_RENDER_TIMEOUT_MS, () => {
-            pdfTimeout = true;
-          });
-
-          const baseRenderScale = aiSettings.provider === 'gemini' ? 2.8 : 2.5;
-          const jpegQuality = aiSettings.provider === 'gemini' ? 0.92 : 0.9;
-          const userRotation = pageRotationsRef.current?.[targetPage] || 0;
-          const baseRotation = (((page?.rotate || 0) + userRotation) % 360 + 360) % 360;
-
-          const baseViewport = page.getViewport({ scale: 1, rotation: baseRotation });
-          setPageDims(prev => ({ ...prev, [targetPage]: { width: baseViewport.width, height: baseViewport.height } }));
-
-          const attempts = [
-            { scale: baseRenderScale, label: "" },
-            { scale: Math.max(1.6, baseRenderScale * 0.62), label: " (modalità leggera)" }
-          ];
-
-          let lastError: any = null;
-          for (let i = 0; i < attempts.length; i += 1) {
-            const { scale, label } = attempts[i];
-            const attemptLabel = attempts.length > 1 ? ` (tentativo ${i + 1}/${attempts.length})` : "";
-            updatePageStatus(targetPage, { loading: `Rendering pagina PDF${attemptLabel}${label}...` });
-
-            try {
-              pdfTimeout = false;
-              const viewport = page.getViewport({ scale, rotation: baseRotation });
-
-              canvas = document.createElement('canvas');
-              canvas.width = viewport.width;
-              canvas.height = viewport.height;
-
-              const context = canvas.getContext('2d', { alpha: false });
-              if (context) {
-                context.fillStyle = 'white';
-                context.fillRect(0, 0, canvas.width, canvas.height);
-              }
-
-              const renderStartedAt = performance.now();
-              const renderTask = page.render({ canvasContext: context as any, viewport });
-              await withTimeout(renderTask.promise, PAGE_RENDER_TIMEOUT_MS, () => {
-                pdfTimeout = true;
-                try { renderTask.cancel(); } catch { }
-              });
-              propsRef.current.appendPageConsole(
-                targetPage,
-                `Render completato (${Math.round(performance.now() - renderStartedAt)}ms) - ${Math.round(viewport.width)}x${Math.round(viewport.height)}`,
-                { scale }
-              );
-
-              const fullImageData = canvas.toDataURL('image/jpeg', jpegQuality);
-              imageData = fullImageData.split(',')[1];
-              propsRef.current.appendPageConsole(targetPage, `Immagine JPEG generata (base64 ~${Math.round(estimateBytesFromBase64(imageData) / 1024)}KB)`, {
-                quality: jpegQuality,
-                canvas: { width: canvas.width, height: canvas.height }
-              });
-
-              let sourceDataUrl = fullImageData;
-              try {
-                sourceDataUrl = await downscaleDataUrlToJpeg(fullImageData, { maxSide: PAGE_CACHE_MAX_EDGE, jpegQuality: PAGE_CACHE_JPEG_QUALITY });
-              } catch { }
-              setOriginalImages(prev => ({ ...prev, [targetPage]: sourceDataUrl }));
-              if (metadata?.name && currentProjectFileId) {
-                try { await propsRef.current.saveSourceForPage({ page: targetPage, sourceDataUrl }); } catch { }
-              }
-
-              break;
-            } catch (e: any) {
-              lastError = e;
-              if (canvas) {
-                canvas.width = 0;
-                canvas.height = 0;
-                canvas = null;
-              }
-              if (signal?.aborted) throw e;
-              if (!pdfTimeout || i === attempts.length - 1) throw e;
-            }
-          }
-
-          if (!imageData && lastError) throw lastError;
-        }
-      } else {
-        const fileName = metadata?.name;
-        const fileId = currentProjectFileId;
-        if (!fileId) return;
-        const sourceRel = pageImagesIndexRef.current?.sources?.[targetPage];
-        if (!sourceRel) {
-          updatePageStatus(targetPage, {
-            error: "Immagine pagina non disponibile: PDF originale mancante. Riapri il progetto e seleziona il PDF.",
-            loading: undefined,
-            processing: "Errore!"
-          });
-          return;
-        }
-
-        try {
-          updatePageStatus(targetPage, { loading: "Caricamento immagine originale..." });
-          imageData = await propsRef.current.readProjectImageBase64({ fileId, relPath: sourceRel });
-          if (!originalImagesRef.current?.[targetPage]) {
-            try {
-              const sourceDataUrl = await propsRef.current.readProjectImageDataUrl({ fileId, relPath: sourceRel });
-              setOriginalImages(prev => ({ ...prev, [targetPage]: sourceDataUrl }));
-            } catch {
-              setOriginalImages(prev => ({ ...prev, [targetPage]: buildJpegDataUrlFromBase64(imageData!) }));
-            }
-          }
-        } catch {
-          updatePageStatus(targetPage, {
-            error: "Errore caricamento immagine originale dal disco.",
-            loading: undefined,
-            processing: "Errore!"
-          });
-          return;
-        }
-        propsRef.current.appendPageConsole(targetPage, `Immagine caricata da cache progetto (base64 ~${Math.round(estimateBytesFromBase64(imageData) / 1024)}KB)`);
-      }
-
-      if (!imageData) throw new Error('Immagine non disponibile');
-      
-      updatePageStatus(targetPage, { loading: "Recupero contesto (pagine adiacenti)..." });
-
-      const prevContext = translationMapRef.current[targetPage - 1] || "";
-
-      const prevPageNumber = targetPage > 1 ? targetPage - 1 : undefined;
-      const nextPageNumber = targetPage + 1 <= (pdfDoc?.numPages || 0) ? targetPage + 1 : undefined;
-      const prevPageImageBase64 = prevPageNumber ? await propsRef.current.getContextImageBase64(prevPageNumber, 'bottom') : undefined;
-      const nextPageImageBase64 = nextPageNumber ? await propsRef.current.getContextImageBase64(nextPageNumber, 'top') : undefined;
-
-      updatePageStatus(targetPage, { loading: `In attesa di ${providerLabel}...` });
-      propsRef.current.appendPageConsole(targetPage, `Preparazione richiesta ${providerLabel} completata. Invio in corso...`);
-      
-      const result = await withTimeout(
-          translatePage(aiSettings, {
-            imageBase64: imageData,
-            pageNumber: targetPage,
-            sourceLanguage: docInputLanguage,
-            previousContext: prevContext,
-            prevPageImageBase64,
-            prevPageNumber,
-            nextPageImageBase64,
-            nextPageNumber,
-            extraInstruction // Use the instruction from retry if present
-          }, (progressText, partial) => {
-            const progressData: any = { sessionId, traceId, page: targetPage };
-            if (partial !== undefined) progressData.partialChars = partial.length;
-            propsRef.current.appendPageConsole(targetPage, progressText, progressData);
-            updatePageStatus(targetPage, { loading: progressText });
-            if (partial !== undefined) {
-              setPartialTranslations(prev => ({ ...prev, [targetPage]: partial }));
-            }
-          }, { signal }),
-          AI_TRANSLATION_TIMEOUT_MS,
-          () => { 
-            aiTimeout = true; 
-            // Forziamo l'abort della richiesta AI al timeout dell'app
-            try {
-              const ctrl = inFlightTranslationRef.current[targetPage];
-              if (ctrl) {
-                log.warning(`Timeout globale app (${AI_TRANSLATION_TIMEOUT_MS}ms) superato per pagina ${targetPage}. Forzo interruzione.`);
-                ctrl.abort();
-              }
-            } catch (e) { }
-          }
-        );
-
-      if (!result.text || result.text.trim().length === 0) throw new Error('Risposta vuota dal provider AI');
-
-      const normalizedText = result.text;
-      const modelLabel = aiSettings.provider === 'gemini' ? aiSettings.gemini.model : aiSettings.openai.model;
-      const savedAt = Date.now();
-      const metaUpdate = { model: modelLabel, savedAt };
-
-      setTranslationMap(prev => {
-        const next = { ...prev, [targetPage]: normalizedText };
-        translationMapRef.current = next;
-        if (metadata) {
-          // Optimized: only send the delta for this page to updateLibrary
-          Promise.resolve().then(() => propsRef.current.updateLibrary(metadata.name, {
-            ...(currentProjectFileId ? { fileId: currentProjectFileId } : {}),
-            translations: { [targetPage]: normalizedText },
-            translationsMeta: { [targetPage]: metaUpdate },
-            annotations: { [targetPage]: result.annotations || [] }
-          }));
-        }
-        return next;
-      });
-      
-      setTranslationsMeta(pm => ({ ...pm, [targetPage]: metaUpdate }));
-      setAnnotationMap(prev => ({ ...prev, [targetPage]: result.annotations || [] }));
-
-      void propsRef.current.verifyAndMaybeFixTranslation({
-        page: targetPage,
-        translatedText: normalizedText,
-        imageBase64: imageData,
-        prevContext,
-        prevPageImageBase64,
-        prevPageNumber,
-        nextPageImageBase64,
-        nextPageNumber,
-        signal // Pass the signal to allow cancellation of verification/retry
-      });
-
-      updatePageStatus(targetPage, null); // Pulisce lo stato al termine con successo
-      setPartialTranslations(prev => { const n = { ...prev }; delete n[targetPage]; return n; });
-      propsRef.current.appendPageConsole(targetPage, `Completata (tempo totale: ${Math.round(performance.now() - startedAt)}ms)`);
-    } catch (err: any) {
-      if (signal?.aborted && !aiTimeout && !pdfTimeout) return;
-      
-      let message = err?.message || "Errore sconosciuto";
-      if (pdfTimeout) {
-        message = `Timeout Rendering PDF (${Math.round(PAGE_RENDER_TIMEOUT_MS / 1000)}s) - Pagina ${targetPage}: la renderizzazione è troppo lenta o complessa. Prova a ritagliare/sostituire la pagina o riprova.`;
-      } else if (aiTimeout) {
-        message = `Timeout globale AI (${Math.round(AI_TRANSLATION_TIMEOUT_MS / 1000)}s) - Pagina ${targetPage}: ${providerLabel} non ha risposto in tempo.`;
-      } else if (err?.name === 'AbortError' || err?.code === 'ABORTED') {
-        message = `Pagina ${targetPage}: richiesta annullata o interrotta.`;
-      }
-
-      propsRef.current.appendPageConsole(targetPage, `ERRORE: ${message}`, err);
-      
-      updatePageStatus(targetPage, {
-        error: message,
-        loading: undefined,
-        processing: "Errore!"
-      });
-    } finally {
-      if (canvas) { 
-        canvas.width = 0; 
-        canvas.height = 0;
-        canvas = null; // Aiuto GC
-      }
     }
-  }, [pdfDoc, metadata, shouldSkipTranslation, sessionId, aiSettings, docInputLanguage, translationMapRef, pageReplacementsRef, pageRotationsRef, setOriginalImages, setPageDims, setAnnotationMap, setTranslationsMeta, updatePageStatus, currentProjectFileId]);
 
-  const { enqueueTranslation, queueStats, setQueueStats, abortAll, stopTranslation: stopQueueTranslation } = useTranslationQueue({
+    const services: TranslationExecutionServices = {
+      updateLibrary: propsRef.current.updateLibrary,
+      appendPageConsole: propsRef.current.appendPageConsole,
+      verifyAndMaybeFixTranslation: propsRef.current.verifyAndMaybeFixTranslation,
+      saveSourceForPage: propsRef.current.saveSourceForPage,
+      readProjectImageBase64: propsRef.current.readProjectImageBase64,
+      readProjectImageDataUrl: propsRef.current.readProjectImageDataUrl,
+      getContextImageBase64: propsRef.current.getContextImageBase64,
+      loadReplacementPdfDoc: propsRef.current.loadReplacementPdfDoc,
+      renderDocPageToJpeg: propsRef.current.renderDocPageToJpeg,
+      getLatestTranslationMap: () => translationMapRef.current
+    };
+
+    const context: TranslationExecutionContext = {
+      pdfDoc,
+      metadata,
+      currentProjectFileId,
+      aiSettings,
+      docInputLanguage,
+      sessionId,
+      verboseLogs: propsRef.current.verboseLogs,
+      isConsultationMode,
+      pageReplacements: pageReplacementsRef.current,
+      pageRotations: pageRotationsRef.current,
+      pageImagesIndex: pageImagesIndexRef.current,
+      translationMap: translationMapRef.current,
+      verificationMap: propsRef.current.verificationMapRef.current
+    };
+
+    const setters: TranslationExecutionStateSetters = {
+      updatePageStatus,
+      setTranslationMap,
+      setTranslationsMeta,
+      setAnnotationMap,
+      setPartialTranslations,
+      setOriginalImages,
+      setPageDims
+    };
+
+    await executePageTranslation(
+      targetPage,
+      services,
+      context,
+      setters,
+      signal,
+      extraInstruction,
+      translationModelOverride,
+      inFlightTranslationRef,
+      concurrencyControl
+    );
+  }, [
+    pdfDoc, metadata, currentProjectFileId, aiSettings, docInputLanguage, sessionId, isConsultationMode,
+    pageReplacementsRef, pageRotationsRef, pageImagesIndexRef, translationMapRef,
+    updatePageStatus, setTranslationMap, setTranslationsMeta, setAnnotationMap, setPartialTranslations, setOriginalImages, setPageDims
+  ]);
+
+  const {
+    enqueueTranslation,
+    enqueueMultipleTranslations,
+    queueStats,
+    setQueueStats,
+    abortAll,
+    setExtraInstruction,
+    resetQueue,
+    stopTranslation: stopQueueTranslation,
+    translationQueueRef,
+    activePagesRef
+  } = useTranslationQueue({
     processPage,
-    MAX_CONCURRENT_TRANSLATIONS: Math.max(1, Math.min(4, Number(aiSettings.translationConcurrency ?? 2) || 2)),
+    MAX_CONCURRENT_TRANSLATIONS: Math.max(1, Math.min(MAX_ALLOWED_CONCURRENCY, Number(aiSettings.translationConcurrency) || DEFAULT_CONCURRENT_TRANSLATIONS)),
     externalInFlightRef: inFlightTranslationRef,
     isPaused,
-    checkDependency: (page, queue, inFlight, queued) => {
+    projectId: currentProjectFileId,
+    checkDependency: (page, queue, inFlight, queued, isForced, active) => {
       // Se è la prima pagina, non ci sono dipendenze
       if (page <= 1) return true;
+
+      // Se è forzato (Avvia subito), ignoriamo le dipendenze
+      if (isForced) return true;
+
+      // Se l'utente ha disabilitato la continuità sequenziale,
+      // ignoriamo le dipendenze della pagina precedente per sbloccare la velocità.
+      const sequentialContext = aiSettings.sequentialContext ?? true;
+      
+      // FIX: Se sequentialContext è true, DOBBIAMO rispettare la dipendenza,
+      // indipendentemente dalla concorrenza impostata.
+      if (!sequentialContext) {
+          return true;
+      }
+
       const prevPage = page - 1;
       // Se la pagina precedente è già tradotta nel map persistente, ok
       if (translationMapRef.current[prevPage]) return true;
-      // Se la pagina precedente è in lavorazione, aspettiamo per evitare lavoro simultaneo su pagine consecutive
-      if (inFlight[prevPage]) return false;
+      
+      // Se la pagina precedente è in lavorazione, ASPETTIAMO.
+      // Rimuoviamo l'ottimizzazione "Pipelining" che causava occupazione indebita di slot attivi.
+      // La pagina deve restare in coda (WAITING) finché la dipendenza non è completata.
+      if (inFlight[prevPage]) {
+          return false;
+      }
+
       // Se la pagina precedente è in coda, aspettiamo per mantenere l'ordine sequenziale e il contesto
-      if (queued.has(prevPage)) return false;
+      // TUTTAVIA: se la pagina attuale è FORCED, e la precedente è in coda ma NON è forced ed è PAUSA, 
+      // potremmo voler procedere comunque o forzare anche la precedente.
+      // Per ora, se è forced, permettiamo di saltare la dipendenza se la precedente è bloccata da pausa.
+      if (queued.has(prevPage)) {
+        // FIX: Check if the page is REALLY in the queue.
+        // queued (Set) might be out of sync with queue (Array) in rare race conditions (Zombie Page).
+        // If it's in the Set but not in the Array, it's a "Zombie" (already processed but not cleared).
+        if (queue.includes(prevPage)) {
+             return false;
+        }
+        // If we are here, prevPage is in 'queued' Set but NOT in 'queue' Array.
+        // Treat it as DONE (Zombie) and allow pipelining.
+        log.warn(`[QUEUE] Zombie dependency detected: Page ${prevPage} is in queued Set but not in Queue Array. Ignoring dependency.`);
+      }
       // Se non è né tradotta, né in volo, né in coda, procediamo (caso di traduzione singola sparsa)
       return true;
     }
   });
 
   const retranslatePage = useCallback((page: number) => {
+    if (isConsultationMode) return;
+
+    // Prevent double-click / accidental re-trigger
+    const currentStatus = pageStatusRef.current[page];
+    if (currentStatus?.loading || currentStatus?.processing) {
+        log.info(`[UI] Ignorata richiesta di ritraduzione per pagina ${page}: operazione già in corso.`);
+        return;
+    }
+
     stopQueueTranslation(page);
 
-    updatePageStatus(page, { error: false, loading: undefined, processing: "In coda per ritraduzione…" });
+    // Feedback immediato: pulizia log e stato
+    setGeminiLogs(prev => { const n = { ...prev }; delete n[page]; return n; });
+    setPartialTranslations(prev => { const n = { ...prev }; delete n[page]; return n; });
+
+    updatePageStatus(page, { error: false, loading: undefined, processing: "Riconnessione a Gemini..." });
 
     if (translationMapRef.current?.[page]) {
       const nextRef = { ...translationMapRef.current };
@@ -515,21 +323,51 @@ export const useAppTranslation = ({
     setTranslationMap(prev => {
       const next = { ...prev };
       delete next[page];
-      if (metadata) {
-        Promise.resolve().then(() => updateLibrary(metadata.name, { ...(currentProjectFileId ? { fileId: currentProjectFileId } : {}), translations: next }));
+      if (currentProjectFileId) {
+        const fileId = currentProjectFileId;
+        Promise.resolve().then(() => updateLibrary(fileId, { fileId, translations: next }));
       }
       return next;
     });
     enqueueTranslation(page, { priority: 'front', force: true, extraInstruction: ' ' });
-  }, [enqueueTranslation, metadata, updateLibrary, stopQueueTranslation, updatePageStatus, currentProjectFileId]);
+  }, [enqueueTranslation, updateLibrary, stopQueueTranslation, updatePageStatus, currentProjectFileId]);
 
   const stopTranslation = useCallback((page: number) => {
     stopQueueTranslation(page);
-    
+
     updatePageStatus(page, null);
     setPartialTranslations(prev => { const n = { ...prev }; delete n[page]; return n; });
     appendPageConsole(page, "Traduzione interrotta manualmente.");
   }, [appendPageConsole, stopQueueTranslation, updatePageStatus]);
+
+  const stopAllTranslations = useCallback((clear = false) => {
+    const activeList = Array.from(activePagesRef.current);
+    abortAll(clear);
+    activeList.forEach((page) => {
+      updatePageStatus(page, null);
+      setPartialTranslations(prev => { const n = { ...prev }; delete n[page]; return n; });
+      appendPageConsole(page, "Traduzione interrotta manualmente.");
+    });
+  }, [abortAll, activePagesRef, appendPageConsole, updatePageStatus]);
+
+  const pauseAllTranslations = useCallback(() => {
+    const activeList = Array.from(activePagesRef.current);
+    abortAll(false);
+    activeList.forEach((page) => {
+      const partial = partialTranslationsRef.current?.[page];
+      if (partial && partial.trim().length > 0) {
+        const MAX_CHARS = 4000;
+        const tail = partial.length > MAX_CHARS ? partial.slice(-MAX_CHARS) : partial;
+        setExtraInstruction(
+          page,
+          `Continua la traduzione ESATTAMENTE dal testo già prodotto qui sotto, senza riscriverlo e senza duplicare contenuti. Completa solo la parte mancante fino a fine pagina.\n\nTESTO GIÀ PRODOTTO (NON RIPETERE):\n<<<\n${tail}\n>>>\n`
+        );
+      }
+
+      updatePageStatus(page, { loading: undefined, processing: 'In pausa' });
+      appendPageConsole(page, "Traduzione messa in pausa.");
+    });
+  }, [abortAll, activePagesRef, appendPageConsole, setExtraInstruction, updatePageStatus]);
 
   return {
     translationMap,
@@ -547,13 +385,19 @@ export const useAppTranslation = ({
     inFlightTranslationRef,
     pageTraceRef,
     enqueueTranslation,
+    enqueueMultipleTranslations,
     queueStats,
     setQueueStats,
     abortAll,
+    pauseAllTranslations,
+    stopAllTranslations,
+    resetQueue,
     retranslatePage,
     stopTranslation,
-    updatePageStatus,
-    shouldSkipTranslation,
-    saveSourceForPage
-  };
-};
+     updatePageStatus,
+     shouldSkipTranslation,
+     saveSourceForPage,
+     getQueue: () => [...translationQueueRef.current],
+     activePagesRef
+   };
+ };

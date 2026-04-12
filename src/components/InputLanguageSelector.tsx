@@ -16,26 +16,26 @@ export const InputLanguageSelector: React.FC<InputLanguageSelectorProps> = ({
   onChange,
   placeholder = 'es. inglese, francese, latino...',
   suggestions = [
-    'inglese', 'francese', 'spagnolo', 'tedesco', 
-    'portoghese', 'russo', 'cinese', 'giapponese', 
+    'inglese', 'francese', 'spagnolo', 'tedesco',
+    'portoghese', 'russo', 'cinese', 'giapponese',
     'olandese', 'polacco', 'greco', 'rumeno',
-    'bulgaro', 'ucraino', 'arabo', 'coreano', 
-    'turco', 'ceco', 'svedese', 'danese', 
+    'bulgaro', 'ucraino', 'arabo', 'coreano',
+    'turco', 'ceco', 'svedese', 'danese',
     'finlandese', 'norvegese', 'ungherese', 'latino'
   ],
   label,
   disabled,
   className
 }) => {
-  const filteredSuggestions = suggestions.filter(s => 
-    s.toLowerCase().includes(value.toLowerCase()) && 
+  const filteredSuggestions = suggestions.filter(s =>
+    s.toLowerCase().includes(value.toLowerCase()) &&
     s.toLowerCase() !== value.toLowerCase()
   );
 
   return (
     <div className={className || 'space-y-3'}>
       {label && (
-        <label className="text-xs font-bold text-gray-400 uppercase tracking-wider block">
+        <label className="text-[10px] font-bold text-txt-muted uppercase tracking-wider block">
           {label}
         </label>
       )}
@@ -47,12 +47,12 @@ export const InputLanguageSelector: React.FC<InputLanguageSelectorProps> = ({
           placeholder={placeholder}
           disabled={disabled}
           autoFocus
-          className="w-full bg-black/30 border border-white/10 rounded-xl py-3.5 pl-4 pr-10 text-sm text-white focus:outline-none focus:border-blue-500/50 focus:ring-1 focus:ring-blue-500/20 transition-all placeholder:text-gray-600"
+          className="w-full bg-surface-4/50 border border-border-muted rounded-xl py-3 pl-4 pr-10 text-[13px] text-txt-primary focus:outline-none focus:border-accent/40 focus:ring-1 focus:ring-accent/20 transition-all duration-200 placeholder:text-txt-faint"
         />
         {value && !disabled && (
           <button
             onClick={() => onChange('')}
-            className="absolute right-3 top-1/2 -translate-y-1/2 p-1 text-gray-500 hover:text-white transition-colors"
+            className="absolute right-3 top-1/2 -translate-y-1/2 p-1 text-txt-muted hover:text-txt-primary transition-colors"
             title="Cancella"
           >
             <X size={14} />
@@ -67,7 +67,7 @@ export const InputLanguageSelector: React.FC<InputLanguageSelectorProps> = ({
               key={s}
               type="button"
               onClick={() => onChange(s)}
-              className="px-2.5 py-1 rounded-lg text-[10px] font-medium border border-white/5 bg-white/5 text-gray-500 hover:bg-white/10 hover:text-gray-300 transition-all"
+              className="px-2.5 py-1 rounded-lg text-[10px] font-medium border border-border-muted bg-surface-3/50 text-txt-muted hover:bg-surface-4 hover:text-txt-secondary hover:border-border transition-all duration-200"
             >
               {s}
             </button>
@@ -77,4 +77,3 @@ export const InputLanguageSelector: React.FC<InputLanguageSelectorProps> = ({
     </div>
   );
 };
-

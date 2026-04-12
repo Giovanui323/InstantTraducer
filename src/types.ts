@@ -1,49 +1,111 @@
 
-export type AIProvider = 'gemini' | 'openai';
+export type AIProvider = 'gemini' | 'openai' | 'claude' | 'groq';
 
-export type GeminiModel = 
-  | 'gemini-3-pro-preview'
+export type GeminiModel =
+  | 'gemini-3.1-pro-preview'
+  | 'gemini-3.1-flash-preview'
   | 'gemini-3-flash-preview'
-  | 'gemini-2.0-flash' 
-  | 'gemini-2.0-flash-lite-preview-02-05' 
-  | 'gemini-2.0-pro-exp-02-05'
-  | 'gemini-1.5-flash' 
-  | 'gemini-1.5-pro' 
-  | 'gemini-2.0-flash-thinking-exp-01-21'
+  | 'gemini-3.1-flash-lite-preview'
+  | 'gemini-2.5-pro'
+  | 'gemini-2.5-flash'
+  | 'gemini-2.5-flash-lite'
   | string;
+
+export type GroqModel =
+  | 'llama-3.1-8b-instant'
+  | 'llama-3.3-70b-versatile'
+  | 'meta-llama/llama-4-scout-17b-16e-instruct'
+  | 'openai/gpt-oss-120b'
+  | 'openai/gpt-oss-20b'
+  | 'qwen/qwen3-32b'
+  | string;
+
+export interface CustomModel {
+  id: string;
+  name: string;
+  provider: AIProvider;
+  category?: 'flash' | 'pro' | 'standard' | 'mini';
+  pricing?: { input: number; output: number };
+  features?: string;
+  isCustom: boolean;
+}
 
 // Missing OpenAI related types added to fix import errors
 export type OpenAIModel = string;
 export type ReasoningEffort = 'none' | 'low' | 'medium' | 'high';
 export type VerbosityLevel = 'low' | 'medium' | 'high';
+export type SettingsSection = 'aiRoles' | 'apiKeys' | 'testAi' | 'translationLogic' | 'costs' | 'libraryTrash' | 'exportApp' | 'logsDiagnostic';
+
+export type ClaudeModel =
+  | 'claude-3-7-sonnet-20250219'
+  | 'claude-3-5-sonnet-20241022'
+  | 'claude-3-5-sonnet-20240620'
+  | 'claude-3-5-haiku-20241022'
+  | 'claude-3-opus-20240229'
+  | 'claude-3-haiku-20240307'
+  | string;
 
 export interface AISettings {
-  provider: AIProvider;
+  provider: AIProvider; // Modello primario di traduzione (ereditato per compatibilità)
   translationConcurrency?: number;
+  sequentialContext?: boolean;
   qualityCheck?: {
     enabled: boolean;
-    verifierModel: GeminiModel;
+    verifierProvider: AIProvider;
+    verifierModel: string;
     maxAutoRetries: number;
+  };
+  metadataExtraction?: {
+    enabled: boolean;
+    provider: AIProvider;
+    model: string;
   };
   gemini: {
     apiKey: string;
     model: GeminiModel;
+    thinkingLevel?: 'minimal' | 'low' | 'medium' | 'high';
   };
+  fastMode?: boolean;
+  proVerification?: boolean;
+  forceFixTranslationModel?: string;
   openai: {
     apiKey: string;
     model: OpenAIModel;
     reasoningEffort: ReasoningEffort;
     verbosity: VerbosityLevel;
   };
+  claude: {
+    apiKey: string;
+    model: ClaudeModel;
+  };
+  groq: {
+    apiKey: string;
+    model: GroqModel;
+  };
+  customModels?: CustomModel[];
   legalContext?: boolean;
-  inputLanguageDefault?: string;
+  customPrompt?: string;
+  customVerificationPrompt?: string;
+  customMetadataPrompt?: string;
   verboseLogs?: boolean;
+  consultationMode?: boolean;
   customProjectsPath?: string;
   exportOptions?: {
     splitSpreadIntoTwoPages: boolean;
     insertBlankPages: boolean;
     outputFormat: 'A4' | 'original';
     previewInReader?: boolean;
+  };
+  modelTests?: {
+    lastTestAt?: number;
+    results: Array<{
+      role: 'primary' | 'secondary' | 'metadata';
+      provider: AIProvider;
+      model: string;
+      status: 'success' | 'error' | 'testing';
+      message?: string;
+      timestamp: number;
+    }>;
   };
 }
 
@@ -89,6 +151,7 @@ export interface PageReplacement {
 export interface TranslationResult {
   text: string;
   annotations: PageAnnotation[];
+  modelUsed?: string;
 }
 
 export interface LogEntry {
@@ -96,6 +159,11 @@ export interface LogEntry {
   timestamp: number;
   message: string;
   type: 'info' | 'success' | 'warning' | 'error';
+}
+
+export interface Group {
+  id: string;
+  name: string;
 }
 
 export interface ReadingProgress {
@@ -106,6 +174,7 @@ export interface ReadingProgress {
   totalPages?: number;
   timestamp: number;
   inputLanguage?: string;
+  projectMetrics?: { totalCost: number; translatedPages: number; verifiedPages: number; totalCalls?: number; lastUpdated?: number };
   translations?: Record<number, string>;
   annotations?: Record<number, PageAnnotation[]>;
   verifications?: Record<number, PageVerification>;
@@ -141,8 +210,18 @@ export interface UserHighlight {
   start: number;
   end: number;
   text: string;
+  quoteExact?: string;
+  quotePrefix?: string;
+  quoteSuffix?: string;
   color?: string;
   createdAt: number;
+  // Coordinate PDF per zoom-indipendenza (Adobe-like)
+  pdfRect?: {
+    x: number;
+    y: number;
+    width: number;
+    height: number;
+  };
 }
 
 export interface UserNote {
@@ -165,5 +244,6 @@ export interface TrashItem {
   fileId: string;
   fileName: string;
   deletedAt: number;
+  daysLeft?: number;
   originalPath: string;
 }

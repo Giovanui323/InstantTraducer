@@ -1,86 +1,125 @@
 import React, { useState, useEffect, useRef, useCallback, useMemo } from 'react';
 import * as pdfjsLib from 'pdfjs-dist';
-import { log } from './services/logger';
-import pkg from '../package.json';
 
-// Types
-import { AISettings, PDFMetadata, PageReplacement, PageAnnotation } from './types';
-import { extractPdfMetadata } from './services/geminiService';
-
-// Components
-import { Header } from './components/Header';
-import { ControlsBar } from './components/ControlsBar';
-import { ReaderView } from './components/ReaderView';
-import {
-  PAGE_RENDER_TIMEOUT_MS,
-} from './constants';
-import { ImageCropModal } from './components/ImageCropModal.tsx';
-import { SettingsModal } from './components/SettingsModal';
-import { UploadLanguagePrompt } from './components/UploadLanguagePrompt';
-import { RenameModal } from './components/RenameModal';
-import { PageSelectionModal } from './components/PageSelectionModal';
-import { CreateGroupModal } from './components/CreateGroupModal';
-import { GroupManagementModal } from './components/GroupManagementModal';
-import { SimpleConfirmModal } from './components/SimpleConfirmModal';
-import { HomeView } from './components/HomeView';
-import { SimplifiedReader } from './components/SimplifiedReader';
-import { MainToolbar } from './components/MainToolbar';
-import { PagePreviewStrip } from './components/PagePreviewStrip';
-
-// Hooks
-import { useAiSettings } from './hooks/useAiSettings';
-import { useInputLanguageDefault } from './hooks/useInputLanguageDefault';
-import { useSearch } from './hooks/useSearch';
-import { useProjectManagement } from './hooks/useProjectManagement';
-import { useAppLibrary } from './hooks/useAppLibrary';
-import { useAppTranslation } from './hooks/useAppTranslation';
-import { useAppQuality } from './hooks/useAppQuality';
-import { useAppAnnotations } from './hooks/useAppAnnotations';
+// Services
+import { log, extractMetadataAdapter, translationManager, TranslationCompletionNotifier } from './services';
+import { setActiveProject } from './services/usageTracker';
 
 // Utils
 import {
+  storage,
+  setStorageLogging,
   loadReplacementPdfDoc,
   renderDocPageToJpeg,
+  renderDocPageToObjectURL,
   renderPageToJpegBase64,
-  renderPageOntoCanvas
-} from './utils/pdfUtils';
-import { withTimeout } from './utils/async';
-import { safeCopy } from './utils/clipboard';
+  renderPageOntoCanvas,
+  renderPageToObjectURL,
+  renderDocPageSafe,
+  renderDocPageWithFallback,
+  isPageCorrupted,
+  withTimeout,
+  safeCopy,
+  pdfRenderAnalytics,
+  cropBase64,
+  revokeObjectURL,
+  base64ToBlob,
+  blobToObjectURL,
+  sanitizeMetadataField,
+  ensureJsonExtension,
+  requireUuidV4FileId
+} from './utils';
+
+// Types
+import { AISettings, PDFMetadata, PageReplacement, PageAnnotation, PageVerification } from './types';
+
+// Components
 import {
-  buildJpegDataUrlFromBase64,
-  rotateJpegBase64,
-  cropBase64
-} from './utils/imageUtils';
-import { sanitizeMetadataField } from './utils/textUtils';
-import { projectFileIdFromName, computeFileId } from './utils/fileUtils';
+  Header,
+  ControlsBar,
+  ReaderView,
+  ImageCropModal,
+  SettingsModal,
+  UploadLanguagePrompt,
+  RenameModal,
+  PageSelectionModal,
+  CreateGroupModal,
+  GroupManagementModal,
+  SimpleConfirmModal,
+  PdfRenderErrorNotification,
+  ToastNotification,
+  ToastType,
+  HomeView,
+  MainToolbar,
+  PagePreviewStrip,
+  GlobalLoadingOverlay
+} from './components';
+
+import { PAGE_RENDER_TIMEOUT_MS } from './constants';
+
+// Contexts
+import { LibraryContext } from './contexts';
+
+// Hooks
+import {
+  useAiSettings,
+  useInputLanguageDefault,
+  useSearch,
+  useProjectManagement,
+  useAppLibrary,
+  useAppTranslation,
+  useAppQuality,
+  useAppAnnotations
+} from './hooks';
 
 // Configuriamo il worker localmente (copiato in public/pdfjs durante il build/dev)
 pdfjsLib.GlobalWorkerOptions.workerSrc = './pdfjs/pdf.worker.min.mjs';
 
+const MAX_IMAGE_CACHE_SIZE = 50; // Numero massimo di immagini (originali/ritagli) da tenere in RAM
+
 const App: React.FC = () => {
   const sessionId = useMemo(() => Math.random().toString(36).slice(2, 10), []);
-  const verboseLogs = useMemo(() => localStorage.getItem('verbose_logs') !== '0', []);
+
+  // --- App Version State ---
+  const [appVersion, setAppVersion] = useState<string>('4.1.12');
+
+  useEffect(() => {
+    if (window.electronAPI?.getAppVersion) {
+      window.electronAPI.getAppVersion().then(setAppVersion).catch(err => log.error('Failed to get app version', err));
+    }
+  }, []);
+
+  // CRITICAL: Unique key to force full remount of Reader/Translation engine on project switch
+  // This ensures "two completely distinct processes" as requested.
+  const [projectKey, setProjectKey] = useState(0);
 
   // --- Core State ---
-  const [pdfDoc, setPdfDoc] = useState<any>(null);
+  const [pdfDoc, setPdfDoc] = useState<pdfjsLib.PDFDocumentProxy | null>(null);
 
   // --- Refs ---
   const originalImagesRef = useRef<Record<number, string>>({});
   const croppedImagesRef = useRef<Record<number, string>>({});
   const pageRotationsRef = useRef<Record<number, number>>({});
   const pageReplacementsRef = useRef<Record<number, PageReplacement>>({});
+  const lastRenderedRef = useRef<Record<string, { page: number, scale: number, timestamp: number }>>({});
   const pageImagesIndexRef = useRef<{ sources: Record<number, string>; crops: Record<number, string> }>({ sources: {}, crops: {} });
   const annotationMapRef = useRef<Record<number, PageAnnotation[]>>({});
+  const verificationMapRef = useRef<Record<number, PageVerification>>({}); // Shared ref for verification map to break circular dependency
   const renderTaskRef = useRef<{ [key: string]: any }>({});
   const latestPageRef = useRef<{ [key: string]: number }>({});
+  const metadataRef = useRef<PDFMetadata | null>(null);
+  const pageDimsRef = useRef<Record<number, { width: number, height: number }>>({});
   const pageTraceRef = useRef<Record<number, { t0: number; seq: number; traceId: string }>>({});
   const cachedReplacementDocsRef = useRef<Record<string, any>>({});
+  const loadingImagesRef = useRef<Set<number>>(new Set());
   const batchRunIdRef = useRef<number>(0);
   const isPausedRef = useRef<boolean>(false);
   const pendingAutoStartRef = useRef<{ page: number; language: string } | null>(null);
   const autoTranslateTimerRef = useRef<number | null>(null);
   const draggableRef = useRef<HTMLDivElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const openingProjectRef = useRef<string | null>(null);
+  const prevIsBatchProcessingRef = useRef(false);
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const canvasRefRight = useRef<HTMLCanvasElement>(null);
   const canvasRef3 = useRef<HTMLCanvasElement>(null);
@@ -88,20 +127,35 @@ const App: React.FC = () => {
   const canvasRef5 = useRef<HTMLCanvasElement>(null);
   const allRefs = [canvasRef, canvasRefRight, canvasRef3, canvasRef4, canvasRef5];
 
+  const shouldDestroyPdfDocRef = useRef(true);
+  const isClosingSessionRef = useRef(false);
+  const isProjectLoadedRef = useRef(false);
+
   // --- PDF Cleanup ---
   useEffect(() => {
     return () => {
-      if (pdfDoc) {
+      if (pdfDoc && shouldDestroyPdfDocRef.current) {
         log.step("Cleanup: Distruzione documento PDF precedente...");
         try {
           pdfDoc.destroy().catch(() => { });
         } catch { }
       }
+      shouldDestroyPdfDocRef.current = true; // Reset for next time
+
       // Pulizia anche dei PDF sostitutivi in cache
       Object.values(cachedReplacementDocsRef.current).forEach(doc => {
         try { (doc as any).destroy().catch(() => { }); } catch { }
       });
       cachedReplacementDocsRef.current = {};
+
+      // RAM Optimization: Revoca tutti i Blob URL per liberare memoria
+      [originalImages, croppedImages, previewThumbnails].forEach(map => {
+        Object.values(map).forEach(url => {
+          if (url && url.startsWith('blob:')) {
+            revokeObjectURL(url);
+          }
+        });
+      });
     };
   }, [pdfDoc]);
 
@@ -126,51 +180,174 @@ const App: React.FC = () => {
     cachedReplacementDocsRef.current[filePath] = doc;
     return doc;
   }, []);
-  const [currentPage, setCurrentPage] = useState<number>(1);
+  const { aiSettings, isSettingsOpen, setIsSettingsOpen, saveSettings, isApiConfigured, settingsLoaded } = useAiSettings();
+
+  // --- Activity Detection ---
+  const [isFocused, setIsFocused] = useState(true);
+  const isFocusedRef = useRef(true);
+  useEffect(() => { isFocusedRef.current = isFocused; }, [isFocused]);
+
+  const [isIdle, setIsIdle] = useState(false);
+  const isIdleRef = useRef(false);
+  useEffect(() => { isIdleRef.current = isIdle; }, [isIdle]);
+  const lastActivityRef = useRef(Date.now());
+
+  useEffect(() => {
+    const handleFocus = () => setIsFocused(true);
+    const handleBlur = () => setIsFocused(false);
+    const handleActivity = () => {
+      lastActivityRef.current = Date.now();
+      if (isIdle) setIsIdle(false);
+    };
+
+    window.addEventListener('focus', handleFocus);
+    window.addEventListener('blur', handleBlur);
+    window.addEventListener('mousemove', handleActivity);
+    window.addEventListener('keydown', handleActivity);
+    window.addEventListener('mousedown', handleActivity);
+    window.addEventListener('touchstart', handleActivity);
+
+    const idleCheckInterval = setInterval(() => {
+      const now = Date.now();
+      // Se non c'è attività da più di 1 minuto, consideriamo l'app idle
+      if (now - lastActivityRef.current > 60000) {
+        if (!isIdle) setIsIdle(true);
+      }
+    }, 10000);
+
+    return () => {
+      window.removeEventListener('focus', handleFocus);
+      window.removeEventListener('blur', handleBlur);
+      window.removeEventListener('mousemove', handleActivity);
+      window.removeEventListener('keydown', handleActivity);
+      window.removeEventListener('mousedown', handleActivity);
+      window.removeEventListener('touchstart', handleActivity);
+      clearInterval(idleCheckInterval);
+    };
+  }, [isIdle]);
+
+  // Sincronizza il logging dello storage e del logger globale con l'impostazione verboseLogs
+  useEffect(() => {
+    if (!settingsLoaded) return;
+    const isEnabled = !!aiSettings.verboseLogs;
+    setStorageLogging(isEnabled);
+    // Sync for logger.ts (defaults to 'false' if disabled)
+    // Avoid redundant writes
+    const current = storage.getItem('verbose_logs');
+    const target = isEnabled ? 'true' : 'false';
+    if (current !== target) {
+      storage.setItem('verbose_logs', target);
+    }
+  }, [aiSettings.verboseLogs, settingsLoaded]);
+
+  // FIX: Auto-start translation when settings become available (race condition fix)
+  // If the user opens a project BEFORE settings are loaded, isPaused will be TRUE.
+  // Once settings load and we confirm API is configured, we can unpause automatically.
+  useEffect(() => {
+    if (settingsLoaded && isApiConfigured && isPaused && !isManualMode && !isConsultationMode) {
+      // Only unpause if we have a valid session that was likely waiting for API
+      if (pdfDoc || (metadata && metadata.totalPages > 0)) {
+        log.info("Impostazioni caricate e API configurata: avvio automatico traduzione (recovery da race condition).");
+        setIsPaused(false);
+      }
+    }
+  }, [settingsLoaded, isApiConfigured]);
+
+  const isConsultationMode = Boolean(aiSettings.consultationMode);
+  const { defaultLang, setDefaultLang } = useInputLanguageDefault();
+
+  const currentPageRef = useRef<number>(1);
+  const [currentPage, _setCurrentPage] = useState<number>(1);
+  const lastSavedPageRef = useRef<number>(1);
+  const setCurrentPage = useCallback((page: number | ((p: number) => number)) => {
+    _setCurrentPage(prev => {
+      const next = typeof page === 'function' ? page(prev) : page;
+      currentPageRef.current = next;
+      return next;
+    });
+  }, []);
+
   const [scale, setScale] = useState<number>(() => {
-    const raw = localStorage.getItem('page_scale');
+    const raw = storage.getItem('page_scale');
     const s = raw ? Number(raw) : 1.2;
     return Math.max(0.3, Math.min(5, Number.isFinite(s) ? s : 1.2));
   });
+  const hasEffectiveScaleRef = useRef(false);
+  const [renderScaleTarget, setRenderScaleTarget] = useState<number>(scale);
   const [renderScale, setRenderScale] = useState<number>(scale);
   const [metadata, setMetadata] = useState<PDFMetadata | null>(null);
   const [isBatchProcessing, setIsBatchProcessing] = useState<boolean>(false);
   const [isPaused, setIsPaused] = useState<boolean>(false);
+  const [isAutodetecting, setIsAutodetecting] = useState<boolean>(false);
+  const [autodetectLogs, setAutodetectLogs] = useState<string>('');
   const [isManualMode, setIsManualMode] = useState<boolean>(false);
+
+  // Forced consultation mode
+  useEffect(() => {
+    if (isConsultationMode) {
+      setIsPaused(true);
+      setIsManualMode(true);
+    }
+  }, [isConsultationMode]);
   const [isTranslatedMode, setIsTranslatedMode] = useState<boolean>(false);
   const [isHomeView, setIsHomeView] = useState(true);
   const [isReaderMode, setIsReaderMode] = useState(false);
   const [isSaving, setIsSaving] = useState(false);
-  const [viewMode, setViewMode] = useState<'single' | 'side-by-side'>('single');
+  const [isClosingSession, setIsClosingSession] = useState(false);
+  const [viewMode, setViewMode] = useState<'auto' | 'single' | 'spread'>(() => {
+    const rawNew = storage.getItem('reader_page_split_mode_v1');
+    const rawOld = storage.getItem('reader_view_mode_v1');
+    const raw = rawNew ?? rawOld;
+    if (raw === 'auto' || raw === 'single' || raw === 'spread') return raw;
+    if (raw === 'side-by-side') return 'spread';
+    return 'auto';
+  });
   const [showPreviewStrip, setShowPreviewStrip] = useState<boolean>(false);
   const [previewThumbnails, setPreviewThumbnails] = useState<Record<number, string>>({});
   const [previewPage, setPreviewPage] = useState<number | null>(null);
   const [copiedPage, setCopiedPage] = useState<number | null>(null);
   const [notesPage, setNotesPage] = useState<number | null>(null);
   const [brightness, setBrightness] = useState<number>(() => {
-    const raw = localStorage.getItem('reader_brightness');
+    const raw = storage.getItem('reader_brightness');
     const n = raw ? Number(raw) : 1;
     return Math.max(0.4, Math.min(1.6, Number.isFinite(n) ? n : 1));
   });
   const [temperature, setTemperature] = useState<number>(() => {
-    const raw = localStorage.getItem('reader_temperature');
+    const raw = storage.getItem('reader_temperature');
     const n = raw ? Number(raw) : 0;
     return Math.max(-100, Math.min(100, Number.isFinite(n) ? n : 0));
   });
   const [translationTheme, setTranslationTheme] = useState<'light' | 'sepia' | 'dark'>(() => {
-    const raw = localStorage.getItem('translation_theme');
+    const raw = storage.getItem('translation_theme');
     return (raw === 'light' || raw === 'sepia' || raw === 'dark') ? raw : 'dark';
   });
+  const [columnLayout, setColumnLayout] = useState<number>(() => {
+    const raw = storage.getItem('reader_column_layout');
+    const n = raw ? Number(raw) : 0.5;
+    return Math.max(0.2, Math.min(0.8, Number.isFinite(n) ? n : 0.5));
+  });
 
-  const { aiSettings, isSettingsOpen, setIsSettingsOpen, saveSettings, isApiConfigured } = useAiSettings();
-
-  const { defaultLang, setDefaultLang } = useInputLanguageDefault();
   const [docInputLanguage, setDocInputLanguage] = useState<string>(defaultLang || 'tedesco');
 
   useEffect(() => {
-    const t = window.setTimeout(() => setRenderScale(scale), 140);
-    return () => window.clearTimeout(t);
+    storage.setItem('reader_page_split_mode_v1', viewMode);
+    storage.setItem('reader_view_mode_v1', viewMode);
+  }, [viewMode]);
+
+  useEffect(() => {
+    if (hasEffectiveScaleRef.current) return;
+    setRenderScaleTarget(scale);
   }, [scale]);
+
+  const handleEffectiveScaleChange = useCallback((s: number) => {
+    hasEffectiveScaleRef.current = true;
+    setRenderScaleTarget(s);
+  }, []);
+
+  useEffect(() => {
+    const t = window.setTimeout(() => setRenderScale(renderScaleTarget), 140);
+    return () => window.clearTimeout(t);
+  }, [renderScaleTarget]);
 
   // Sync docInputLanguage with defaultLang when not in a session
   useEffect(() => {
@@ -179,8 +356,46 @@ const App: React.FC = () => {
     }
   }, [defaultLang, pdfDoc, metadata]);
 
-  const [originalImages, setOriginalImages] = useState<Record<number, string>>({});
-  const [croppedImages, setCroppedImages] = useState<Record<number, string>>({});
+  const [originalImages, _setOriginalImages] = useState<Record<number, string>>({});
+  const [croppedImages, _setCroppedImages] = useState<Record<number, string>>({});
+
+  const pruneImageCache = useCallback((cache: Record<number, string>, current: number, max: number) => {
+    const keys = Object.keys(cache).map(Number);
+    if (keys.length <= max) return cache;
+
+    // Ordiniamo per distanza dalla pagina corrente (le più lontane per prime)
+    keys.sort((a, b) => Math.abs(b - current) - Math.abs(a - current));
+
+    const nextCache = { ...cache };
+    const toRemove = keys.slice(0, keys.length - max);
+    toRemove.forEach(k => {
+      const url = nextCache[k];
+      if (url && url.startsWith('blob:')) {
+        revokeObjectURL(url);
+      }
+      delete nextCache[k];
+    });
+    return nextCache;
+  }, []);
+
+  const setOriginalImages = useCallback((update: any) => {
+    _setOriginalImages((prev: Record<number, string>) => {
+      const next = typeof update === 'function' ? update(prev) : update;
+      const pruned = pruneImageCache(next, currentPageRef.current, MAX_IMAGE_CACHE_SIZE);
+      originalImagesRef.current = pruned;
+      return pruned;
+    });
+  }, [pruneImageCache]);
+
+  const setCroppedImages = useCallback((update: any) => {
+    _setCroppedImages((prev: Record<number, string>) => {
+      const next = typeof update === 'function' ? update(prev) : update;
+      const pruned = pruneImageCache(next, currentPageRef.current, MAX_IMAGE_CACHE_SIZE);
+      croppedImagesRef.current = pruned;
+      return pruned;
+    });
+  }, [pruneImageCache]);
+
   const [pageRotations, setPageRotations] = useState<Record<number, number>>({});
   const [pageReplacements, setPageReplacements] = useState<Record<number, PageReplacement>>({});
   const [pageImagesIndex, setPageImagesIndex] = useState<{ sources: Record<number, string>; crops: Record<number, string> }>({ sources: {}, crops: {} });
@@ -199,6 +414,7 @@ const App: React.FC = () => {
   const [createGroupModalOpen, setCreateGroupModalOpen] = useState(false);
   const [activeGroupModalBookId, setActiveGroupModalBookId] = useState<string | null>(null);
   const [renameState, setRenameState] = useState<null | any>(null);
+  const [editLanguageTarget, setEditLanguageTarget] = useState<{ fileId: string, currentLang: string } | null>(null);
   const [pageSelectionModal, setPageSelectionModal] = useState<any>({ isOpen: false, total: 0, targetPage: 0 });
   const [pendingReplacement, setPendingReplacement] = useState<any>(null);
   const [confirmModal, setConfirmModal] = useState<{
@@ -214,12 +430,18 @@ const App: React.FC = () => {
     onConfirm: () => { }
   });
 
+  const [toast, setToast] = useState<{ message: string; type: ToastType } | null>(null);
+
   const showConfirm = useCallback((title: string, message: string, onConfirm: () => void, type: 'danger' | 'info' | 'alert' = 'info') => {
     setConfirmModal({ isOpen: true, title, message, onConfirm, type });
   }, []);
 
+  const showToast = useCallback((message: string, type: ToastType = 'info') => {
+    setToast({ message, type });
+  }, []);
+
   // --- Hook Initialization ---
-  const library = useAppLibrary(metadata, docInputLanguage, showConfirm, setIsSaving);
+  const library = useAppLibrary(metadata, docInputLanguage, showConfirm, setIsSaving, showToast);
 
   // --- Pre-scansione dimensioni pagine ---
   useEffect(() => {
@@ -229,7 +451,8 @@ const App: React.FC = () => {
     const scanDims = async () => {
       try {
         const totalPages = pdfDoc.numPages;
-        const currentDims = pageDims;
+        // FIX: Use ref to get the absolute latest state (including just-loaded data)
+        const currentDims = pageDimsRef.current || {};
         const newDims: Record<number, { width: number, height: number }> = {};
 
         // Priority: current page and neighbors
@@ -251,7 +474,7 @@ const App: React.FC = () => {
 
         if (changed && isMounted) {
           setPageDims(prev => ({ ...prev, ...newDims }));
-          void library.updateLibrary(metadata.name, { pageDims: { ...currentDims, ...newDims } });
+          // REMOVED: void library.updateLibrary(metadata.name, { pageDims: { ...currentDims, ...newDims } }, 'BACKGROUND', true);
         }
 
         // Background scanning for other pages in small batches
@@ -262,11 +485,14 @@ const App: React.FC = () => {
           }
 
           if (others.length > 0) {
-            // Wait a bit before background scanning
-            await new Promise(r => setTimeout(r, 2000));
+            // Wait longer before background scanning (5s instead of 2s)
+            await new Promise(r => setTimeout(r, 5000));
             if (!isMounted) return;
 
-            const batchSize = 10;
+            const batchSize = 5;
+            let accumulatedDims: Record<number, { width: number, height: number }> = {};
+            let pagesSinceLastSave = 0;
+
             for (let i = 0; i < others.length; i += batchSize) {
               const batch = others.slice(i, i + batchSize);
               const batchDims: Record<number, { width: number, height: number }> = {};
@@ -282,13 +508,40 @@ const App: React.FC = () => {
               }
 
               if (isMounted && Object.keys(batchDims).length > 0) {
+                // Removed background pause logic to allow batch processing when unfocused
+
+                // Optimization: update state but debounce library save
+                let hasNewData = false;
+                Object.assign(accumulatedDims, batchDims);
+                pagesSinceLastSave += batch.length;
+
                 setPageDims(prev => {
-                  const merged = { ...prev, ...batchDims };
-                  void library.updateLibrary(metadata!.name, { pageDims: merged });
+                  const merged = { ...prev };
+                  for (const [p, dims] of Object.entries(batchDims)) {
+                    const pNum = Number(p);
+                    if (!prev[pNum] || prev[pNum].width !== dims.width || prev[pNum].height !== dims.height) {
+                      merged[pNum] = dims;
+                      hasNewData = true;
+                    }
+                  }
+
+                  // Salva su disco solo ogni 30 pagine scansionate per minimizzare IO
+                  /*
+                  if (hasNewData && (pagesSinceLastSave >= 30 || i + batchSize >= others.length)) {
+                    log.info(`Salvataggio consolidato dimensioni PDF (${pagesSinceLastSave} pagine)`);
+                    if (library.currentProjectFileId) {
+                      const fileId = library.currentProjectFileId;
+                      void library.updateLibrary(fileId, { fileId, pageDims: merged }, 'BACKGROUND', true);
+                    }
+                    pagesSinceLastSave = 0;
+                    accumulatedDims = {};
+                  }
+                  */
                   return merged;
                 });
-                // Throttle background batches
-                await new Promise(r => setTimeout(r, 1000));
+
+                // Throttle background batches drastically (15s instead of 3s)
+                await new Promise(r => setTimeout(r, 15000));
               }
             }
           }
@@ -300,7 +553,47 @@ const App: React.FC = () => {
 
     void scanDims();
     return () => { isMounted = false; };
-  }, [pdfDoc, metadata?.name, currentPage]);
+  }, [pdfDoc, metadata?.name, currentPage, isFocused, isIdle]);
+
+  useEffect(() => {
+    if (window.electronAPI?.onCloseRequest) {
+      window.electronAPI.onCloseRequest(async () => {
+        log.step("Ricevuta richiesta di chiusura: stop background e flush salvataggi...");
+        try {
+          // FIX: Save last page state before closing (Silent Save)
+          if (library.currentProjectFileId && currentPageRef.current) {
+            const payload: any = { lastPage: currentPageRef.current };
+            // Add pageDims if available to save them once at the end
+            if (pageDimsRef.current && Object.keys(pageDimsRef.current).length > 0) {
+              payload.pageDims = pageDimsRef.current;
+            }
+            const fileId = library.currentProjectFileId;
+            await library.updateLibrary(fileId, { fileId, ...payload }, 'CRITICAL', true);
+          }
+
+          // Stop background job first to prevent new saves and release resources
+          await translationManager.stopBackground();
+
+          // Force timeout after 8 seconds to ensure we reply to main process (which waits 10s)
+          // FIX: Check return value to report actual status
+          const success = await Promise.race([
+            library.flushSaves(),
+            new Promise<boolean>((_, reject) => setTimeout(() => reject(new Error('Flush timeout')), 8000))
+          ]);
+
+          if (!success) {
+            log.error("CRITICAL: Flush salvataggi fallito. Alcuni dati potrebbero non essere stati scritti su disco.");
+          } else {
+            log.success("Flush salvataggi completato con successo.");
+          }
+        } catch (e) {
+          log.error("Errore (o timeout) durante flush in chiusura", e);
+        } finally {
+          window.electronAPI.readyToClose();
+        }
+      });
+    }
+  }, [library.flushSaves]);
 
   // Sync refs
   useEffect(() => { originalImagesRef.current = originalImages; }, [originalImages]);
@@ -310,79 +603,214 @@ const App: React.FC = () => {
   useEffect(() => { pageImagesIndexRef.current = pageImagesIndex; }, [pageImagesIndex]);
   useEffect(() => { annotationMapRef.current = annotationMap; }, [annotationMap]);
   useEffect(() => { isPausedRef.current = isPaused; }, [isPaused]);
+  useEffect(() => { metadataRef.current = metadata; }, [metadata]);
+  useEffect(() => { 
+    const projectName = metadata?.name || metadata?.title || 'Progetto Senza Nome';
+    const projectId = library.currentProjectFileId || projectName;
+    setActiveProject(projectId, projectName); 
+  }, [library.currentProjectFileId, metadata?.name, metadata?.title]);
+  useEffect(() => { pageDimsRef.current = pageDims; }, [pageDims]);
 
+  // Save reading progress (lastPage) automatically
+  // FIX: Removed aggressive saving on every page turn. 
+  // Last page is now saved only on session exit (Home) or app close.
+  /*
   useEffect(() => {
-     if (!isTranslatedMode && !isReaderMode) return;
-     if (!currentPage || (!library.currentProjectFileId && !pdfDoc)) return;
- 
-     const ensureImageLoaded = async (p: number) => {
-       if (originalImages[p]) return;
-       
-       // 1. Prova a caricare dal disco se disponibile nell'indice
-       const relPath = pageImagesIndex.sources[p];
-       if (relPath && library.currentProjectFileId) {
-         try {
-           const res = await window.electronAPI.readProjectImageBase64({ 
-             fileId: library.currentProjectFileId!, 
-             relPath 
-           });
-           if (res.success && res.base64) {
-             const dataUrl = buildJpegDataUrlFromBase64(res.base64);
-             setOriginalImages(prev => ({ ...prev, [p]: dataUrl }));
-             return;
-           }
-         } catch (e) {
-           console.error(`Failed to load original image from disk for page ${p}`, e);
-         }
-       }
-
-       // 2. Se non è sul disco ma abbiamo il PDF, caricalo/generalo al volo
-       if (pdfDoc) {
-         try {
-           const base64 = await renderPageToJpegBase64(p, {
-             pdfDoc,
-             pageReplacementsRef,
-             pageRotationsRef,
-             loadReplacementPdfDoc: getCachedReplacementPdfDoc
-           }, { scale: 1.5, jpegQuality: 0.7 });
-           
-           const dataUrl = buildJpegDataUrlFromBase64(base64);
-           setOriginalImages(prev => ({ ...prev, [p]: dataUrl }));
-         } catch (e) {
-           console.error(`Failed to render original image from PDF for page ${p}`, e);
-         }
-       }
-     };
- 
-     void ensureImageLoaded(currentPage);
-   }, [currentPage, isTranslatedMode, isReaderMode, pageImagesIndex.sources, library.currentProjectFileId, originalImages, pdfDoc, getCachedReplacementPdfDoc]);
-
-  // --- Image Cache Cleanup (RAM Optimization) ---
-  useEffect(() => {
-    if (!currentPage) return;
-    const windowSize = 30; // Manteniamo 30 pagine di buffer per lato
-
-    const cleanup = (prev: Record<number, string>) => {
-      const keys = Object.keys(prev).map(Number);
-      if (keys.length <= windowSize * 2) return prev;
-
-      const next = { ...prev };
-      let cleaned = 0;
-      for (const p of keys) {
-        if (Math.abs(p - currentPage) > windowSize) {
-          delete next[p];
-          cleaned++;
-        }
+    if (!isHomeView && metadata?.name && library.currentProjectFileId) {
+      // Evitiamo chiamate ridondanti se la pagina non è cambiata rispetto all'ultimo salvataggio
+      if (currentPage !== lastSavedPageRef.current) {
+        lastSavedPageRef.current = currentPage;
+        void library.updateLibrary(metadata.name, { lastPage: currentPage });
       }
-      return cleaned > 0 ? next : prev;
+    }
+  }, [currentPage, isHomeView, metadata?.name, library.currentProjectFileId, library.updateLibrary]);
+  */
+
+  // Track corrupted pages and failed renders
+  const [corruptedPages, setCorruptedPages] = useState<Set<number>>(new Set());
+  const [failedRenders, setFailedRenders] = useState<Record<number, number>>({});
+  const [internalSevereError, setInternalSevereError] = useState(false);
+
+  useEffect(() => {
+    let isMounted = true;
+    if (!isTranslatedMode && !isReaderMode) return;
+    if (!currentPage || (!library.currentProjectFileId && !pdfDoc)) return;
+
+    const renderPageWithRetry = async (p: number, attempt: number = 1, opts?: { quality?: number, scale?: number }): Promise<string> => {
+      if (!isMounted) throw new Error('cancelled');
+      if (!pdfDoc) throw new Error('PDF document not available');
+
+      const startTime = Date.now();
+
+      // Determine target quality/scale for this attempt
+      // Attempt 1: Use requested quality (default 1.0) and scale (default 1.5)
+      // Retry 1 (Attempt 2): Drop to 0.5 quality, 1.0 scale
+      // Retry 2 (Attempt 3): Drop to 0.3 quality, 0.7 scale
+      const baseQuality = opts?.quality ?? 1.0;
+      const baseScale = opts?.scale ?? 1.5;
+
+      const quality = attempt === 1 ? baseQuality : attempt === 2 ? 0.5 : 0.3;
+      const scale = attempt === 1 ? baseScale : attempt === 2 ? 1.0 : 0.7;
+
+      pdfRenderAnalytics.recordRenderAttempt(p, quality);
+
+      // First check if page might be corrupted
+      try {
+        const isCorrupted = await isPageCorrupted(pdfDoc, p);
+        if (isCorrupted) {
+          log.warning(`Page ${p} detected as potentially corrupted, using enhanced fallback rendering`);
+          pdfRenderAnalytics.recordCorruptedPage(p);
+
+          const result = await renderDocPageSafe(pdfDoc, p, {
+            scale: scale, // Use the calculated scale
+            jpegQuality: quality, // Use the calculated quality
+            maxRetries: 5
+          });
+
+          if (result.success && result.dataUrl) {
+            const renderTime = Date.now() - startTime;
+            pdfRenderAnalytics.recordRenderSuccess(p, renderTime, result.attempts);
+            return result.dataUrl;
+          } else {
+            throw new Error(`Failed to render corrupted page ${p}: ${result.error?.message}`);
+          }
+        }
+      } catch (corruptionError: any) {
+        log.warning(`Corruption detection failed for page ${p}, proceeding with normal rendering: ${corruptionError?.message}`);
+      }
+
+      const maxAttempts = 3;
+      const retryDelay = Math.min(1000 * Math.pow(2, attempt - 1), 5000); // Exponential backoff, max 5s
+      const timeoutMs = Math.max(20000, PAGE_RENDER_TIMEOUT_MS - (attempt - 1) * 15000);
+
+      try {
+        if (!isMounted) throw new Error('cancelled');
+        log.info(`Attempting to render page ${p}, attempt ${attempt}/${maxAttempts} (quality: ${quality}, scale: ${scale}, timeout: ${timeoutMs}ms)`);
+
+        const result = await renderPageToObjectURL(p, {
+          pdfDoc,
+          pageReplacementsRef,
+          pageRotationsRef,
+          loadReplacementPdfDoc: getCachedReplacementPdfDoc
+        }, { scale, jpegQuality: quality, timeoutMs });
+
+        const renderTime = Date.now() - startTime;
+        pdfRenderAnalytics.recordRenderSuccess(p, renderTime, attempt);
+        return result;
+      } catch (e: any) {
+        if (!isMounted) throw new Error('cancelled');
+        const isRenderingCancelled = e?.name === 'RenderingCancelledException' || e?.message?.includes('cancelled');
+        const isTimeout = e?.message?.includes('timeout') || e?.message?.includes('Timeout');
+
+        if (isRenderingCancelled && attempt < maxAttempts) {
+          // If cancelled (e.g. PDF destroyed), checking isMounted helps, but if we are still mounted
+          // and just cancelled for another reason, we might want to retry? 
+          // Actually if PDF is destroyed, we shouldn't retry.
+          // But here we rely on isMounted check mostly.
+          if (!isMounted) throw e;
+
+          log.warning(`Page ${p} render cancelled, retrying in ${retryDelay}ms (attempt ${attempt}/${maxAttempts})`);
+          await new Promise(resolve => setTimeout(resolve, retryDelay));
+          return renderPageWithRetry(p, attempt + 1, opts);
+        }
+
+        if (isTimeout && attempt < maxAttempts) {
+          log.warning(`Page ${p} render timeout, retrying with lower quality (attempt ${attempt}/${maxAttempts})`);
+          await new Promise(resolve => setTimeout(resolve, retryDelay));
+          return renderPageWithRetry(p, attempt + 1, opts);
+        }
+
+        // If it's not a recoverable error or we've exhausted retries, throw
+        throw e;
+      }
     };
 
-    setOriginalImages(cleanup);
-    setCroppedImages(cleanup);
-    setPreviewThumbnails(cleanup);
-  }, [currentPage]);
+    const ensureImageLoaded = async (p: number) => {
+      if (!isMounted) return;
+      if (originalImages[p] || corruptedPages.has(p)) return;
+      if (loadingImagesRef.current.has(p)) return;
 
-  const annotations = useAppAnnotations(metadata, library.updateLibrary);
+      loadingImagesRef.current.add(p);
+      try {
+        // 1. Prova a caricare dal disco se disponibile nell'indice
+        const relPath = pageImagesIndex.sources[p];
+        if (relPath && library.currentProjectFileId) {
+          try {
+            const res = await window.electronAPI.readProjectImageBase64({
+              fileId: library.currentProjectFileId!,
+              relPath
+            });
+            if (res.success && res.base64) {
+              const blob = base64ToBlob(res.base64);
+              const objectUrl = blobToObjectURL(blob);
+              if (isMounted) {
+                setOriginalImages((prev: Record<number, string>) => ({ ...prev, [p]: objectUrl }));
+              }
+              return;
+            }
+          } catch (e) {
+            log.error(`Failed to load original image from disk for page ${p}`, e);
+          }
+        }
+
+        if (!isMounted) return;
+
+        // 2. Se non è sul disco ma abbiamo il PDF, caricalo/generalo al volo
+        if (pdfDoc) {
+          try {
+            const objectUrl = await renderPageWithRetry(p);
+            if (isMounted) {
+              setOriginalImages((prev: Record<number, string>) => ({ ...prev, [p]: objectUrl }));
+
+              // Clear failed renders tracking on success
+              setFailedRenders(prev => {
+                const updated = { ...prev };
+                delete updated[p];
+                return updated;
+              });
+
+              log.success(`Successfully rendered page ${p}`);
+            }
+          } catch (e: any) {
+            if (!isMounted) return;
+            const errorMsg = e?.message || e?.toString() || JSON.stringify(e);
+            const isRenderingCancelled = e?.name === 'RenderingCancelledException' || e?.message?.includes('cancelled');
+
+            if (isRenderingCancelled) {
+              log.info(`Render cancelled for page ${p} (likely due to cleanup or navigation)`);
+              return;
+            }
+
+            // Track failed renders
+            setFailedRenders(prev => ({ ...prev, [p]: (prev[p] || 0) + 1 }));
+
+            // Record failure in analytics
+            pdfRenderAnalytics.recordRenderFailure(p, e, (failedRenders[p] || 0) + 1);
+
+            // Mark as corrupted after 3 failed attempts
+            if ((failedRenders[p] || 0) >= 2) {
+              setCorruptedPages(prev => new Set([...prev, p]));
+              pdfRenderAnalytics.recordCorruptedPage(p);
+              log.error(`Page ${p} marked as corrupted after multiple failed attempts`, errorMsg);
+            } else {
+              log.error(`Failed to render original image from PDF for page ${p}`, errorMsg);
+            }
+
+            // Provide user feedback for rendering failures
+            // Store error information for potential user notification
+            log.warning(`Page ${p} may contain corrupted elements. Consider checking the PDF file.`);
+          }
+        }
+      } finally {
+        loadingImagesRef.current.delete(p);
+      }
+    };
+
+    void ensureImageLoaded(currentPage);
+    return () => { isMounted = false; };
+  }, [currentPage, isTranslatedMode, isReaderMode, pageImagesIndex.sources, library.currentProjectFileId, originalImages, pdfDoc, getCachedReplacementPdfDoc, setOriginalImages]);
+
+  const annotations = useAppAnnotations(metadata, library.currentProjectFileId, library.updateLibrary);
 
   // Forward references to bridge hooks
   const translationMapRef = useRef<Record<number, string>>({});
@@ -391,10 +819,9 @@ const App: React.FC = () => {
   const ensurePreviewThumbnail = useCallback(async (p: number) => {
     if (previewThumbnails[p] || !pdfDoc) return previewThumbnails[p] || null;
     try {
-      const result = await renderDocPageToJpeg(pdfDoc, p, { scale: 0.2 });
-      const dataUrl = typeof result === 'string' ? result : result.dataUrl;
-      setPreviewThumbnails((prev: Record<number, string>) => ({ ...prev, [p]: dataUrl }));
-      return dataUrl;
+      const objectUrl = await renderDocPageToObjectURL(pdfDoc, p, { scale: 0.2 });
+      setPreviewThumbnails((prev: Record<number, string>) => ({ ...prev, [p]: objectUrl }));
+      return objectUrl;
     } catch { return null; }
   }, [pdfDoc, previewThumbnails]);
 
@@ -413,10 +840,18 @@ const App: React.FC = () => {
       const next = (existing ? `${existing}\n` : "") + line;
       return { ...prev, [page]: next.length > 12000 ? next.slice(-12000) : next };
     });
-    if (verboseLogs) {
+    if (aiSettings.verboseLogs) {
       log.step(`TRACE p${page} #${trace?.seq ?? '---'} +${elapsedMs ?? '---'}ms`, { sessionId, traceId: trace?.traceId, msg, data });
     }
-  }, [sessionId, verboseLogs]);
+  }, [sessionId, aiSettings.verboseLogs]);
+
+  const appendAutodetectLog = useCallback((msg: string) => {
+    const line = `${new Date().toLocaleTimeString()}  ${msg}`;
+    setAutodetectLogs((prev) => {
+      const next = (prev ? `${prev}\n` : "") + line;
+      return next.length > 6000 ? next.slice(-6000) : next;
+    });
+  }, []);
 
   const getContextImageBase64 = useCallback(async (pageNum: number, section: 'top' | 'bottom' | 'full' = 'full'): Promise<string | undefined> => {
     let fullBase64: string | undefined = undefined;
@@ -433,7 +868,8 @@ const App: React.FC = () => {
     if (!fullBase64 && !pdfDoc) {
       const fileName = metadata?.name;
       if (fileName) {
-        const fileId = library.currentProjectFileId || projectFileIdFromName(fileName);
+        const fileId = library.currentProjectFileId;
+        if (!fileId) return undefined;
         const cropRel = pageImagesIndexRef.current?.crops?.[pageNum];
         const sourceRel = pageImagesIndexRef.current?.sources?.[pageNum];
         const rel = cropRel || sourceRel;
@@ -447,27 +883,26 @@ const App: React.FC = () => {
     }
 
     if (!fullBase64 && pdfDoc) {
-      const thumbCanvas = document.createElement('canvas');
       try {
         const replacement = pageReplacementsRef.current?.[pageNum];
         const doc = replacement?.filePath ? await getCachedReplacementPdfDoc(replacement.filePath) : pdfDoc;
         const srcPage = replacement?.filePath ? replacement.sourcePage : pageNum;
-        const p: any = await withTimeout<any>(doc.getPage(srcPage), PAGE_RENDER_TIMEOUT_MS);
-        const uRot = pageRotationsRef.current?.[pageNum] || 0;
-        const rot = (((p?.rotate || 0) + uRot) % 360 + 360) % 360;
-        const viewport = p.getViewport({ scale: 1.3, rotation: rot });
-        thumbCanvas.width = viewport.width;
-        thumbCanvas.height = viewport.height;
-        const ctx = thumbCanvas.getContext('2d', { alpha: false });
-        if (ctx) {
-          ctx.fillStyle = 'white';
-          ctx.fillRect(0, 0, thumbCanvas.width, thumbCanvas.height);
+
+        const result = await renderDocPageWithFallback(doc, srcPage, {
+          scale: 1.3,
+          jpegQuality: 0.62,
+          extraRotation: pageRotationsRef.current?.[pageNum] || 0,
+          timeoutMs: PAGE_RENDER_TIMEOUT_MS,
+          maxRetries: 2
+        });
+
+        if (result.success) {
+          if (result.base64) fullBase64 = result.base64;
+          else if (result.dataUrl) fullBase64 = result.dataUrl.split(',')[1];
         }
-        const task = p.render({ canvasContext: ctx as any, viewport });
-        await withTimeout(task.promise, PAGE_RENDER_TIMEOUT_MS);
-        const dataUrl = thumbCanvas.toDataURL('image/jpeg', 0.62);
-        fullBase64 = dataUrl.split(',')[1];
-      } catch { fullBase64 = undefined; } finally { thumbCanvas.width = 0; thumbCanvas.height = 0; }
+      } catch (e) {
+        fullBase64 = undefined;
+      }
     }
 
     if (!fullBase64) return undefined;
@@ -488,8 +923,16 @@ const App: React.FC = () => {
     readProjectImageBase64: async (args: any) => window.electronAPI.readProjectImageBase64(args).then((r: any) => r.base64),
     readProjectImageDataUrl: async (args: any) => window.electronAPI.readProjectImage(args).then((r: any) => r.dataUrl),
     saveSourceForPage: async (args: any) => {
-      let buffer: Uint8Array | undefined;
+      const targetId = library.currentProjectFileId || '';
+      if (library.isBlocked(targetId)) {
+        log.warning(`Blocked saveSourceForPage for ${targetId} (blacklisted/transitioning)`);
+        return;
+      }
+
       const dataUrl = args.sourceDataUrl || args.dataUrl;
+      if (!dataUrl && !args.buffer) return;
+
+      let buffer: Uint8Array | undefined;
       if (dataUrl && dataUrl.startsWith('data:')) {
         const base64 = dataUrl.split(',')[1];
         const binary = atob(base64);
@@ -507,26 +950,47 @@ const App: React.FC = () => {
       setPageImagesIndex((prev: any) => ({ ...prev, sources: { ...prev.sources, [args.page]: res.relPath } }));
     },
     getContextImageBase64,
-    sessionId, verboseLogs,
+    sessionId, verboseLogs: !!aiSettings.verboseLogs,
     isPaused,
+    isConsultationMode,
     currentProjectFileId: library.currentProjectFileId,
     loadReplacementPdfDoc: getCachedReplacementPdfDoc,
-    renderDocPageToJpeg
+    renderDocPageToJpeg,
+    verificationMapRef // Pass the shared ref
   });
+
+  // KILL SWITCH: Log only, but do not kill adjacent pages to isolate errors.
+  const onSevereError = useCallback((failedPage: number) => {
+    setInternalSevereError(true);
+    log.info(`[SAFETY] Errore critico sulla pagina ${failedPage}. (Isolamento attivo: Nessuna interruzione a catena sulle altre pagine).`);
+  }, []);
 
   const quality = useAppQuality({
     pdfDoc, metadata, aiSettings, docInputLanguage,
+    currentProjectFileId: library.currentProjectFileId,
     translationMapRef,
-    originalImagesRef, pageRotationsRef, pageReplacementsRef,
     setTranslationMap: translation.setTranslationMap,
     setAnnotationMap,
-    setTranslationsMeta: translation.setTranslationsMeta,
     updatePageStatus: translation.updatePageStatus,
     updateLibrary: library.updateLibrary,
     appendPageConsole,
     loadReplacementPdfDoc: getCachedReplacementPdfDoc,
     getContextImageBase64,
-    enqueueTranslation: (page: number, options?: any) => translation.enqueueTranslation(page, options)
+    enqueueTranslation: (page: number, options?: any) => translation.enqueueTranslation(page, options),
+    clearLogs: (page: number) => {
+      setGeminiLogs(prev => {
+        const next = { ...prev };
+        delete next[page];
+        return next;
+      });
+      translation.setPartialTranslations(prev => {
+        const next = { ...prev };
+        delete next[page];
+        return next;
+      });
+    },
+    isConsultationMode,
+    onSevereError // Pass the kill switch callback
   });
 
   // Link quality hook with translation state
@@ -534,10 +998,31 @@ const App: React.FC = () => {
     translationMapRef.current = translation.translationMap;
   }, [translation.translationMap]);
 
+  // Sync verification map to shared ref
+  useEffect(() => {
+    verificationMapRef.current = quality.verificationMap;
+  }, [quality.verificationMap]);
+
+  const combinedQueueStats = useMemo(() => ({
+    active: translation.queueStats.active + quality.verificationQueueStats.active,
+    queued: translation.queueStats.queued + quality.verificationQueueStats.queued,
+    details: [
+      ...Array.from(translation.activePagesRef.current).map(p => ({ page: p, type: 'translation' as const, status: 'active' as const })),
+      ...translation.getQueue().map(p => ({ page: p, type: 'translation' as const, status: 'queued' as const })),
+      ...Array.from(quality.activeVerificationsRef.current).map(p => ({ page: p, type: 'verification' as const, status: 'active' as const })),
+      ...quality.getQueue().map(p => ({ page: p, type: 'verification' as const, status: 'queued' as const }))
+    ]
+  }), [translation.queueStats, quality.verificationQueueStats, translation.getQueue, quality.getQueue]);
+
   const { redoAllPages, retryAllErrors, scanAndRenameOldFiles, scanAndRenameAllFiles } = useProjectManagement({
     pdfDoc, setPdfDoc, metadata, setMetadata, recentBooks: library.recentBooks, setRecentBooks: library.setRecentBooks,
-    aiSettings, refreshLibrary: library.refreshLibrary,
+    currentProjectFileId: library.currentProjectFileId,
+    aiSettings, refreshLibrary: library.refreshLibrary, flushSaves: library.flushSaves,
     updateLibrary: library.updateLibrary,
+    cancelPendingSaves: library.cancelPendingSaves,
+    blockSave: library.blockSave,
+    unblockSave: library.unblockSave,
+    registerRename: library.registerRename,
     setTranslationMap: translation.setTranslationMap,
     setAnnotationMap,
     setVerificationMap: quality.setVerificationMap,
@@ -552,13 +1037,16 @@ const App: React.FC = () => {
     pageStatusRef: translation.pageStatusRef,
     verificationMapRef: quality.verificationMapRef,
     showConfirm,
+    isConsultationMode,
     ensurePageImageSaved: async (page: number) => {
       try {
         if (!metadata?.name) return null;
         let rel = pageImagesIndexRef.current?.sources?.[page];
-        if (rel) return await window.electronAPI.readProjectImageBase64({ fileId: library.currentProjectFileId || projectFileIdFromName(metadata.name), relPath: rel }).then((r: any) => r.base64);
+        const fileId = library.currentProjectFileId;
+        if (rel && fileId) return await window.electronAPI.readProjectImageBase64({ fileId, relPath: rel }).then((r: any) => r.base64);
 
         // If not found, render and save
+        if (!pdfDoc) return null;
         log.info(`Generating missing source image for page ${page} for rename scan...`);
         const base64 = await renderPageToJpegBase64(page, {
           pdfDoc,
@@ -575,6 +1063,37 @@ const App: React.FC = () => {
     }
   });
 
+  const handleConsolidate = useCallback(async (silent = false) => {
+    if (!window.electronAPI?.consolidateLibrary) return;
+    try {
+      if (!silent) log.step("Avvio consolidamento libreria...");
+      const res = await window.electronAPI.consolidateLibrary();
+      if (res.success) {
+        if (!silent) {
+          log.success(`Consolidamento completato. File recuperati: ${res.fixedCount}, Ancora mancanti: ${res.missingCount}`);
+          showConfirm("Consolidamento Completato", `Operazione riuscita!\n\nFile recuperati: ${res.fixedCount}\nFile ancora mancanti: ${res.missingCount}\n\n(I file ancora mancanti sono quelli che non sono stati trovati nemmeno nel percorso originale sul disco)`, () => { }, 'alert');
+          library.refreshLibrary();
+        } else if (res.fixedCount > 0) {
+          // All'avvio silenzioso, ricarichiamo solo se abbiamo effettivamente recuperato qualcosa
+          log.info(`Consolidamento silenzioso completato: ${res.fixedCount} file recuperati.`);
+          library.refreshLibrary();
+        }
+      } else {
+        if (!silent) log.error("Consolidamento fallito:", res.error);
+      }
+    } catch (e) {
+      if (!silent) log.error("Errore durante il consolidamento", e);
+    }
+  }, [library.refreshLibrary, showConfirm]);
+
+  useEffect(() => {
+    // Consolidamento automatico silenzioso all'avvio
+    const timer = setTimeout(() => {
+      handleConsolidate(true);
+    }, 2000);
+    return () => clearTimeout(timer);
+  }, [handleConsolidate]);
+
   const search = useSearch(translation.translationMap, currentPage, (p: number) => setCurrentPage(p), metadata?.name);
 
   const normalizePageNumber = useCallback((pageValue: unknown, totalValue?: unknown) => {
@@ -588,8 +1107,29 @@ const App: React.FC = () => {
     return page;
   }, []);
 
-  const resetProjectState = useCallback(() => {
-    try { translation.abortAll(); } catch { }
+  const resetProjectState = useCallback((reason: string = "Unknown") => {
+    log.step(`[App] Resetting project state. Reason: ${reason}`);
+
+    // TASK 39: STOP RENDERING IMMEDIATELY
+    // Clearing the PDF document stops the rendering loop in useEffect
+    setPdfDoc(null);
+    setInternalSevereError(false);
+    isProjectLoadedRef.current = false;
+
+    try { translation.abortAll(true); } catch { } // FORCE CLEAR queue and active tasks
+    try { quality.abortAllVerifications(); } catch { }
+    try { translation.resetQueue(); } catch { }
+    pendingAutoStartRef.current = null; // Evita ritraduzioni automatiche residue
+
+    // RAM Optimization: Revoca tutti i Blob URL prima di svuotare
+    [originalImages, croppedImages, previewThumbnails].forEach(map => {
+      Object.values(map).forEach(url => {
+        if (url && url.startsWith('blob:')) {
+          revokeObjectURL(url);
+        }
+      });
+    });
+
     translation.setTranslationMap({});
     translation.setTranslationsMeta({});
     translation.setPageStatus({});
@@ -629,24 +1169,123 @@ const App: React.FC = () => {
     setIsTranslatedMode(true);
   }, [search.setActiveResultId]);
 
+  const [isOpeningProject, setIsOpeningProject] = useState<string | null>(null);
+
   const handleOpenProject = useCallback(async (fileId: string) => {
+    let targetFileId = '';
     try {
-      if (!fileId || fileId === 'undefined') return;
-      library.setCurrentProjectFileId(fileId);
-      log.step(`Caricamento progetto dal disco (${fileId})...`);
+      targetFileId = requireUuidV4FileId(fileId);
+    } catch (e) {
+      showToast((e as any)?.message || 'ID progetto non valido (UUID).', 'error');
+      return;
+    }
+
+    // TASK 37: Redundancy Verification
+    // Prevent reloading the same project if it is already active
+    if (library.currentProjectFileId === targetFileId) {
+      log.info(`[App] Progetto ${targetFileId} già attivo. Ignoro ricaricamento.`);
+      return;
+    }
+
+    if (openingProjectRef.current === targetFileId) {
+      log.warn(`[App] Apertura progetto ${targetFileId} già in corso. Ignoro richiesta duplicata.`);
+      return;
+    }
+    // Global lock to prevent rapid switching race conditions
+    if (openingProjectRef.current && openingProjectRef.current !== targetFileId) {
+      log.warn(`[App] Cambio progetto troppo rapido. Ignoro ${targetFileId} mentre apro ${openingProjectRef.current}`);
+      return;
+    }
+
+    log.info(`[App] 🔄 Inizio cambio progetto: ${library.currentProjectFileId || 'Nessuno'} -> ${targetFileId}`);
+    const switchStartTime = performance.now();
+
+    openingProjectRef.current = targetFileId;
+    setIsOpeningProject(targetFileId);
+
+    try {
+      // 0. Ensure we save the CURRENT project state before doing anything else
+      // This prevents "translationsCount: 0" on the old project when it reloads
+      if (library.currentProjectFileId) {
+        log.info(`[App] 💾 Salvataggio stato progetto precedente (${library.currentProjectFileId})...`);
+      }
+      // TASK 38: Wait for flush to complete to avoid collision
+      await library.flushSaves(library.currentProjectFileId || undefined);
+
+      // BACKGROUND TRANSLATION HANDOFF
+      if (library.currentProjectFileId && library.currentProjectFileId !== targetFileId) {
+        const queue = translation.getQueue();
+        const isTranslating = translation.queueStats.active > 0 || queue.length > 0;
+
+        if (isTranslating && pdfDoc && metadata) {
+          const success = translationManager.requestBackground(
+            library.currentProjectFileId,
+            pdfDoc,
+            metadata,
+            aiSettings,
+            docInputLanguage,
+            translation.translationMapRef.current,
+            queue
+          );
+          if (success) {
+            shouldDestroyPdfDocRef.current = false;
+            log.info(`[App] Progetto ${metadata.name} spostato in background.`);
+          }
+        }
+      }
+
+      // Notify Manager about the new current file (stops background if it matches)
+      await translationManager.setCurrentFileId(targetFileId);
+
+      // CRITICAL FIX: Clean handoff to prevent "Ghost State" and ID mismatches
+      // 1. Block saves for the OLD project to prevent trailing debounces writing to the wrong file
+      if (library.currentProjectFileId) {
+        library.cancelPendingSaves(library.currentProjectFileId);
+        // TASK 38: Reduced timeout from 10s to 2s
+        library.blockSave(library.currentProjectFileId, 2000);
+      }
+
+      // 2. Reset local state immediately (clears logs, maps, stats) BEFORE switching ID
+      // This ensures the UI never renders "New ID" + "Old Data"
+
+      // CRITICAL FIX: Detach metadata first to stop effects in hooks (like useAppAnnotations)
+      // from trying to save empty state to the old project ID.
+      setMetadata(null);
+
+      resetProjectState(`Switching to ${targetFileId}`);
+      setIsBatchProcessing(false);
+      setIsPaused(true);
+
+      // 3. Now safe to switch the ID
+      library.setCurrentProjectFileId(targetFileId);
+      log.info(`[App] ✅ ID progetto attivato: ${targetFileId}`);
+
+      // Force React to teardown the old component tree and mount a fresh one
+      setProjectKey(prev => prev + 1);
+
+      // Ensure we can save to this NEW ID (in case it was previously blacklisted)
+      library.unblockSave(targetFileId);
+
+      pdfRenderAnalytics.reset();
+      log.step(`Caricamento dati JSON (${targetFileId})...`);
       if (!window.electronAPI) throw new Error('Contesto Electron non rilevato');
 
-      const data = await window.electronAPI.loadTranslation(fileId);
+      const data = await window.electronAPI.loadTranslation(targetFileId);
+
       if (!data) {
-        log.error('Dati progetto non trovati per:', fileId);
+        log.error('Dati progetto non trovati per:', targetFileId);
         return;
       }
+      log.info(`[App] Dati caricati: ${data.fileName} (${data.totalPages} pagine)`);
+
       setDocInputLanguage((data as any).inputLanguage || defaultLang || 'tedesco');
 
-      // Reset project-specific states to avoid pollution
-      setIsBatchProcessing(false);
-      setIsPaused(false);
-      resetProjectState();
+      // Impostiamo i metadati base dal JSON subito, prima di caricare il PDF
+      setMetadata({
+        name: data.fileName || fileId,
+        size: 0,
+        totalPages: (data.totalPages && data.totalPages > 0) ? data.totalPages : 1
+      });
 
       const loadedSources = (data.pageImages?.sources && typeof data.pageImages.sources === 'object') ? data.pageImages.sources : {};
       const loadedCrops = (data.pageImages?.crops && typeof data.pageImages.crops === 'object') ? data.pageImages.crops : {};
@@ -665,242 +1304,377 @@ const App: React.FC = () => {
       setPageDims(loadedDims);
 
       translation.setTranslationMap(data.translations || {});
+      // CRITICAL FIX: Sync translationMapRef immediately for hooks (like useAppQuality auto-resume)
+      translationMapRef.current = data.translations || {};
+
       translation.setTranslationsMeta(data.translationsMeta || {});
       annotations.setUserHighlights(data.userHighlights || {});
       annotations.setUserNotes(data.userNotes || {});
       quality.setVerificationMap(data.verifications || {});
       quality.setVerificationsMeta(data.verificationsMeta || {});
       setAnnotationMap(data.annotations || {});
-      setCurrentPage(normalizePageNumber((data as any).lastPage ?? 1, (data as any).totalPages));
 
-      setIsReaderMode(true);
-      setIsHomeView(false);
+      // MARK PROJECT AS FULLY LOADED
+      // This prevents the prefetch/auto-translate logic from running on partial state
+      // resolving the "Lost Progress" and "Massive Redundant Rendering" issues.
+      isProjectLoadedRef.current = true;
+      const loadedCount = Object.keys(data.translations || {}).length;
+      if (loadedCount > 0) {
+        log.info(`[App] Stato caricato con successo: ${loadedCount} traduzioni verificate.`);
+        setIsTranslatedMode(true);
+      }
 
-      // Load PDF
-      const pdfPathRes = await window.electronAPI.getOriginalPdfPath(fileId);
-      let pdfPath = (pdfPathRes?.success && pdfPathRes?.path) ? pdfPathRes.path : data.originalFilePath;
-      if (pdfPathRes?.success && pdfPathRes?.path && !data.originalFilePath) {
-        try {
-          await library.updateLibrary(data.fileName, { fileId, originalFilePath: pdfPathRes.path, hasSafePdf: true });
-        } catch { }
-      }
-      if ((!pdfPathRes?.success || !pdfPathRes?.path) && data.originalFilePath) {
-        try {
-          const recopyRes = await window.electronAPI.copyOriginalPdf({ fileId, sourcePath: data.originalFilePath });
-          if (recopyRes?.success && recopyRes?.path) pdfPath = recopyRes.path;
-        } catch { }
-      }
-      if ((!pdfPathRes?.success || !pdfPathRes?.path) && !pdfPath) {
-        try {
-          const picked = await window.electronAPI.openFileDialog();
-          if (picked) {
-            const recopyRes = await window.electronAPI.copyOriginalPdf({ fileId, sourcePath: picked });
-            if (recopyRes?.success && recopyRes?.path) {
-              pdfPath = recopyRes.path;
-              await library.updateLibrary(data.fileName, { fileId, originalFilePath: pdfPath, hasSafePdf: true });
-              library.refreshLibrary();
+      const targetPage = normalizePageNumber((data as any).lastPage ?? 1, (data as any).totalPages);
+
+      lastSavedPageRef.current = targetPage;
+      setCurrentPage(targetPage);
+      try {
+        // Entriamo subito in modalità lettura
+        setIsHomeView(false);
+        // Se non abbiamo immagini caricate per la pagina corrente, attiviamo la modalità semplificata
+        const hasImage = Boolean(loadedSources[targetPage]);
+        setIsReaderMode(!hasImage);
+
+        // TASK 39: Load PDF with Retry Logic
+        // Handle "Original PDF not found" race condition
+        let pdfPath = data.originalFilePath;
+
+        if (!pdfPath) {
+          // Try to fetch path from library if missing in JSON
+          const pdfPathRes = await window.electronAPI.getOriginalPdfPath(targetFileId);
+          if (pdfPathRes?.success && pdfPathRes?.path) {
+            pdfPath = pdfPathRes.path;
+          }
+        }
+
+        // Retry loop if path is missing but expected
+        if (!pdfPath && data.originalFilePath) {
+          for (let attempt = 0; attempt < 3; attempt++) {
+            log.info(`[App] Retry fetching PDF path (attempt ${attempt + 1})...`);
+            await new Promise(r => setTimeout(r, 500));
+            const retryRes = await window.electronAPI.getOriginalPdfPath(targetFileId);
+            if (retryRes?.success && retryRes?.path) {
+              pdfPath = retryRes.path;
+              break;
             }
           }
-        } catch { }
-      }
-
-      if (pdfPath) {
-        try {
-          const buffer = await window.electronAPI.readPdfFile(pdfPath);
-          const pdf = await pdfjsLib.getDocument({
-            data: buffer,
-            cMapUrl: './pdfjs/cmaps/',
-            cMapPacked: true,
-            standardFontDataUrl: './pdfjs/standard_fonts/'
-          }).promise;
-          setPdfDoc(pdf);
-          setMetadata({ name: data.fileName, size: 0, totalPages: pdf.numPages });
-          setIsReaderMode(false);
-
-          // Generate thumbnail if missing
-          if (!loadedSources[1]) {
-            try {
-              const page = await pdf.getPage(1);
-              const viewport = page.getViewport({ scale: 1.5 });
-              const canvas = document.createElement('canvas');
-              canvas.width = viewport.width;
-              canvas.height = viewport.height;
-              const ctx = canvas.getContext('2d');
-              if (ctx) {
-                await (page as any).render({ canvasContext: ctx, viewport }).promise;
-                const dataUrl = canvas.toDataURL('image/jpeg', 0.8);
-                const res = await window.electronAPI.saveProjectImage({
-                  fileId,
-                  page: 1,
-                  kind: 'source',
-                  dataUrl
-                });
-                if (res.success) {
-                  setPageImagesIndex(prev => ({ ...prev, sources: { ...prev.sources, [1]: 'source-p1.jpg' } }));
-                  pageImagesIndexRef.current.sources[1] = 'source-p1.jpg';
-                  // Force refresh library to show thumbnail in home
-                  library.refreshLibrary();
-                }
-              }
-              canvas.width = 0; canvas.height = 0;
-            } catch (e) { console.error("Failed to generate missing thumbnail", e); }
-          }
-        } catch (err) {
-          log.warning("PDF originale non trovato o corrotto. Apertura in modalità 'Solo Testo'.");
-          setPdfDoc(null);
-          setMetadata({ name: data.fileName, size: 0, totalPages: data.totalPages || 0 });
-          setIsReaderMode(true);
         }
-      } else {
-        setPdfDoc(null);
-        setMetadata({ name: data.fileName, size: 0, totalPages: data.totalPages || 0 });
-        setIsReaderMode(true);
+
+        if (pdfPath && !data.originalFilePath) {
+          try {
+            await library.updateLibrary(targetFileId, { fileId: targetFileId, originalFilePath: pdfPath, hasSafePdf: true });
+          } catch { }
+        }
+
+        if (!pdfPath && data.originalFilePath) {
+          try {
+            const recopyRes = await window.electronAPI.copyOriginalPdf({ fileId: targetFileId, sourcePath: data.originalFilePath });
+            if (recopyRes?.success && recopyRes?.path) pdfPath = recopyRes.path;
+          } catch { }
+        }
+
+        // Se il PDF non viene trovato nei percorsi noti, NON apriamo il selettore file automaticamente.
+        // Lo faremo solo se l'utente prova a fare un'azione che richiede il PDF (es. re-render).
+        // Per ora, proseguiamo con quello che abbiamo.
+
+        if (pdfPath) {
+          try {
+            log.info(`[App] 📄 Caricamento PDF sorgente: ${pdfPath}`);
+
+            // BACKFILL FINGERPRINT if missing
+            if (!(data as any).fingerprint && window.electronAPI?.calculateFileFingerprint) {
+              const fp = await window.electronAPI.calculateFileFingerprint(pdfPath);
+              if (fp) {
+                log.info(`Backfilling fingerprint for ${data.fileName}: ${fp}`);
+                await library.updateLibrary(fileId, { fileId, fingerprint: fp }, 'CRITICAL');
+                (data as any).fingerprint = fp; // Update local reference
+              }
+            }
+
+            const buffer = await window.electronAPI.readPdfFile(pdfPath);
+            log.info(`[App] PDF letto in memoria (${Math.round(buffer.byteLength / 1024 / 1024)} MB). Parsing...`);
+
+            const pdf = await pdfjsLib.getDocument({
+              data: buffer,
+              cMapUrl: './pdfjs/cmaps/',
+              cMapPacked: true,
+              standardFontDataUrl: './pdfjs/standard_fonts/'
+            }).promise;
+
+            // NOTE: We do NOT use PDF.js fingerprint anymore, as we rely on the SHA256 file hash
+            // calculated via calculateFileFingerprint above. This ensures stricter file identity.
+
+
+            setPdfDoc(pdf);
+            setMetadata({ name: data.fileName, size: 0, totalPages: pdf.numPages });
+
+            // FIX: Ensure totalPages is synced to disk if it differs from JSON
+            // This prevents "8 pages" issues if the JSON was corrupted/guessed while the PDF has 20.
+            if (data.totalPages !== pdf.numPages) {
+              log.info(`Discrepanza pagine rilevata: JSON=${data.totalPages} vs PDF=${pdf.numPages}. Aggiornamento metadati in corso...`);
+              void library.updateLibrary(fileId, { fileId, totalPages: pdf.numPages });
+            }
+
+            // Se il PDF è caricato con successo, possiamo uscire dalla modalità "solo testo"
+            setIsReaderMode(false);
+            log.success(`[App] PDF caricato correttamente (${pdf.numPages} pagine)`);
+
+            // Generate thumbnail if missing
+            if (!loadedSources[1]) {
+              const canvas = document.createElement('canvas');
+              try {
+                const page = await pdf.getPage(1);
+                const viewport = page.getViewport({ scale: 1.5 });
+                canvas.width = viewport.width;
+                canvas.height = viewport.height;
+                const ctx = canvas.getContext('2d');
+                if (ctx) {
+                  await (page as any).render({ canvasContext: ctx, viewport }).promise;
+                  const dataUrl = canvas.toDataURL('image/jpeg', 0.8);
+                  const res = await window.electronAPI.saveProjectImage({
+                    fileId: targetFileId,
+                    page: 1,
+                    kind: 'source',
+                    dataUrl
+                  });
+                  if (res.success) {
+                    setPageImagesIndex(prev => ({ ...prev, sources: { ...prev.sources, [1]: 'source-p1.jpg' } }));
+                    pageImagesIndexRef.current.sources[1] = 'source-p1.jpg';
+                    library.refreshLibrary();
+                  } else {
+                    log.error(`Failed to save project image for file ${targetFileId}`, res.error);
+                  }
+                }
+              } catch (e) {
+                log.error(`Failed to generate missing thumbnail for file ${targetFileId}`, e);
+              } finally {
+                canvas.width = 0;
+                canvas.height = 0;
+              }
+            }
+          } catch (err) {
+            log.warning("PDF originale non trovato o corrotto. Apertura in modalità 'Solo Testo'.");
+            setPdfDoc(null);
+          }
+        } else {
+          log.info("PDF originale non trovato nei percorsi salvati. Modalità 'Solo Testo' attiva.");
+          setPdfDoc(null);
+
+          if (data.originalFilePath) {
+            showConfirm(
+              "File PDF Mancante",
+              "Il file PDF originale non è stato trovato. Vuoi ricollegarlo manualmente?",
+              async () => {
+                try {
+                  const newPath = await window.electronAPI.openFileDialog();
+                  if (newPath) {
+                    log.step(`Ricollegamento PDF: ${newPath}`);
+                    const res = await window.electronAPI.copyOriginalPdf({ fileId: targetFileId, sourcePath: newPath });
+                    if (res?.success) {
+                      log.success("PDF ricollegato con successo. Ricaricamento...");
+                      setTimeout(() => {
+                        openingProjectRef.current = null; // Reset lock
+                        handleOpenProject(targetFileId);
+                      }, 500);
+                    } else {
+                      log.error("Errore ricollegamento PDF", res?.error);
+                      showToast("Errore durante il ricollegamento.", 'error');
+                    }
+                  }
+                } catch (e) {
+                  log.error("Eccezione ricollegamento", e);
+                }
+              },
+              'alert'
+            );
+          }
+        }
+
+        // Fine caricamento: ripristiniamo la pausa se le API sono configurate
+        setIsPaused(!isApiConfigured);
+
+        const duration = Math.round(performance.now() - switchStartTime);
+        log.success(`[App] ✅ Cambio progetto completato con successo in ${duration}ms`);
+      } catch (e) {
+        log.error("Errore apertura progetto", e);
+        setIsPaused(false);
       }
-    } catch (e) {
-      log.error("Errore apertura progetto", e);
+    } finally {
+      if (openingProjectRef.current === targetFileId) {
+        openingProjectRef.current = null;
+      }
+      setIsOpeningProject(null);
     }
+
   }, [library, defaultLang, translation, annotations, quality]);
 
-  const continueUploadWithLanguage = useCallback(async (file: File, lang: string, groups?: string[]) => {
-    const normalizeProjectName = (name: string) => {
-      const trimmed = String(name || '').trim().replace(/\s+/g, ' ');
-      const withoutExt = trimmed.replace(/\.pdf$/i, '');
-      return withoutExt.toLowerCase();
-    };
-
-    const makeUniqueProjectName = (desiredName: string, sourcePath: string) => {
-      const existingNameKeys = new Set(
-        Object.values(library.recentBooks)
-          .map(b => normalizeProjectName(b.fileName))
-          .filter(Boolean)
-      );
-      const existingIds = new Set(Object.keys(library.recentBooks));
-
-      const trimmed = String(desiredName || '').trim().replace(/\s+/g, ' ');
-      const hasPdfExt = /\.pdf$/i.test(trimmed);
-      const baseName = hasPdfExt ? trimmed.replace(/\.pdf$/i, '') : trimmed;
-
-      for (let i = 1; i < 1000; i++) {
-        const candidate = i === 1 ? trimmed : `${baseName} (${i})${hasPdfExt ? '.pdf' : ''}`;
-        const nameKey = normalizeProjectName(candidate);
-        const fileId = computeFileId(candidate, sourcePath);
-        if (!existingNameKeys.has(nameKey) && !existingIds.has(fileId)) return candidate;
-      }
-
-      return `${baseName} (${Date.now()})${hasPdfExt ? '.pdf' : ''}`;
-    };
-
+  const continueUploadWithLanguage = useCallback(async (file: File, lang: string, groups: string[] | undefined, stableFileId: string) => {
     const sourcePath = (file as any).path || '';
+
+    // SMART IMPORT: Check if we already have this file in our library
+    // This prevents creating a new ID (and thus a new file) if we've already imported 
+    // and potentially renamed this PDF.
+    if (sourcePath && window.electronAPI?.calculateFileFingerprint) {
+      // 1. Calculate fingerprint
+      const fingerprint = await window.electronAPI.calculateFileFingerprint(sourcePath);
+
+      // 2. Check for duplicates by fingerprint OR path (normalized)
+      const normalizePath = (p: string) => p.toLowerCase().replace(/\\/g, '/').trim();
+      const normalizedSource = normalizePath(sourcePath);
+
+      let existingBook = Object.values(library.recentBooks).find(b => {
+        // Strict Fingerprint Match (Best)
+        if (fingerprint && b.fingerprint === fingerprint) return true;
+
+        // Path Match (Normalized)
+        if (b.originalFilePath) {
+          if (b.originalFilePath === sourcePath) return true;
+          // CRITICAL FIX: Also check if path points to the assets folder of this project ID (UUID based)
+          // This handles cases where file was moved but structure is intact
+          if (normalizePath(b.originalFilePath) === normalizedSource) return true;
+        }
+        return false;
+      });
+
+      if (existingBook) {
+        log.info(`Smart Import: Trovato progetto esistente per questo PDF: ${existingBook.fileName} (${existingBook.fileId}) [Fingerprint match: ${Boolean(fingerprint && existingBook.fingerprint === fingerprint)}]`);
+
+        const existingId = String(existingBook.fileId || '').trim();
+        if (!existingId) {
+          log.warning('Smart Import: progetto esistente trovato ma fileId mancante. Operazione annullata.');
+          return;
+        }
+
+        // If the language matches or we want to update it, we can just open it
+        // We might want to update the language if it's different
+        if (existingBook.inputLanguage !== lang) {
+          await library.updateLibrary(existingId, { fileId: existingId, inputLanguage: lang });
+        }
+
+        // Ensure we backfill fingerprint if the existing match was only by path
+        if (fingerprint && !existingBook.fingerprint) {
+          await library.updateLibrary(existingId, { fileId: existingId, fingerprint });
+        }
+
+        // Update path if it changed (e.g. file moved but fingerprint matched)
+        if (existingBook.originalFilePath !== sourcePath) {
+          await library.updateLibrary(existingId, { fileId: existingId, originalFilePath: sourcePath });
+        }
+
+        await handleOpenProject(existingId);
+        return;
+      }
+    } else if (sourcePath) {
+      // Fallback for path-only check if fingerprinting fails or API missing
+      const normalizePath = (p: string) => p.toLowerCase().replace(/\\/g, '/').trim();
+      const normalizedSource = normalizePath(sourcePath);
+
+      const existingBook = Object.values(library.recentBooks).find(b => {
+        if (!b.originalFilePath) return false;
+        return normalizePath(b.originalFilePath) === normalizedSource;
+      });
+
+      if (existingBook) {
+        log.info(`Smart Import (Path Only): Trovato progetto esistente: ${existingBook.fileName}`);
+        const existingId = String(existingBook.fileId || '').trim();
+        if (!existingId) {
+          log.warning('Smart Import: progetto esistente trovato ma fileId mancante. Operazione annullata.');
+          return;
+        }
+        if (existingBook.inputLanguage !== lang) {
+          await library.updateLibrary(existingId, { fileId: existingId, inputLanguage: lang });
+        }
+        await handleOpenProject(existingId);
+        return;
+      }
+    }
+
+    // const sourcePath = (file as any).path || ''; // Hoisted to top
     const originalFileName = file.name;
-    const desiredFileId = computeFileId(originalFileName, sourcePath);
-    const isDuplicateName = Object.values(library.recentBooks).some(b => normalizeProjectName(b.fileName) === normalizeProjectName(originalFileName));
-    const isDuplicateId = Boolean(library.recentBooks[desiredFileId]);
+    const fileId = ensureJsonExtension(stableFileId);
 
     const doUpload = async (projectName: string) => {
       try {
         log.step(`Avvio elaborazione PDF: ${projectName} (Lingua: ${lang})...`);
-        const sessionFileId = window.electronAPI ? computeFileId(projectName, sourcePath) : null;
-        if (sessionFileId) {
-          library.setCurrentProjectFileId(sessionFileId);
-        }
+
+        // CRITICAL: Flush pending saves before starting a new heavy operation
+        await library.flushSaves();
+
         const buffer = await file.arrayBuffer();
-      const pdfParseBuffer = buffer.slice(0);
-      const safeSaveBuffer = buffer.slice(0);
-      const pdf = await pdfjsLib.getDocument({
-        data: pdfParseBuffer,
-        cMapUrl: './pdfjs/cmaps/',
-        cMapPacked: true,
-        standardFontDataUrl: './pdfjs/standard_fonts/'
-      }).promise;
-
-      setPdfDoc(pdf);
-      setMetadata({ name: projectName, size: buffer.byteLength, totalPages: pdf.numPages });
-      setDocInputLanguage(lang);
-      setIsHomeView(false);
-      const canTranslate = Boolean(isApiConfigured);
-      setIsTranslatedMode(canTranslate);
-      setIsManualMode(!canTranslate);
-      setIsPaused(!canTranslate);
-      setIsReaderMode(false);
-      setCurrentPage(1);
-      setPreviewPage(null);
-      setNotesPage(null);
-
-      // Initial reset for new session
-      resetProjectState();
-      if (!canTranslate) {
-        showConfirm(
-          "API non configurate",
-          "Hai caricato il PDF correttamente, ma per avviare la traduzione serve una API key nelle Impostazioni.",
-          () => setIsSettingsOpen(true),
-          'alert'
-        );
-      }
-
-      // Copy PDF and create project
-      if (window.electronAPI) {
-        const fileId = sessionFileId || computeFileId(projectName, sourcePath);
+        const pdfParseBuffer = buffer.slice(0);
+        const safeSaveBuffer = buffer.slice(0);
         let finalPath: string | undefined = undefined;
         let hasSafePdf = false;
-        try {
-          window.electronAPI.logToMain?.({
-            level: 'info',
-            message: 'Upload PDF: avvio salvataggio copia safe',
-            meta: {
-              fileName: projectName,
-              fileId,
-              sourcePathPresent: Boolean(sourcePath),
-              saveOriginalPdfBufferType: typeof (window.electronAPI as any)?.saveOriginalPdfBuffer,
-              copyOriginalPdfType: typeof (window.electronAPI as any)?.copyOriginalPdf
-            }
+
+        // 1. Load PDF and prepare state (Validate PDF Integrity)
+        const pdfDoc = await pdfjsLib.getDocument({
+          data: pdfParseBuffer,
+          cMapUrl: './pdfjs/cmaps/',
+          cMapPacked: true,
+          standardFontDataUrl: './pdfjs/standard_fonts/'
+        }).promise;
+
+        // 2. Initialize Project Shell AFTER validation to reserve the UUID
+        if (window.electronAPI?.initProjectShell) {
+          await window.electronAPI.initProjectShell({
+            fileId,
+            fileName: projectName,
+            inputLanguage: lang,
+            groups
           });
-        } catch { }
-        try {
-          if (sourcePath) {
-            const copyRes = await window.electronAPI.copyOriginalPdf({ fileId, sourcePath });
-            if (copyRes?.success && copyRes?.path) {
-              finalPath = copyRes.path;
-              hasSafePdf = true;
-              try {
-                window.electronAPI.logToMain?.({
-                  level: 'info',
-                  message: 'Upload PDF: copia da path riuscita',
-                  meta: { fileId, targetPath: copyRes.path }
-                });
-              } catch { }
-            } else {
-              try {
-                window.electronAPI.logToMain?.({
-                  level: 'warn',
-                  message: 'Upload PDF: copia da path fallita',
-                  meta: { fileId, sourcePathPresent: Boolean(sourcePath), error: copyRes?.error }
-                });
-              } catch { }
-            }
-          }
-        } catch (e) {
+        }
+
+        // CRITICAL FIX: Block saves for the OLD project before switching
+        if (library.currentProjectFileId) {
+          library.blockSave(library.currentProjectFileId, 10000);
+        }
+
+        // 3. Set Active Project ID immediately to lock the session to the new UUID
+        library.setCurrentProjectFileId(fileId);
+
+        // 4. Save PDF buffer (Atomic)
+        if (window.electronAPI?.saveOriginalPdfBuffer) {
           try {
             window.electronAPI.logToMain?.({
-              level: 'error',
-              message: 'Upload PDF: eccezione durante copia da path',
-              meta: { fileId, sourcePathPresent: Boolean(sourcePath), error: (e as any)?.message || String(e) }
+              level: 'info',
+              message: 'Upload PDF: avvio salvataggio copia safe (CAS/fingerprint)',
+              meta: {
+                fileName: projectName,
+                fileId,
+                sourcePathPresent: Boolean(sourcePath),
+                saveOriginalPdfBufferType: typeof (window.electronAPI as any)?.saveOriginalPdfBuffer,
+                copyOriginalPdfType: typeof (window.electronAPI as any)?.copyOriginalPdf
+              }
             });
           } catch { }
-        }
-        if (!finalPath) {
+
           try {
-            const saveRes = await window.electronAPI.saveOriginalPdfBuffer({ fileId, buffer: new Uint8Array(safeSaveBuffer) });
+            const saveRes = await window.electronAPI.saveOriginalPdfBuffer({
+              fileId,
+              buffer: new Uint8Array(safeSaveBuffer),
+              fileName: projectName
+            });
+
+            if (saveRes?.success && saveRes?.isDuplicate && saveRes?.fileId) {
+              // If it's a duplicate, we abort the new project creation and switch to the existing one.
+              // We must unblock saves first if we blocked them.
+              if (library.currentProjectFileId) {
+                library.unblockSave(library.currentProjectFileId);
+              }
+
+              await library.refreshLibrary();
+              await handleOpenProject(saveRes.fileId);
+              return;
+            }
+
             if (saveRes?.success && saveRes?.path) {
               finalPath = saveRes.path;
               hasSafePdf = true;
-              try {
-                window.electronAPI.logToMain?.({
-                  level: 'info',
-                  message: 'Upload PDF: salvataggio da buffer riuscito',
-                  meta: { fileId, targetPath: saveRes.path, bytes: safeSaveBuffer.byteLength }
-                });
-              } catch { }
-            } else {
+            } else if (saveRes?.success && saveRes?.fileId && saveRes?.fileId !== fileId) {
+              await library.refreshLibrary();
+              await handleOpenProject(saveRes.fileId);
+              return;
+            } else if (saveRes?.success === false) {
               try {
                 window.electronAPI.logToMain?.({
                   level: 'warn',
@@ -918,119 +1692,212 @@ const App: React.FC = () => {
               });
             } catch { }
           }
-        }
-        if (!finalPath) finalPath = sourcePath;
-        if (!hasSafePdf) {
-          try {
-            window.electronAPI.logToMain?.({
-              level: 'error',
-              message: 'Upload PDF: copia safe non creata (nessun path finale)',
-              meta: { fileId, sourcePathPresent: Boolean(sourcePath) }
-            });
-          } catch { }
+
+          if (!finalPath && sourcePath && window.electronAPI?.copyOriginalPdf) {
+            try {
+              const copyRes = await window.electronAPI.copyOriginalPdf({ fileId, sourcePath, fileName: projectName });
+              if (copyRes?.success && copyRes?.path) {
+                finalPath = copyRes.path;
+                hasSafePdf = true;
+                try {
+                  window.electronAPI.logToMain?.({
+                    level: 'info',
+                    message: 'Upload PDF: copia da path riuscita',
+                    meta: { fileId, targetPath: copyRes.path }
+                  });
+                } catch { }
+              } else {
+                try {
+                  window.electronAPI.logToMain?.({
+                    level: 'warn',
+                    message: 'Upload PDF: copia da path fallita',
+                    meta: { fileId, sourcePathPresent: Boolean(sourcePath), error: copyRes?.error }
+                  });
+                } catch { }
+              }
+            } catch (e) {
+              try {
+                window.electronAPI.logToMain?.({
+                  level: 'error',
+                  message: 'Upload PDF: eccezione durante copia da path',
+                  meta: { fileId, sourcePathPresent: Boolean(sourcePath), error: (e as any)?.message || String(e) }
+                });
+              } catch { }
+            }
+          }
         }
 
-        await library.updateLibrary(projectName, {
-          fileId,
-          originalFilePath: finalPath,
-          hasSafePdf,
-          totalPages: pdf.numPages,
-          inputLanguage: lang,
-          groups: groups || []
-        });
+        if (!finalPath) finalPath = sourcePath;
+
+        // 5. Initialize the core project metadata into library memory FIRST,
+        // so that any sub-components that react to 'currentProjectFileId' 
+        // will find a fully valid project state with a 'fileName'.
+        if (window.electronAPI) {
+          await library.updateLibrary(fileId, {
+            fileId,
+            fileName: projectName,
+            originalFilePath: finalPath,
+            hasSafePdf,
+            totalPages: pdfDoc.numPages,
+            inputLanguage: lang,
+            groups: groups || []
+          }, 'CRITICAL');
+        }
+
+        // Detach metadata to stop side-effects from useAppAnnotations
+        setMetadata(null);
+
+        // Initial reset for new session
+        resetProjectState(`New Upload: ${projectName}`);
+        pdfRenderAnalytics.reset();
+
+        // 6. Set Active Project ID (triggers hooks)
         library.setCurrentProjectFileId(fileId);
+
+        setPdfDoc(pdfDoc);
+        setMetadata({ name: projectName, size: buffer.byteLength, totalPages: pdfDoc.numPages });
+        setDocInputLanguage(lang);
+        setDefaultLang(lang);
+        setIsHomeView(false);
+        const canTranslate = Boolean(isApiConfigured);
+        setIsTranslatedMode(canTranslate);
+        setIsManualMode(!canTranslate);
+        setIsPaused(!canTranslate);
+        setIsReaderMode(false);
+        lastSavedPageRef.current = 1;
+        setCurrentPage(1);
+        setPreviewPage(null);
+        setNotesPage(null);
+
+        if (!canTranslate) {
+          showConfirm(
+            "API non configurate",
+            "Hai caricato il PDF correttamente, ma per avviare la traduzione serve una API key nelle Impostazioni.",
+            () => setIsSettingsOpen(true),
+            'alert'
+          );
+        }
+
+        isProjectLoadedRef.current = true;
 
         // Metadata detection & Thumbnail generation
         try {
           const images: string[] = [];
-          for (let i = 1; i <= Math.min(3, pdf.numPages); i++) {
-            const page = await pdf.getPage(i);
-            const viewport = page.getViewport({ scale: 1.5 });
+          appendAutodetectLog("Preparazione miniature per riconoscimento titolo...");
+          // Generate thumbnails for up to 5 pages (was 3) to improve metadata extraction context
+          for (let i = 1; i <= Math.min(5, pdfDoc.numPages); i++) {
             const canvas = document.createElement('canvas');
-            canvas.width = viewport.width;
-            canvas.height = viewport.height;
-            const ctx = canvas.getContext('2d');
-            if (ctx) {
-              await (page as any).render({ canvasContext: ctx, viewport }).promise;
-              const dataUrl = canvas.toDataURL('image/jpeg', 0.8);
-              const base64 = dataUrl.split(',')[1];
-              images.push(base64);
-              
-              // Save first page as thumbnail/source-p1
-              if (i === 1) {
-                await window.electronAPI.saveProjectImage({
-                  fileId,
-                  page: 1,
-                  kind: 'source',
-                  dataUrl
-                });
-                setPageImagesIndex((prev: any) => ({ ...prev, sources: { ...prev.sources, [1]: 'source-p1.jpg' } }));
+            try {
+              const page = await pdfDoc.getPage(i);
+              const viewport = page.getViewport({ scale: 1.5 });
+              canvas.width = viewport.width;
+              canvas.height = viewport.height;
+              const ctx = canvas.getContext('2d');
+              if (ctx) {
+                await (page as any).render({ canvasContext: ctx, viewport }).promise;
+                const dataUrl = canvas.toDataURL('image/jpeg', 0.8);
+                const base64 = dataUrl.split(',')[1];
+                images.push(base64);
+                appendAutodetectLog(`Miniatura pagina ${i}/${Math.min(5, pdfDoc.numPages)} pronta`);
+
+                // Save first page as thumbnail/source-p1
+                if (i === 1) {
+                  await window.electronAPI.saveProjectImage({
+                    fileId,
+                    page: 1,
+                    kind: 'source',
+                    dataUrl
+                  });
+                  setPageImagesIndex((prev: any) => ({ ...prev, sources: { ...prev.sources, [1]: 'source-p1.jpg' } }));
+                }
               }
+            } finally {
+              canvas.width = 0;
+              canvas.height = 0;
             }
-            canvas.width = 0; canvas.height = 0;
           }
 
-          if (images.length > 0 && aiSettings.gemini.apiKey.trim()) {
+          if (images.length > 0 && isApiConfigured) {
             try {
-              log.step("Autodetect metadati in corso...");
-              const meta = await extractPdfMetadata(aiSettings.gemini.apiKey, aiSettings.gemini.model, images, undefined, lang);
+              setIsAutodetecting(true);
+              setAutodetectLogs('');
+              appendAutodetectLog("Ricerca nome libro con AI in corso...");
               
+              const metaProvider = aiSettings.metadataExtraction?.provider || aiSettings.provider;
+              appendAutodetectLog(`Provider: ${metaProvider}`);
+              appendAutodetectLog(`Miniature pronte (${images.length})`);
+              appendAutodetectLog("Invio richiesta...");
+              log.step("Autodetect metadati in corso...");
+              
+              const meta = await extractMetadataAdapter(images, aiSettings, { targetLanguage: lang });
+              appendAutodetectLog("Risposta ricevuta");
+
               const y = sanitizeMetadataField(meta.year || "");
               const a = sanitizeMetadataField(meta.author || "");
               const t = sanitizeMetadataField(meta.title || "");
+              appendAutodetectLog(`Titolo: ${t || 'N/D'}`);
+              appendAutodetectLog(`Autore: ${a || 'N/D'}`);
+              appendAutodetectLog(`Anno: ${y || 'N/D'}`);
 
               if (t && t !== 'Untitled' && t.length > 2) {
                 const yearPart = y && y !== '0000' && y !== 'Unknown' ? `${y}_` : "";
                 const authorPart = a && a !== 'Unknown' ? `${a}_` : "";
                 const newName = `${yearPart}${authorPart}${t}`;
+                appendAutodetectLog(`Nome proposto: ${newName}`);
 
                 if (newName.length > 5 && newName !== projectName) {
-                  const res = await window.electronAPI.renameTranslation({ fileId, newFileName: newName });
+                  const res = await window.electronAPI.setDisplayName({ fileId, displayName: newName });
                   if (res?.success) {
-                    log.success(`Rinomina automatica: ${newName}`);
+                    log.success(`Nome aggiornato automaticamente: ${newName}`);
+                    appendAutodetectLog("Nome aggiornato");
                     setMetadata(prev => prev ? ({ ...prev, name: newName }) : prev);
-                    const newId = computeFileId(newName, finalPath);
-                    library.setCurrentProjectFileId(newId);
+
+                    // CRITICAL FIX: Synchronize local state immediately to avoid race conditions with saves
+                    if (library.registerNameChange) {
+                      library.registerNameChange(fileId, newName);
+                    }
+
                     library.refreshLibrary();
                   } else {
-                    log.warning(`Rinomina fallita: ${res?.error || 'Errore sconosciuto'}`);
+                    log.warning(`Aggiornamento nome fallito: ${res?.error || 'Errore sconosciuto'}`);
+                    appendAutodetectLog(`Aggiornamento nome fallito: ${res?.error || 'Errore sconosciuto'}`);
                   }
                 } else {
                   log.info(`Salto rinomina: nome identico o troppo corto (${newName})`);
+                  appendAutodetectLog(`Salto rinomina: nome identico o troppo corto (${newName})`);
                 }
               } else {
                 log.warning("Salto rinomina: titolo non trovato o non valido nell'estrazione AI", { meta });
               }
-            } catch (e) { log.error("Errore autodetect metadati", e); }
+            } catch (e) {
+              log.error("Errore autodetect metadati", e);
+              appendAutodetectLog(`Errore ricerca nome: ${e instanceof Error ? e.message : String(e)}`);
+            } finally {
+              setIsAutodetecting(false);
+            }
           }
         } catch (e) { log.error("Errore generazione anteprima/metadati", e); }
 
-      }
       } catch (e) {
         log.error("Errore caricamento PDF", e);
       }
     };
 
-    if (isDuplicateName || isDuplicateId) {
-      const uniqueName = makeUniqueProjectName(originalFileName, sourcePath);
-      const reason = isDuplicateId ? 'Un progetto con lo stesso identificatore esiste già.' : 'Un progetto con lo stesso nome esiste già.';
-      showConfirm(
-        "Nome già presente",
-        `${reason}\n\nIl nuovo progetto verrà salvato come:\n"${uniqueName}"`,
-        () => { void doUpload(uniqueName); },
-        'alert'
-      );
-      return;
-    }
-
     await doUpload(originalFileName);
-  }, [aiSettings, library, translation, annotations, quality, isApiConfigured, showConfirm, setIsSettingsOpen]);
+  }, [aiSettings, library, translation, annotations, quality, isApiConfigured, showConfirm, setIsSettingsOpen, appendAutodetectLog]);
 
   const renderPage = useCallback(async (pageNum: number, cRef: React.RefObject<HTMLCanvasElement | null>) => {
     if (!pdfDoc || !cRef.current) return;
     const canvas = cRef.current;
     const refIdx = allRefs.indexOf(cRef as any);
     const canvasKey = refIdx !== -1 ? `canvas_${refIdx}` : 'default';
+
+    const last = lastRenderedRef.current[canvasKey];
+    const now = Date.now();
+    if (last && last.page === pageNum && Math.abs(last.scale - renderScale) < 0.001 && (now - last.timestamp) < 500) {
+      return;
+    }
+
     latestPageRef.current[canvasKey] = pageNum;
     if (renderTaskRef.current[canvasKey]) {
       try {
@@ -1051,6 +1918,7 @@ const App: React.FC = () => {
         { scale: renderScale }
       );
       if (dims) {
+        lastRenderedRef.current[canvasKey] = { page: pageNum, scale: renderScale, timestamp: Date.now() };
         setPageDims(prev => ({ ...prev, [pageNum]: { width: dims.width, height: dims.height } }));
       }
     } catch (e: any) {
@@ -1110,6 +1978,21 @@ const App: React.FC = () => {
     } catch (e) { log.error("Errore fatale esportazione PDF", e); }
   }, [metadata, translation.translationMap, annotations.userHighlights, annotations.userNotes, pageDims, aiSettings.exportOptions]);
 
+  const handleExportOriginalPdf = useCallback(async () => {
+    if (!library.currentProjectFileId) return;
+    try {
+      const result = await window.electronAPI.exportOriginalPdf(library.currentProjectFileId);
+      if (result.success) {
+        log.success("PDF originale esportato con successo.");
+      } else if (result.canceled) {
+        // User canceled
+      } else {
+        log.error("Errore esportazione PDF originale", result.error);
+        showToast(result.error || "Errore esportazione", 'error');
+      }
+    } catch (e: any) { log.error("Errore fatale esportazione PDF originale", e); }
+  }, [library.currentProjectFileId, showToast]);
+
   const handleExportById = useCallback(async (fileId: string) => {
     try {
       const result = await window.electronAPI.exportProjectPackage({ fileId });
@@ -1128,22 +2011,38 @@ const App: React.FC = () => {
         log.success('Progetto importato con successo!');
         library.refreshLibrary();
         await handleOpenProject(importedId);
+      } else {
+        showToast('Importazione annullata o progetto non valido.', 'warning');
       }
-    } catch (e) { log.error("Errore importazione", e); }
-  }, [library, handleOpenProject]);
+    } catch (e) {
+      log.error("Errore importazione", e);
+      showToast('Impossibile importare il progetto. Riprova.', 'error');
+    }
+  }, [library, handleOpenProject, showToast]);
 
   const handleRotatePage = useCallback(async (page: number, deg: number) => {
     const current = pageRotations[page] || 0;
     const next = (current + deg) % 360;
     setPageRotations(prev => ({ ...prev, [page]: next }));
 
-    // If we have a cached image, we should rotate it or clear it
-    if (originalImages[page]) {
-      const rotated = await rotateJpegBase64(originalImages[page].split(',')[1], deg);
-      const newUrl = buildJpegDataUrlFromBase64(rotated);
-      setOriginalImages(prev => ({ ...prev, [page]: newUrl }));
-    }
-  }, [pageRotations, originalImages]);
+    // Puliamo la cache per forzare il ricaricamento/rendering con la nuova rotazione
+    setOriginalImages((prev: Record<number, string>) => {
+      const nextMap = { ...prev };
+      if (nextMap[page]) {
+        revokeObjectURL(nextMap[page]);
+        delete nextMap[page];
+      }
+      return nextMap;
+    });
+    setCroppedImages((prev: Record<number, string>) => {
+      const nextMap = { ...prev };
+      if (nextMap[page]) {
+        revokeObjectURL(nextMap[page]);
+        delete nextMap[page];
+      }
+      return nextMap;
+    });
+  }, [pageRotations]);
 
   const handleCropPage = useCallback((page: number) => {
     const src = originalImages[page] || "";
@@ -1159,7 +2058,10 @@ const App: React.FC = () => {
     }
     setCroppedImages((prev: Record<number, string>) => {
       const next = { ...prev };
-      delete next[page];
+      if (next[page]) {
+        revokeObjectURL(next[page]);
+        delete next[page];
+      }
       return next;
     });
     setPageImagesIndex((prev: any) => {
@@ -1190,8 +2092,35 @@ const App: React.FC = () => {
       );
       return;
     }
+    if (isPaused) {
+      const isQueued = translation.getQueue().includes(page);
+      const isActive = translation.activePagesRef.current.has(page);
+      const hasPartial = Boolean(translation.partialTranslations?.[page]?.trim());
+      const hasStatus = Boolean(translation.pageStatusRef.current?.[page]?.loading || translation.pageStatusRef.current?.[page]?.processing);
+
+      if (isQueued || isActive || hasPartial || hasStatus) {
+        setIsPaused(false);
+        return;
+      }
+    }
+
+    setIsPaused(false);
     translation.retranslatePage(page);
-  }, [isApiConfigured, showConfirm, translation, setIsSettingsOpen]);
+  }, [isApiConfigured, showConfirm, translation, setIsSettingsOpen, setIsPaused, isPaused]);
+
+  const handleTogglePauseActiveProject = useCallback(() => {
+    if (!isPaused) {
+      translation.pauseAllTranslations();
+      setIsPaused(true);
+      return;
+    }
+    setIsPaused(false);
+  }, [isPaused, setIsPaused, translation]);
+
+  const handleStopActiveProject = useCallback(() => {
+    translation.stopAllTranslations(true);
+    setIsPaused(true);
+  }, [setIsPaused, translation]);
 
   const handleRetranslatePages = useCallback((pages: number[]) => {
     if (!isApiConfigured) {
@@ -1203,8 +2132,9 @@ const App: React.FC = () => {
       );
       return;
     }
+    setIsPaused(false);
     pages.forEach(p => translation.retranslatePage(p));
-  }, [isApiConfigured, showConfirm, translation, setIsSettingsOpen]);
+  }, [isApiConfigured, showConfirm, translation, setIsSettingsOpen, setIsPaused]);
 
   const handleRetryAllCritical = useCallback(() => {
     if (!isApiConfigured) {
@@ -1221,6 +2151,12 @@ const App: React.FC = () => {
 
   // --- Effects ---
   useEffect(() => {
+    if (translation.queueStats.active > 0) {
+      translationManager.notifyActiveTranslationStarted();
+    }
+  }, [translation.queueStats.active]);
+
+  useEffect(() => {
     const next = pendingAutoStartRef.current;
     if (!next) return;
     if (!pdfDoc) return;
@@ -1229,28 +2165,38 @@ const App: React.FC = () => {
     if (docInputLanguage.trim().toLowerCase() !== next.language.trim().toLowerCase()) return;
     pendingAutoStartRef.current = null;
     translation.retranslatePage(next.page);
-  }, [pdfDoc, isManualMode, isApiConfigured, docInputLanguage, translation]);
+  }, [autoTranslateTimerRef]);
+
+  // FIX: Cache prefetch value to avoid localStorage reads on every render
+  const prefetchPagesValue = useMemo(() => {
+    const rawPrefetch = storage.getItem('auto_prefetch_pages');
+    const parsedPrefetch = rawPrefetch ? Number(rawPrefetch) : 2;
+    return Math.max(0, Math.min(10, Number.isFinite(parsedPrefetch) ? Math.floor(parsedPrefetch) : 2));
+  }, []);
 
   useEffect(() => {
     if (autoTranslateTimerRef.current) {
       window.clearTimeout(autoTranslateTimerRef.current);
       autoTranslateTimerRef.current = null;
     }
-    if (isHomeView) return;
     if (isManualMode) return;
     if (isPaused) return;
+    if (isConsultationMode) return;
     if (!isApiConfigured) return;
+
+    // SAFETY: Do not start prefetch/auto-translate if project is not fully loaded
+    if (!isProjectLoadedRef.current) return;
+
+    // Se l'app non è focalizzata o l'utente è inattivo, non avviamo nuove traduzioni automatiche
+    // Questo evita "scritture fantasma" quando l'utente non sta usando l'app.
+    if (!isFocused || isIdle) return;
 
     const total = pdfDoc?.numPages || metadata?.totalPages || 0;
     if (total <= 0) return;
 
-    const rawPrefetch = localStorage.getItem('auto_prefetch_pages');
-    const parsedPrefetch = rawPrefetch ? Number(rawPrefetch) : 2;
-    const prefetchPages = Math.max(0, Math.min(10, Number.isFinite(parsedPrefetch) ? Math.floor(parsedPrefetch) : 2));
+    const prefetchPages = prefetchPagesValue;
 
-    const visiblePages = viewMode === 'side-by-side'
-      ? [currentPage, currentPage + 1].filter(p => p >= 1 && p <= total)
-      : [currentPage].filter(p => p >= 1 && p <= total);
+    const visiblePages = [currentPage].filter(p => p >= 1 && p <= total);
     const visibleSet = new Set<number>(visiblePages);
     const basePage = visiblePages.length ? Math.max(...visiblePages) : currentPage;
 
@@ -1267,7 +2213,12 @@ const App: React.FC = () => {
         const already = translation.shouldSkipTranslation(p);
         if (already) continue;
         const hasError = Boolean(translation.pageStatusRef.current?.[p]?.error);
-        if (hasError) continue;
+
+        // FIX: Stop prefetching if we encounter an error.
+        // This prevents eager rendering of future pages when the current/previous page is blocked,
+        // saving CPU/RAM and preventing "obsolete" work if the user needs to change parameters (e.g. brightness).
+        if (hasError) break;
+
         translation.enqueueTranslation(p, { priority: visibleSet.has(p) ? 'front' : 'back' });
       }
     }, 260);
@@ -1280,7 +2231,6 @@ const App: React.FC = () => {
     };
   }, [
     currentPage,
-    viewMode,
     pdfDoc,
     metadata,
     isHomeView,
@@ -1290,7 +2240,9 @@ const App: React.FC = () => {
     translation.enqueueTranslation,
     translation.shouldSkipTranslation,
     translation.pageStatusRef,
-    translation.translationMap
+    translation.translationMap,
+    isFocused,
+    isIdle
   ]);
 
   useEffect(() => {
@@ -1311,6 +2263,11 @@ const App: React.FC = () => {
       if (search.searchOpen && !target.closest('.search-container') && !target.closest('.search-trigger')) {
         search.setSearchOpen(false);
       }
+
+      // Miniature (PagePreviewStrip)
+      if (showPreviewStrip && !target.closest('.preview-strip-container') && !target.closest('.preview-strip-trigger')) {
+        setShowPreviewStrip(false);
+      }
     };
     window.addEventListener('mousedown', handleGlobalClick);
     return () => window.removeEventListener('mousedown', handleGlobalClick);
@@ -1328,8 +2285,15 @@ const App: React.FC = () => {
   }, [showPreviewStrip, pdfDoc, previewThumbnails, ensurePreviewThumbnail]);
 
   useEffect(() => {
-    if (!isBatchProcessing) return;
+    if (!isBatchProcessing) {
+      prevIsBatchProcessingRef.current = false;
+      return;
+    }
     if (isManualMode) {
+      setIsBatchProcessing(false);
+      return;
+    }
+    if (isConsultationMode) {
       setIsBatchProcessing(false);
       return;
     }
@@ -1345,22 +2309,32 @@ const App: React.FC = () => {
       return;
     }
 
-    const runId = batchRunIdRef.current + 1;
-    batchRunIdRef.current = runId;
+    const isStarting = !prevIsBatchProcessingRef.current;
+    prevIsBatchProcessingRef.current = true;
+
+    let runId = batchRunIdRef.current;
     const total = pdfDoc.numPages || 0;
-    const startPage = currentPage;
 
-    log.step("Traduci tutto avviato", { totalPages: total, startPage });
+    if (isStarting) {
+      runId += 1;
+      batchRunIdRef.current = runId;
+      const startPage = currentPage;
 
-    const order: number[] = [];
-    for (let p = startPage; p <= total; p += 1) order.push(p);
-    for (let p = 1; p < startPage; p += 1) order.push(p);
+      log.step("Traduci tutto avviato", { totalPages: total, startPage });
 
-    order.forEach(p => {
-      const already = typeof translation.translationMap[p] === 'string' && translation.translationMap[p].trim().length > 0;
-      const hasError = Boolean(translation.pageStatus[p]?.error);
-      if (!already && !hasError) translation.enqueueTranslation(p, { priority: 'back' });
-    });
+      // Fix: Use batch enqueue to prevent UI freeze and log spam (STALLED warnings)
+      // This queues all pages at once and triggers pumpQueue only once.
+      const pagesToQueue: number[] = [];
+      for (let p = 1; p <= total; p += 1) {
+        const already = typeof translation.translationMap[p] === 'string' && translation.translationMap[p].trim().length > 0;
+        const hasError = Boolean(translation.pageStatus[p]?.error);
+        if (!already && !hasError) pagesToQueue.push(p);
+      }
+
+      if (pagesToQueue.length > 0) {
+        translation.enqueueMultipleTranslations(pagesToQueue, { priority: 'back' });
+      }
+    }
 
     const intervalId = window.setInterval(() => {
       if (batchRunIdRef.current !== runId) return;
@@ -1376,15 +2350,21 @@ const App: React.FC = () => {
       }
 
       const active = translation.queueStats.active;
-      if (remaining === 0 && active === 0) {
+      const queued = translation.queueStats.queued;
+
+      // Stop if everything is done OR if the queue/active are empty (deadlock/finished state)
+      if (remaining === 0 || (active === 0 && queued === 0)) {
         setIsBatchProcessing(false);
-        log.success("Traduci tutto completato.");
+        if (remaining === 0) {
+          log.success("Traduci tutto completato.");
+        } else {
+          log.warning(`Traduci tutto terminato con ${remaining} pagine incomplete (coda vuota).`);
+        }
       }
     }, 500);
 
     return () => {
       window.clearInterval(intervalId);
-      batchRunIdRef.current += 1;
     };
   }, [isBatchProcessing, pdfDoc, isApiConfigured, currentPage, translation, showConfirm, setIsSettingsOpen]);
 
@@ -1432,7 +2412,7 @@ const App: React.FC = () => {
         return;
       }
 
-      const step = viewMode === 'side-by-side' ? 2 : 1;
+      const step = 1;
       if (e.key === 'ArrowLeft') {
         e.preventDefault();
         setCurrentPage((p) => Math.max(1, p - step));
@@ -1447,7 +2427,6 @@ const App: React.FC = () => {
   }, [
     showHome,
     totalPages,
-    viewMode,
     search.searchOpen,
     isSettingsOpen,
     uploadPromptOpen,
@@ -1515,451 +2494,690 @@ const App: React.FC = () => {
     update();
     const ro = new ResizeObserver(update);
     ro.observe(el);
-    const onResize = () => update();
+
+    let timeoutId: number | null = null;
+    const onResize = () => {
+      if (timeoutId) window.clearTimeout(timeoutId);
+      timeoutId = window.setTimeout(update, 150);
+    };
+
     window.addEventListener('resize', onResize);
     return () => {
+      if (timeoutId) window.clearTimeout(timeoutId);
       ro.disconnect();
       window.removeEventListener('resize', onResize);
     };
   }, [isHomeView]);
 
   useEffect(() => {
-    if (pdfDoc) {
-      Object.entries(canvasRefsMap).forEach(([p, ref]) => {
-        renderPage(Number(p), ref);
-      });
-    }
+    if (!pdfDoc) return;
+
+    let cancelled = false;
+    const timeouts: number[] = [];
+
+    const schedule = (fn: () => void, delayMs: number) => {
+      const id = window.setTimeout(fn, delayMs);
+      timeouts.push(id);
+    };
+
+    const tryRender = (page: number, ref: React.RefObject<HTMLCanvasElement | null>, attempt: number) => {
+      if (cancelled) return;
+
+      if (!ref.current) {
+        if (attempt < 15) {
+          schedule(() => tryRender(page, ref, attempt + 1), 100);
+        } else {
+          // Canvas may legitimately not mount (e.g. off-screen in single-page view).
+          // Only log at debug level to reduce noise.
+          log.info(`[App] Canvas per pagina ${page} non montato dopo ${attempt} tentativi (skip, probabilmente fuori viewport).`);
+        }
+        return;
+      }
+
+      void renderPage(page, ref);
+    };
+
+    Object.entries(canvasRefsMap).forEach(([p, ref]) => {
+      tryRender(Number(p), ref, 0);
+    });
+
+    return () => {
+      cancelled = true;
+      timeouts.forEach((id) => window.clearTimeout(id));
+    };
   }, [pdfDoc, canvasRefsMap, renderScale, renderPage, pageRotations]);
 
   useEffect(() => {
-    localStorage.setItem('reader_brightness', String(brightness));
+    const target = String(brightness);
+    if (storage.getItem('reader_brightness') !== target) {
+      storage.setItem('reader_brightness', target);
+    }
   }, [brightness]);
 
   useEffect(() => {
-    localStorage.setItem('reader_temperature', String(temperature));
+    const target = String(temperature);
+    if (storage.getItem('reader_temperature') !== target) {
+      storage.setItem('reader_temperature', target);
+    }
   }, [temperature]);
 
   useEffect(() => {
-    localStorage.setItem('translation_theme', translationTheme);
+    if (storage.getItem('translation_theme') !== translationTheme) {
+      storage.setItem('translation_theme', translationTheme);
+    }
   }, [translationTheme]);
 
+  // Generate analytics report when PDF changes or significant rendering events occur
   useEffect(() => {
-    localStorage.setItem('page_scale', String(scale));
+    if (pdfDoc) {
+      const analytics = pdfRenderAnalytics.getAnalytics();
+      if (analytics.totalAttempts > 0) {
+        log.info('PDF Render Analytics Update', {
+          totalAttempts: analytics.totalAttempts,
+          successRate: analytics.successfulRenders / analytics.totalAttempts * 100,
+          corruptedPages: analytics.corruptedPages.size,
+          averageAttempts: analytics.averageAttemptsPerPage
+        });
+
+        // Generate detailed report if there are corrupted pages
+        if (analytics.corruptedPages.size > 0) {
+          const report = pdfRenderAnalytics.generateReport();
+          log.warning('PDF Render Issues Detected', report);
+        }
+      }
+    }
+  }, [pdfDoc, corruptedPages]);
+
+  useEffect(() => {
+    const target = String(columnLayout);
+    if (storage.getItem('reader_column_layout') !== target) {
+      storage.setItem('reader_column_layout', target);
+    }
+  }, [columnLayout]);
+
+  useEffect(() => {
+    const target = String(scale);
+    if (storage.getItem('page_scale') !== target) {
+      storage.setItem('page_scale', target);
+    }
   }, [scale]);
 
+  const showSevereErrorIndicator = internalSevereError || corruptedPages.size > 0;
+
+  const closeSession = useCallback(async () => {
+    if (isClosingSessionRef.current) return;
+    isClosingSessionRef.current = true;
+    setIsClosingSession(true);
+    try {
+      log.step("Chiusura sessione: salvataggio modifiche pendenti...");
+      if (library.currentProjectFileId && currentPageRef.current) {
+        const payload: any = { lastPage: currentPageRef.current };
+        if (pageDimsRef.current && Object.keys(pageDimsRef.current).length > 0) {
+          payload.pageDims = pageDimsRef.current;
+        }
+        const fileId = library.currentProjectFileId;
+        await library.updateLibrary(fileId, { fileId, ...payload }, 'CRITICAL', true);
+      }
+      await library.flushSaves();
+      setPdfDoc(null);
+      setMetadata(null);
+      setIsReaderMode(false);
+      library.setCurrentProjectFileId(null);
+      resetProjectState("Close Session");
+    } finally {
+      setIsClosingSession(false);
+      setTimeout(() => {
+        isClosingSessionRef.current = false;
+      }, 1000);
+    }
+  }, [library, resetProjectState]);
+
   return (
-    <div className="w-screen flex flex-col bg-[#1e1e1e] text-gray-200 overflow-hidden font-sans select-none" style={{ height: '100dvh' }}>
-      <Header
-        showActions={!showHome}
-        hasSession={hasSession}
-        metadata={metadata}
-        isBatchProcessing={isBatchProcessing}
-        isPaused={isPaused}
-        viewMode={viewMode}
-        scale={scale}
-        canVerifyAll={quality.canVerifyAll}
-        verifyAllRunning={quality.verifyAllState.running}
-        verifyAllCurrent={quality.verifyAllState.current}
-        verifyAllTotal={quality.verifyAllState.total}
-        brightness={brightness}
-        temperature={temperature}
-        onBatch={() => { setIsTranslatedMode(true); setIsPaused(false); setIsBatchProcessing(true); }}
-        onExport={handleExport}
-        onExportPdf={handleExportPdf}
-        onImportProject={handleImportProject}
-        onSettings={() => setIsSettingsOpen(true)}
-        onVerifyAll={quality.verifyAllTranslatedPages}
-        searchFilters={search.filters}
-        onSearchFilterChange={search.setFilter}
-        searchResults={search.searchResults}
-        onSearchResultSelect={handleSearchResultSelect}
-        statusBadge={statusBadge}
-        onToggleView={() => setViewMode(v => v === 'single' ? 'side-by-side' : 'single')}
-        onScale={setScale}
-        onBrightnessChange={setBrightness}
-        onTemperatureChange={setTemperature}
-        onToggleControls={() => setShowControls(!showControls)}
-        onRedoAll={redoAllPages}
-        onReset={() => setIsHomeView(!isHomeView)}
-        searchOpen={search.searchOpen}
-        searchTerm={search.searchTerm}
-        onSearchToggle={search.toggleSearch}
-        onSearchChange={search.setSearchTerm}
-        searchTotal={search.totalHits}
-        onSearchNext={search.goToNextSearch}
-        onSearchPrev={search.goToPrevSearch}
-        currentLanguage={docInputLanguage}
-        onLanguageClick={() => setEditLanguagePromptOpen(true)}
-        isSaving={isSaving}
-      />
-
-      {showControls && (
-        <ControlsBar
-          brightness={brightness} temperature={temperature} translationTheme={translationTheme} scale={scale}
-          onScale={setScale} onBrightnessChange={setBrightness} onTemperatureChange={setTemperature} onThemeChange={setTranslationTheme}
-        />
-      )}
-
-      <main className="flex-1 relative bg-[#121212] flex flex-col overflow-hidden" style={{ filter: `brightness(${brightness})` }}>
-        {/* Overlay Temperatura Colore (Caldo/Freddo) */}
-        {temperature !== 0 && (
+    <LibraryContext.Provider value={library}>
+      <div className="w-screen flex flex-col bg-[#1e1e1e] text-gray-200 overflow-hidden font-sans select-none" style={{ height: '100dvh' }}>
+        {showSevereErrorIndicator && (
           <div
-            className="pointer-events-none absolute inset-0 z-[180] transition-colors duration-300"
-            style={{
-              backgroundColor: temperature > 0
-                ? `rgba(255, 120, 0, ${Math.abs(temperature) * 0.0015})`
-                : `rgba(0, 120, 255, ${Math.abs(temperature) * 0.0015})`,
-            }}
+            className="absolute top-2 left-2 w-8 h-8 bg-red-600 rounded-full z-[9999] shadow-[0_0_10px_rgba(220,38,38,0.8)] animate-pulse cursor-help"
+            title="Si è verificato un problema critico (es. pagina corrotta o errore di traduzione persistente)"
           />
         )}
-        {showHome ? (
-          <HomeView
-            hasSession={hasSession}
-            metadata={metadata}
-            docInputLanguage={docInputLanguage}
-            currentPage={currentPage}
-            recentBooks={library.recentBooks}
-            availableGroups={library.availableGroups}
-            selectedGroupFilters={library.selectedGroupFilters}
-            currentProjectFileId={library.currentProjectFileId}
-            isDragging={isDragging}
-            isApiConfigured={isApiConfigured}
-            openMenuId={openMenuId}
-            pkgVersion={pkg.version}
-            onCloseSession={() => {
-              setPdfDoc(null);
-              setMetadata(null);
-              setIsReaderMode(false);
-              library.setCurrentProjectFileId(null);
-              resetProjectState();
-            }}
-            onReturnToSession={() => setIsHomeView(false)}
-            onBrowseClick={() => fileInputRef.current?.click()}
-            onDragOver={(e: any) => { e.preventDefault(); if (!isDragging) setIsDragging(true); }}
-            onDragLeave={(e: any) => { e.preventDefault(); setIsDragging(false); }}
-            onDrop={(e: any) => {
-              e.preventDefault();
-              setIsDragging(false);
-              const files = Array.from(e.dataTransfer.files) as File[];
-              const file = files[0];
-              if (file) {
-                if (file.type === 'application/pdf' || file.name.toLowerCase().endsWith('.pdf')) {
-                  setPendingUpload({ file });
-                  setUploadPromptOpen(true);
-                } else {
-                  showConfirm(
-                    "Formato non supportato",
-                    "Spiacenti, è possibile caricare solo file in formato PDF.",
-                    () => { },
-                    'alert'
-                  );
-                }
-              }
-            }}
-            onImportProject={handleImportProject}
-            onOpenProject={handleOpenProject}
-            onRenameProject={(id: string, name: string, e: any) => { e?.stopPropagation(); setRenameState({ fileId: id, currentName: name }); }}
-            onDeleteProject={async (id: string, e: any) => {
-              e?.stopPropagation();
-              const deleted = await library.deleteProject(id);
-              if (deleted && library.currentProjectFileId === id) {
-                setPdfDoc(null);
-                setMetadata(null);
-                setIsReaderMode(false);
-                library.setCurrentProjectFileId(null);
-                resetProjectState();
-              }
-            }}
-            onToggleGroupFilter={library.toggleGroupFilter}
-            onCreateGroup={() => setCreateGroupModalOpen(true)}
-            onSetOpenMenuId={setOpenMenuId}
-            onOpenSettings={() => setIsSettingsOpen(true)}
-            onManageGroups={setActiveGroupModalBookId}
-            onExportGpt={handleExportById}
-            onDeleteGroup={library.deleteGroup}
-          />
-        ) : (
-          <ReaderView
-            pages={allPages}
-            pdfDoc={pdfDoc}
-            currentPage={currentPage}
-            navigationMode="flip"
-            viewMode={viewMode}
-            pageDims={pageDims}
-            scale={scale}
-            isTranslatedMode={isTranslatedMode || isReaderMode}
-            isManualMode={isManualMode}
-            previewPage={previewPage}
-            onPreviewPageChange={setPreviewPage}
-            onOpenOriginalPage={(p: number) => {
-              setPreviewPage(null);
-              setCurrentPage(p);
-              setViewMode('single');
-              setIsTranslatedMode(false);
-              setIsReaderMode(false);
-            }}
-            onActivePageChange={(p: number) => setCurrentPage(p)}
-            onPageClick={(p: number) => {
-              if (pdfDoc && p >= 1 && p <= pdfDoc.numPages) {
-                setCurrentPage(p);
-              }
-            }}
-            translationMap={translation.translationMap}
-            annotationMap={annotationMap}
-            verificationMap={quality.verificationMap}
-            pageStatus={translation.pageStatus}
-            isPaused={isPaused}
-            copiedPage={copiedPage}
-            translationLogs={geminiLogs}
-            partialTranslations={translation.partialTranslations}
-            originalImages={originalImages}
-            croppedImages={croppedImages}
-            canvasRefs={[]}
-            canvasRefsMap={canvasRefsMap}
-            onRetry={handleRetryPage}
-            onStop={translation.stopTranslation}
-            onCopy={(p: number) => {
-              safeCopy(translation.translationMap[p] || '');
-              setCopiedPage(p);
-              window.setTimeout(() => setCopiedPage(null), 2000);
-            }}
-            onRotatePage={(p: number) => handleRotatePage(p, 90)}
-            onCropPage={handleCropPage}
-            onClearCrop={handleClearCrop}
-            onReplacePage={handleReplacePage}
-            onVerifyPage={quality.verifySingleTranslatedPage}
-            onReanalyzePage={(p: number) => quality.verifySingleTranslatedPage(p, { reanalyze: true })}
-            onFixPage={quality.fixTranslation}
-            onRetryAllCritical={handleRetryAllCritical}
-            onToggleTranslatedMode={() => setIsTranslatedMode(!isTranslatedMode)}
-            onScaleChange={setScale}
-            showConfirm={showConfirm}
-            bottomPadding={bottomBarHeight + 24}
-            translationTheme={translationTheme}
-            notesPage={notesPage}
-            onSetNotesPage={setNotesPage}
-            searchTerm={search.searchTerm}
-            activeResultId={search.activeResultId}
-            translationsMeta={translation.translationsMeta}
-            verificationsMeta={quality.verificationsMeta}
-            userHighlights={annotations.userHighlights}
-            userNotes={annotations.userNotes}
-            onAddHighlight={annotations.addUserHighlight}
-            onRemoveHighlight={annotations.removeUserHighlight}
-            onAddNote={annotations.addUserNote}
-            onUpdateNote={annotations.updateUserNote}
-            onRemoveNote={annotations.removeUserNote}
-          />
-        )}
-
-        {!showHome && previewPage == null && (
-          <MainToolbar
-            draggableRef={draggableRef}
-            currentPage={currentPage}
-            totalPages={totalPages}
-            viewMode={viewMode}
-            queueStats={translation.queueStats}
-            isPaused={isPaused}
-            isTranslatedMode={isTranslatedMode}
-            isManualMode={isManualMode}
-            previewPage={previewPage}
-            verificationMap={quality.verificationMap}
-            annotationMap={annotationMap}
-            translationMap={translation.translationMap}
-            currentPages={viewMode === 'side-by-side' ? [currentPage, currentPage + 1].filter(p => p <= totalPages) : [currentPage]}
-            onPrevPage={() => setCurrentPage((p: number) => Math.max(1, p - (viewMode === 'side-by-side' ? 2 : 1)))}
-            onNextPage={() => setCurrentPage((p: number) => Math.min(totalPages, p + (viewMode === 'side-by-side' ? 2 : 1)))}
-            onTogglePreviewStrip={() => setShowPreviewStrip(!showPreviewStrip)}
-            onTogglePause={() => setIsPaused(!isPaused)}
-            onRetranslatePages={handleRetranslatePages}
-            onToggleTranslatedMode={() => setIsTranslatedMode(!isTranslatedMode)}
-            onToggleManualMode={() => setIsManualMode(!isManualMode)}
-            onOpenNotes={(p: number | null) => setNotesPage(p)}
-          />
-        )}
-
-        {showPreviewStrip && !showHome && previewPage == null && (
-          <div className="fixed bottom-[80px] left-0 w-full z-[190] px-8 animate-in slide-in-from-bottom-4 fade-in duration-300">
-            <PagePreviewStrip
-              totalPages={totalPages}
-              currentPage={currentPage}
-              onSelect={(p: number) => { setCurrentPage(p); setShowPreviewStrip(false); }}
-              onClose={() => setShowPreviewStrip(false)}
-              getThumbnail={(p: number) => previewThumbnails[p] || null}
-              getStatus={getPageStatus}
-              getTranslatedText={(p: number) => translation.translationMap[p] || null}
-              theme={translationTheme}
-            />
+        {isConsultationMode && (
+          <div className="bg-blue-600/90 text-white text-[10px] font-bold py-1 px-4 text-center z-[100] border-b border-blue-400/20 backdrop-blur-sm">
+            MODALITÀ CONSULTAZIONE - SOLO LETTURA (FUNZIONI AI DISABILITATE)
           </div>
         )}
-      </main>
-
-      {/* Hidden File Input */}
-      <input type="file" ref={fileInputRef} className="hidden" accept="application/pdf" onChange={(e: any) => {
-        const file = e.target.files?.[0];
-        if (file) {
-          if (file.type === 'application/pdf' || file.name.toLowerCase().endsWith('.pdf')) {
-            setPendingUpload({ file });
-            setUploadPromptOpen(true);
-          } else {
-            showConfirm(
-              "Formato non supportato",
-              "Spiacenti, è possibile caricare solo file in formato PDF.",
-              () => { },
-              'alert'
-            );
-          }
-        }
-        e.target.value = '';
-      }} />
-
-      {/* Modals */}
-      {isSettingsOpen && (
-        <SettingsModal
-          isOpen={isSettingsOpen}
-          onClose={() => setIsSettingsOpen(false)}
-          currentSettings={aiSettings}
-          onSave={async (s: AISettings) => {
-            await saveSettings(s);
-            if (s.inputLanguageDefault) setDefaultLang(s.inputLanguageDefault);
-          }}
+        <Header
+          showActions={!showHome}
+          hasSession={hasSession}
+          metadata={metadata}
+          isBatchProcessing={isBatchProcessing}
+          isPaused={isPaused}
+          viewMode={viewMode}
+          scale={scale}
+          canVerifyAll={quality.canVerifyAll}
+          verificationStats={quality.verificationQueueStats}
+          brightness={brightness}
+          temperature={temperature}
+          onBatch={() => { setIsTranslatedMode(true); setIsPaused(false); setIsBatchProcessing(true); }}
+          onExport={handleExport}
+          onExportPdf={handleExportPdf}
+          onExportOriginalPdf={handleExportOriginalPdf}
+          onImportProject={handleImportProject}
+          onSettings={() => setIsSettingsOpen(true)}
+          onVerifyAll={quality.verifyAllTranslatedPages}
+          searchFilters={search.filters}
+          onSearchFilterChange={search.setFilter}
+          searchResults={search.searchResults}
+          onSearchResultSelect={handleSearchResultSelect}
+          statusBadge={statusBadge}
+          onToggleView={() => setViewMode((v) => (v === 'auto' ? 'single' : v === 'single' ? 'spread' : 'auto'))}
+          onScale={setScale}
+          onBrightnessChange={setBrightness}
+          onTemperatureChange={setTemperature}
+          onToggleControls={() => setShowControls(!showControls)}
           onRedoAll={redoAllPages}
-          onRetroactiveRename={scanAndRenameOldFiles}
-          onRetroactiveRenameAll={scanAndRenameAllFiles}
-          onRefreshLibrary={library.refreshLibrary}
-          isLibraryView={isHomeView}
-          showConfirm={showConfirm}
-        />
-      )}
-
-      {uploadPromptOpen && (
-        <UploadLanguagePrompt
-          isOpen={uploadPromptOpen}
-          defaultValue={docInputLanguage}
-          onCancel={() => { setUploadPromptOpen(false); setPendingUpload(null); }}
-          onConfirm={(lang: string, groups: string[]) => {
-            const file: File | undefined = pendingUpload?.file;
-            setUploadPromptOpen(false);
-            setPendingUpload(null);
-            if (!file) {
-              pendingAutoStartRef.current = null;
-              return;
-            }
-            pendingAutoStartRef.current = { page: 1, language: lang };
-            void continueUploadWithLanguage(file, lang, groups);
-          }}
-          availableGroups={library.availableGroups}
-        />
-      )}
-
-      {editLanguagePromptOpen && (
-        <UploadLanguagePrompt
-          isOpen={editLanguagePromptOpen}
-          defaultValue={docInputLanguage}
-          onCancel={() => setEditLanguagePromptOpen(false)}
-          onConfirm={async (lang: string) => {
-            setDocInputLanguage(lang);
-            if (metadata?.name) {
-              await library.updateLibrary(metadata.name, { inputLanguage: lang });
-              log.success(`Lingua di input aggiornata a: ${lang}`);
-            }
-            setEditLanguagePromptOpen(false);
-          }}
-        />
-      )}
-
-      {renameState && (
-        <RenameModal
-          isOpen={!!renameState}
-          currentName={renameState.currentName}
-          onClose={() => setRenameState(null)}
-          onRename={async (newName: string) => {
-            const res = await window.electronAPI.renameTranslation({ fileId: renameState.fileId, newFileName: newName });
-            if (res.success) {
-              library.refreshLibrary();
-              if (library.currentProjectFileId === renameState.fileId) {
-                setMetadata(prev => prev ? { ...prev, name: newName } : null);
+          onReset={() => {
+            if (!isHomeView && library.currentProjectFileId && currentPage) {
+              const payload: any = { lastPage: currentPage };
+              if (pageDims && Object.keys(pageDims).length > 0) {
+                payload.pageDims = pageDims;
               }
-              setRenameState(null);
+              const fileId = library.currentProjectFileId;
+              void library.updateLibrary(fileId, { fileId, ...payload }, 'CRITICAL', true);
             }
+            setIsHomeView(!isHomeView);
           }}
+          searchOpen={search.searchOpen}
+          searchTerm={search.searchTerm}
+          onSearchToggle={search.toggleSearch}
+          onSearchChange={search.setSearchTerm}
+          searchTotal={search.totalHits}
+          onSearchNext={search.goToNextSearch}
+          onSearchPrev={search.goToPrevSearch}
+          currentLanguage={docInputLanguage}
+          onLanguageClick={() => setEditLanguagePromptOpen(true)}
+          isSaving={isSaving}
+          isConsultationMode={isConsultationMode}
         />
-      )}
 
-      {createGroupModalOpen && (
-        <CreateGroupModal
-          isOpen={createGroupModalOpen}
-          onClose={() => setCreateGroupModalOpen(false)}
-          onConfirm={(group: string) => { library.createGroup(group); setCreateGroupModalOpen(false); }}
-        />
-      )}
+        {showControls && (
+          <ControlsBar
+            brightness={brightness} temperature={temperature} translationTheme={translationTheme} scale={scale}
+            onScale={setScale} onBrightnessChange={setBrightness} onTemperatureChange={setTemperature} onThemeChange={setTranslationTheme}
+            viewMode={viewMode} onViewModeChange={setViewMode}
+            columnLayout={columnLayout} onColumnLayoutChange={setColumnLayout}
+          />
+        )}
 
-      {activeGroupModalBookId && (
-        <GroupManagementModal
-          isOpen={!!activeGroupModalBookId}
-          fileName={library.recentBooks[activeGroupModalBookId]?.fileName || ''}
-          availableGroups={library.availableGroups}
-          assignedGroups={library.recentBooks[activeGroupModalBookId]?.groups || []}
-          onClose={() => setActiveGroupModalBookId(null)}
-          onToggleGroup={(group: string) => library.addBookToGroup(activeGroupModalBookId, group)}
-          onCreateGroup={(group: string) => library.createGroup(group)}
-        />
-      )}
+        <main className="flex-1 relative bg-[#121212] flex flex-col overflow-hidden" style={{ filter: `brightness(${brightness})` }}>
+          {/* Overlay Temperatura Colore (Caldo/Freddo) */}
+          {temperature !== 0 && (
+            <div
+              className="pointer-events-none absolute inset-0 z-[180] transition-colors duration-300"
+              style={{
+                backgroundColor: temperature > 0
+                  ? `rgba(255, 120, 0, ${Math.abs(temperature) * 0.0015})`
+                  : `rgba(0, 120, 255, ${Math.abs(temperature) * 0.0015})`,
+              }}
+            />
+          )}
+          {showHome ? (
+            <HomeView
+              hasSession={hasSession}
+              metadata={metadata}
+              docInputLanguage={docInputLanguage}
+              currentPage={currentPage}
+              isDragging={isDragging}
+              isApiConfigured={isApiConfigured}
+              openMenuId={openMenuId}
+              pkgVersion={appVersion}
+              onRequestCloseSession={() => {
+                showConfirm(
+                  "Chiudere la sessione?",
+                  "Verrà salvata l'ultima pagina e tornerai alla Libreria.",
+                  () => {
+                    void closeSession();
+                  },
+                  'info'
+                );
+              }}
+              onReturnToSession={() => setIsHomeView(false)}
+              onBrowseClick={() => fileInputRef.current?.click()}
+              onDragOver={(e: any) => { e.preventDefault(); if (!isDragging) setIsDragging(true); }}
+              onDragLeave={(e: any) => { e.preventDefault(); setIsDragging(false); }}
+              onDrop={(e: any) => {
+                e.preventDefault();
+                setIsDragging(false);
+                const files = Array.from(e.dataTransfer.files) as File[];
+                const file = files[0];
+                if (file) {
+                  if (file.type === 'application/pdf' || file.name.toLowerCase().endsWith('.pdf')) {
+                    const fileId = crypto.randomUUID();
+                    const stableFileId = ensureJsonExtension(fileId);
+                    setPendingUpload({ file, fileId: stableFileId });
+                    setUploadPromptOpen(true);
+                  } else {
+                    showConfirm(
+                      "Formato non supportato",
+                      "Spiacenti, è possibile caricare solo file in formato PDF.",
+                      () => { },
+                      'alert'
+                    );
+                  }
+                }
+              }}
+              onImportProject={handleImportProject}
+              onOpenProject={handleOpenProject}
+              onRenameProject={(id: string, name: string, e: any, lang?: string) => { e?.stopPropagation(); setRenameState({ fileId: id, currentName: name, currentLang: lang }); }}
+              onEditLanguageProject={(id: string, lang: string) => { setEditLanguageTarget({ fileId: id, currentLang: lang }); setEditLanguagePromptOpen(true); }}
+              onDeleteProject={async (id: string, e: any) => {
+                e?.stopPropagation();
+                const deleted = await library.deleteProject(id);
+                if (deleted && library.currentProjectFileId === id) {
+                  setPdfDoc(null);
+                  setMetadata(null);
+                  setIsReaderMode(false);
+                  library.setCurrentProjectFileId(null);
+                  resetProjectState("Project Deleted");
+                }
+              }}
+              onCreateGroup={() => setCreateGroupModalOpen(true)}
+              onSetOpenMenuId={setOpenMenuId}
+              onOpenSettings={() => setIsSettingsOpen(true)}
+              onManageGroups={setActiveGroupModalBookId}
+              onExportGpt={handleExportById}
+              isConsultationMode={isConsultationMode}
+              isActiveProjectPaused={isPaused}
+              activeProjectQueueStats={combinedQueueStats}
+              onPauseActiveProject={handleTogglePauseActiveProject}
+              onStopActiveProject={handleStopActiveProject}
+              isOpeningProject={isOpeningProject}
+              isClosingSession={isClosingSession}
+            />
+          ) : (
+            <ReaderView
+              key={`reader-${projectKey}`}
+              pages={allPages}
+              pdfDoc={pdfDoc}
+              currentPage={currentPage}
+              navigationMode="flip"
+              viewMode={viewMode}
+              pageDims={pageDims}
+              pageRotations={pageRotations}
+              scale={scale}
+              onEffectiveScaleChange={handleEffectiveScaleChange}
+              isTranslatedMode={isTranslatedMode || isReaderMode}
+              isManualMode={isManualMode}
+              previewPage={previewPage}
+              onPreviewPageChange={setPreviewPage}
+              onOpenOriginalPage={(p: number) => {
+                setCurrentPage(p);
+                setPreviewPage(p);
+              }}
+              onActivePageChange={(p: number) => setCurrentPage(p)}
+              onPageClick={(p: number) => {
+                if (pdfDoc && p >= 1 && p <= pdfDoc.numPages) {
+                  setCurrentPage(p);
+                }
+              }}
+              translationMap={translation.translationMap}
+              annotationMap={annotationMap}
+              verificationMap={quality.verificationMap}
+              pageStatus={translation.pageStatus}
+              isPaused={isPaused}
+              copiedPage={copiedPage}
+              translationLogs={geminiLogs}
+              isAutodetecting={isAutodetecting}
+              autodetectLogs={autodetectLogs}
+              partialTranslations={translation.partialTranslations}
+              originalImages={originalImages}
+              croppedImages={croppedImages}
+              canvasRefs={[]}
+              canvasRefsMap={canvasRefsMap}
+              onRetry={handleRetryPage}
+              onStop={translation.stopTranslation}
+              onCopy={(p: number) => {
+                safeCopy(translation.translationMap[p] || '');
+                setCopiedPage(p);
+                window.setTimeout(() => setCopiedPage(null), 2000);
+              }}
+              onRotatePage={(p: number) => handleRotatePage(p, 90)}
+              onCropPage={handleCropPage}
+              onClearCrop={handleClearCrop}
+              onReplacePage={handleReplacePage}
+              onVerifyPage={quality.verifySingleTranslatedPage}
+              onForceVerifyPage={quality.forceVerificationSuccess}
+              onReanalyzePage={(p: number) => quality.verifySingleTranslatedPage(p, { reanalyze: true })}
+              onFixPage={(p, opts) => {
+                log.info(`[UI] Azione 'Rifai con suggerimenti' per pagina ${p}`, opts);
+                setIsPaused(false);
+                setIsManualMode(false);
+                // Piccola attesa per permettere allo stato di propagarsi? 
+                // Non necessaria grazie al fix in useTranslationQueue, ma utile per chiarezza
+                quality.fixTranslation(p, opts);
+              }}
+              onRetryAllCritical={handleRetryAllCritical}
 
-      {cropModal && (
-        <ImageCropModal
-          isOpen={!!cropModal}
-          src={cropModal.src}
-          page={cropModal.page}
-          onClose={() => setCropModal(null)}
-          onConfirm={async (result: { page: number; croppedDataUrl: string; rect: any }) => {
-            const page = result.page;
-            setCroppedImages((prev: Record<number, string>) => ({ ...prev, [page]: result.croppedDataUrl }));
-            const res = await window.electronAPI.saveProjectImage({
-              fileId: library.currentProjectFileId || '',
-              page,
-              kind: 'crop',
-              dataUrl: result.croppedDataUrl
+              onScaleChange={setScale}
+              showConfirm={showConfirm}
+              bottomPadding={bottomBarHeight + 120}
+              translationTheme={translationTheme}
+              notesPage={notesPage}
+              onSetNotesPage={setNotesPage}
+              searchTerm={search.searchTerm}
+              activeResultId={search.activeResultId}
+              translationsMeta={translation.translationsMeta}
+              verificationsMeta={quality.verificationsMeta}
+              userHighlights={annotations.userHighlights}
+              userNotes={annotations.userNotes}
+              onAddHighlight={annotations.addUserHighlight}
+              onRemoveHighlight={annotations.removeUserHighlight}
+              onAddNote={annotations.addUserNote}
+              onUpdateNote={annotations.updateUserNote}
+              onRemoveNote={annotations.removeUserNote}
+              isConsultationMode={isConsultationMode}
+              columnLayout={columnLayout}
+              isApiConfigured={isApiConfigured}
+              onOpenSettings={() => setIsSettingsOpen(true)}
+            />
+          )}
+
+          {!showHome && previewPage == null && (
+            <MainToolbar
+              draggableRef={draggableRef}
+              currentPage={currentPage}
+              totalPages={totalPages}
+              viewMode={viewMode}
+              queueStats={combinedQueueStats}
+              isPaused={isPaused}
+              isTranslatedMode={isTranslatedMode}
+              isManualMode={isManualMode}
+              previewPage={previewPage}
+              verificationMap={quality.verificationMap}
+              annotationMap={annotationMap}
+              translationMap={translation.translationMap}
+              currentPages={[currentPage]}
+              onPrevPage={() => setCurrentPage((p: number) => Math.max(1, p - 1))}
+              onNextPage={() => setCurrentPage((p: number) => Math.min(totalPages, p + 1))}
+              onTogglePreviewStrip={() => setShowPreviewStrip(!showPreviewStrip)}
+              onTogglePause={handleTogglePauseActiveProject}
+              onStop={handleStopActiveProject}
+              onRetranslatePages={handleRetranslatePages}
+
+              onOpenOriginalPreview={() => setPreviewPage(currentPage)}
+              onToggleManualMode={() => setIsManualMode(!isManualMode)}
+              onOpenNotes={(p: number | null) => setNotesPage(p)}
+              isConsultationMode={isConsultationMode}
+            />
+          )}
+
+          {showPreviewStrip && !showHome && previewPage == null && (
+            <div className="fixed top-[60px] left-0 w-full z-[190] px-8 animate-in slide-in-from-top-4 fade-in duration-300">
+              <PagePreviewStrip
+                totalPages={totalPages}
+                currentPage={currentPage}
+                onSelect={(p: number) => { setCurrentPage(p); setShowPreviewStrip(false); }}
+                onClose={() => setShowPreviewStrip(false)}
+                getThumbnail={(p: number) => previewThumbnails[p] || null}
+                getStatus={getPageStatus}
+                getTranslatedText={(p: number) => translation.translationMap[p] || null}
+                theme={translationTheme}
+              />
+            </div>
+          )}
+        </main>
+
+        {/* PDF Render Error Notification */}
+        <PdfRenderErrorNotification
+          corruptedPages={corruptedPages}
+          failedRenders={failedRenders}
+          onDismiss={() => {
+            log.info('User dismissed PDF render error notification');
+          }}
+          onSkipPage={(pageNum) => {
+            log.info(`User chose to skip corrupted page ${pageNum}`);
+            setCorruptedPages(prev => {
+              const updated = new Set(prev);
+              updated.delete(pageNum);
+              return updated;
             });
-            if (res?.relPath) {
-              setPageImagesIndex((prev: any) => ({ ...prev, crops: { ...prev.crops, [page]: res.relPath } }));
-            }
-            setCropModal(null);
           }}
         />
-      )}
 
-      {pageSelectionModal.isOpen && (
-        <PageSelectionModal
-          isOpen={pageSelectionModal.isOpen}
-          total={pageSelectionModal.total}
-          defaultPage={pageSelectionModal.targetPage}
-          onClose={() => {
-            setPageSelectionModal((prev: any) => ({ ...prev, isOpen: false }));
-            setPendingReplacement(null);
-          }}
-          onConfirm={(page: number) => {
-            if (pendingReplacement) {
-              setPageReplacements((prev: Record<number, PageReplacement>) => ({
-                ...prev,
-                [pendingReplacement.page]: { filePath: pendingReplacement.filePath, sourcePage: page, updatedAt: Date.now() }
-              }));
+        {/* Hidden File Input */}
+        <input type="file" ref={fileInputRef} className="hidden" accept="application/pdf" onChange={(e: any) => {
+          const file = e.target.files?.[0];
+          if (file) {
+            if (file.type === 'application/pdf' || file.name.toLowerCase().endsWith('.pdf')) {
+              const fileId = crypto.randomUUID();
+              const stableFileId = ensureJsonExtension(fileId);
+              setPendingUpload({ file, fileId: stableFileId });
+              setUploadPromptOpen(true);
+            } else {
+              showConfirm(
+                "Formato non supportato",
+                "Spiacenti, è possibile caricare solo file in formato PDF.",
+                () => { },
+                'alert'
+              );
+            }
+          }
+          e.target.value = '';
+        }} />
+
+        {/* Modals */}
+        {isSettingsOpen && (
+          <SettingsModal
+            onClose={() => setIsSettingsOpen(false)}
+            settings={aiSettings}
+            onSave={async (s: AISettings) => {
+              await saveSettings(s);
+            }}
+            onRedoAll={redoAllPages}
+            onRetroactiveRename={scanAndRenameOldFiles}
+            onRetroactiveRenameAll={scanAndRenameAllFiles}
+            onConsolidate={handleConsolidate}
+            onRefreshLibrary={library.refreshLibrary}
+            isLibraryView={isHomeView}
+            currentBookTitle={metadata?.name}
+            showConfirm={showConfirm}
+          />
+        )}
+
+        {uploadPromptOpen && (
+          <UploadLanguagePrompt
+            isOpen={uploadPromptOpen}
+            defaultValue={docInputLanguage}
+            onCancel={() => { setUploadPromptOpen(false); setPendingUpload(null); }}
+            onConfirm={(lang: string, groups: string[]) => {
+              const file: File | undefined = pendingUpload?.file;
+              const stableFileId: string | undefined = pendingUpload?.fileId;
+              setUploadPromptOpen(false);
+              setPendingUpload(null);
+              if (!file) {
+                pendingAutoStartRef.current = null;
+                return;
+              }
+              const effectiveId = stableFileId || ensureJsonExtension(crypto.randomUUID());
+              pendingAutoStartRef.current = { page: 1, language: lang };
+              void continueUploadWithLanguage(file, lang, groups, effectiveId);
+            }}
+            availableGroups={library.availableGroups}
+          />
+        )}
+
+        {editLanguagePromptOpen && (
+          <UploadLanguagePrompt
+            isOpen={editLanguagePromptOpen}
+            defaultValue={editLanguageTarget ? editLanguageTarget.currentLang : docInputLanguage}
+            onCancel={() => { setEditLanguagePromptOpen(false); setEditLanguageTarget(null); }}
+            onConfirm={async (lang: string) => {
+              if (editLanguageTarget) {
+                // Modifica da Home o menu contestuale per progetto specifico
+                const targetId = String(editLanguageTarget.fileId || '').trim();
+                if (!targetId) {
+                  setEditLanguageTarget(null);
+                  setEditLanguagePromptOpen(false);
+                  return;
+                }
+
+                const book = library.recentBooks[targetId];
+                if (book) {
+                  await library.updateLibrary(targetId, { fileId: targetId, inputLanguage: lang });
+                  log.success(`Lingua aggiornata per "${book.fileName}" a: ${lang}`);
+                  await library.refreshLibrary();
+                }
+                setEditLanguageTarget(null);
+              } else {
+                // Modifica per progetto attivo (dal Reader)
+                setDocInputLanguage(lang);
+                setDefaultLang(lang);
+                if (library.currentProjectFileId) {
+                  const fileId = library.currentProjectFileId;
+                  await library.updateLibrary(fileId, { fileId, inputLanguage: lang });
+                  log.success(`Lingua di input aggiornata a: ${lang}`);
+                }
+              }
+              setEditLanguagePromptOpen(false);
+            }}
+          />
+        )}
+
+        {renameState && (
+          <RenameModal
+            isOpen={!!renameState}
+            currentName={renameState.currentName}
+            currentLanguage={renameState.currentLang}
+            onClose={() => setRenameState(null)}
+            onRename={async (newName: string, newLang: string) => {
+              const oldId = renameState.fileId;
+              const res = await window.electronAPI.setDisplayName({
+                fileId: oldId,
+                displayName: newName,
+                inputLanguage: newLang
+              });
+
+              if (res?.success) {
+                if (library.currentProjectFileId === oldId) {
+                  setMetadata(prev => prev ? { ...prev, name: newName } : null);
+                  if (newLang && newLang !== docInputLanguage) {
+                    setDocInputLanguage(newLang);
+                    setDefaultLang(newLang);
+                  }
+                }
+
+                if (library.registerNameChange) {
+                  library.registerNameChange(oldId, newName);
+                }
+
+                library.refreshLibrary();
+
+                setRenameState(null);
+              } else {
+                log.warning(`Aggiornamento nome fallito: ${res?.error || 'Errore sconosciuto'}`);
+              }
+            }}
+          />
+        )}
+
+        {createGroupModalOpen && (
+          <CreateGroupModal
+            isOpen={createGroupModalOpen}
+            onClose={() => setCreateGroupModalOpen(false)}
+            onConfirm={(group: string) => { library.createGroup(group); setCreateGroupModalOpen(false); }}
+          />
+        )}
+
+        {activeGroupModalBookId && (
+          <GroupManagementModal
+            isOpen={!!activeGroupModalBookId}
+            fileName={library.recentBooks[activeGroupModalBookId]?.fileName || ''}
+            availableGroups={library.availableGroups}
+            assignedGroups={library.recentBooks[activeGroupModalBookId]?.groups || []}
+            onClose={() => setActiveGroupModalBookId(null)}
+            onToggleGroup={(group: string) => library.addBookToGroup(activeGroupModalBookId, group)}
+            onCreateGroup={(group: string) => library.createGroup(group)}
+          />
+        )}
+
+        {cropModal && (
+          <ImageCropModal
+            isOpen={!!cropModal}
+            src={cropModal.src}
+            page={cropModal.page}
+            onClose={() => setCropModal(null)}
+            onConfirm={async (result: { page: number; croppedDataUrl: string; rect: any }) => {
+              if (library.currentProjectFileId && library.isBlocked(library.currentProjectFileId)) {
+                log.warning(`Blocked save crop for ${library.currentProjectFileId} (blacklisted/transitioning)`);
+                setCropModal(null);
+                return;
+              }
+              const page = result.page;
+              setCroppedImages((prev: Record<number, string>) => ({ ...prev, [page]: result.croppedDataUrl }));
+              const res = await window.electronAPI.saveProjectImage({
+                fileId: library.currentProjectFileId || '',
+                page,
+                kind: 'crop',
+                dataUrl: result.croppedDataUrl
+              });
+              if (res?.relPath) {
+                setPageImagesIndex((prev: any) => ({ ...prev, crops: { ...prev.crops, [page]: res.relPath } }));
+              }
+              setCropModal(null);
+            }}
+          />
+        )}
+
+        {pageSelectionModal.isOpen && (
+          <PageSelectionModal
+            isOpen={pageSelectionModal.isOpen}
+            total={pageSelectionModal.total}
+            defaultPage={pageSelectionModal.targetPage}
+            onClose={() => {
+              setPageSelectionModal((prev: any) => ({ ...prev, isOpen: false }));
               setPendingReplacement(null);
-            }
-            setPageSelectionModal((prev: any) => ({ ...prev, isOpen: false }));
-          }}
-        />
-      )}
+            }}
+            onConfirm={(page: number) => {
+              if (pendingReplacement) {
+                setPageReplacements((prev: Record<number, PageReplacement>) => ({
+                  ...prev,
+                  [pendingReplacement.page]: { filePath: pendingReplacement.filePath, sourcePage: page, updatedAt: Date.now() }
+                }));
+                setPendingReplacement(null);
+              }
+              setPageSelectionModal((prev: any) => ({ ...prev, isOpen: false }));
+            }}
+          />
+        )}
 
-      <SimpleConfirmModal
-        isOpen={confirmModal.isOpen}
-        title={confirmModal.title}
-        message={confirmModal.message}
-        type={confirmModal.type}
-        onConfirm={confirmModal.onConfirm}
-        onClose={() => setConfirmModal(prev => ({ ...prev, isOpen: false }))}
-      />
-    </div>
+        <SimpleConfirmModal
+          isOpen={confirmModal.isOpen}
+          title={confirmModal.title}
+          message={confirmModal.message}
+          type={confirmModal.type}
+          onConfirm={confirmModal.onConfirm}
+          onClose={() => setConfirmModal(prev => ({ ...prev, isOpen: false }))}
+        />
+
+        {toast && (
+          <ToastNotification
+            message={toast.message}
+            type={toast.type}
+            onClose={() => setToast(null)}
+          />
+        )}
+
+        <TranslationCompletionNotifier
+          showConfirm={showConfirm}
+          onOpenProject={handleOpenProject}
+        />
+
+        <GlobalLoadingOverlay
+          isVisible={!!isOpeningProject}
+          message={isOpeningProject ? "Apertura progetto in corso..." : undefined}
+        />
+      </div>
+    </LibraryContext.Provider>
   );
 };
 

@@ -1,26 +1,29 @@
-
 <!DOCTYPE html>
 <html lang="it">
 <head>
     <meta charset="UTF-8">
+    <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' 'unsafe-inline' 'unsafe-eval'; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src 'self' https://fonts.gstatic.com; img-src 'self' data: blob: https:; connect-src 'self' https:;">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>InstantTraducer</title>
-    <script src="https://cdn.tailwindcss.com"></script>
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800;900&display=swap" rel="stylesheet">
+    <link href="https://fonts.googleapis.com/css2?family=Inter:ital,opsz,wght@0,14..32,100..900;1,14..32,100..900&display=swap" rel="stylesheet">
     <style>
+        * {
+            -webkit-font-smoothing: antialiased;
+            -moz-osx-font-smoothing: grayscale;
+        }
         body {
-            font-family: 'Inter', sans-serif;
-            background-color: #121212;
+            font-family: 'Inter', -apple-system, BlinkMacSystemFont, system-ui, sans-serif;
+            background-color: #0d1117;
             margin: 0;
             padding: 0;
             overflow: hidden;
-            color: #e0e0e0;
+            color: #e6edf3;
         }
         ::selection {
-            background-color: rgba(59, 130, 246, 0.3);
-            color: white;
+            background-color: rgba(88, 166, 255, 0.25);
+            color: #fff;
         }
         @keyframes progress {
             0% { transform: scaleX(0); }
@@ -28,24 +31,11 @@
             100% { transform: scaleX(1); }
         }
         .animate-progress {
-            animation: progress 2s ease-in-out infinite;
+            animation: progress 2.5s ease-in-out infinite;
             transform-origin: left;
         }
     </style>
-<script type="importmap">
-{
-  "imports": {
-    "react": "https://esm.sh/react@^19.2.3",
-    "react/": "https://esm.sh/react@^19.2.3/",
-    "lucide-react": "https://esm.sh/lucide-react@^0.562.0",
-    "react-dom/": "https://esm.sh/react-dom@^19.2.3/",
-    "@google/genai": "https://esm.sh/@google/genai@^1.35.0",
-    "pdfjs-dist": "https://esm.sh/pdfjs-dist@5.4.530",
-    "jspdf": "https://esm.sh/jspdf@^2.5.1"
-  }
-}
-</script>
-<link rel="stylesheet" href="/src/index.css">
+    <link rel="stylesheet" href="/src/index.css">
 </head>
 <body>
     <div id="root"></div>

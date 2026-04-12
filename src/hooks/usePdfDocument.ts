@@ -11,12 +11,25 @@ const PAGE_RENDER_TIMEOUT_MS = 60_000;
 const PAGE_CACHE_JPEG_QUALITY = 0.74;
 const PAGE_CACHE_MAX_EDGE = 1600;
 
+// Helper to detect if an error is due to PDF destruction/cleanup
+const isPdfDestructionError = (err: any): boolean => {
+  if (!err) return false;
+  const msg = (err.message || err.toString() || '').toLowerCase();
+  return (
+    msg.includes('invalid page request') ||
+    msg.includes('worker was destroyed') ||
+    msg.includes('transport destroyed') ||
+    msg.includes('renderingcancelledexception') ||
+    msg.includes('cancelled')
+  );
+};
+
 export const usePdfDocument = () => {
   const [pdfDoc, setPdfDoc] = useState<any>(null);
   const [currentPage, setCurrentPage] = useState<number>(1);
   const [scale, setScale] = useState<number>(1.2);
   const [metadata, setMetadata] = useState<PDFMetadata | null>(null);
-  const [viewMode, setViewMode] = useState<'single' | 'side-by-side'>('single');
+  const [viewMode, setViewMode] = useState<'single' | 'spread'>('single');
   const [pageDims, setPageDims] = useState<Record<number, { width: number, height: number }>>({});
   const [isReaderMode, setIsReaderMode] = useState(false);
 
@@ -73,6 +86,10 @@ export const usePdfDocument = () => {
     pageRotations: Record<number, number> = {}
   ) => {
     if (!pdfDoc) return;
+    if (pageNum < 1 || (pdfDoc.numPages && pageNum > pdfDoc.numPages)) {
+      log.error(`[usePdfDocument] Invalid page request: ${pageNum} (Total: ${pdfDoc.numPages})`);
+      return;
+    }
     latestPageRef.current[canvasKey] = pageNum;
 
     // Cancel existing render task
@@ -87,6 +104,12 @@ export const usePdfDocument = () => {
       const replacement = pageReplacements[pageNum];
       const doc = replacement?.filePath ? await loadReplacementPdfDoc(replacement.filePath) : pdfDoc;
       const srcPage = replacement?.filePath ? replacement.sourcePage : pageNum;
+      
+      // Bounds check for source page
+      if (srcPage < 1 || (doc.numPages && srcPage > doc.numPages)) {
+         throw new Error(`Invalid source page: ${srcPage} (Total: ${doc.numPages})`);
+      }
+
       const page: any = await doc.getPage(srcPage);
       
       if (latestPageRef.current[canvasKey] !== pageNum) return;
@@ -113,7 +136,7 @@ export const usePdfDocument = () => {
       
       await renderTask.promise;
     } catch (e: any) { 
-        if (e.name !== 'RenderingCancelledException') {
+        if (!isPdfDestructionError(e)) {
              log.error(`Errore render pagina ${pageNum}`, e); 
         }
     }
@@ -123,37 +146,50 @@ export const usePdfDocument = () => {
     const { scale = 2.1, jpegQuality = 0.86, extraRotation = 0, signal } = opts || {};
     if (signal?.aborted) throw new Error('Operazione annullata');
 
-    const page: any = await withTimeout<any>(doc.getPage(pageNum), PAGE_RENDER_TIMEOUT_MS);
-    if (signal?.aborted) throw new Error('Operazione annullata');
+    // Safety checks
+    if (!doc) throw new Error('Documento non valido (null)');
+    if (pageNum < 1 || (doc.numPages && pageNum > doc.numPages)) {
+      throw new Error(`Pagina non valida: ${pageNum}`);
+    }
 
-    const canvas = document.createElement('canvas');
-    let renderTask: any = null;
     try {
-      const baseRotation = (((page?.rotate || 0) + extraRotation) % 360 + 360) % 360;
-      const viewport = page.getViewport({ scale, rotation: baseRotation });
-      canvas.width = viewport.width;
-      canvas.height = viewport.height;
-
-      const ctx = canvas.getContext('2d', { alpha: false });
-      if (ctx) {
-        ctx.fillStyle = 'white';
-        ctx.fillRect(0, 0, canvas.width, canvas.height);
-      }
-
-      renderTask = page.render({ canvasContext: ctx as any, viewport });
-      await withTimeout(renderTask.promise, PAGE_RENDER_TIMEOUT_MS, () => {
-        try { renderTask?.cancel?.(); } catch { }
-      });
+      const page: any = await withTimeout<any>(doc.getPage(pageNum), PAGE_RENDER_TIMEOUT_MS);
       if (signal?.aborted) throw new Error('Operazione annullata');
 
-      const dataUrl = canvas.toDataURL('image/jpeg', jpegQuality);
-      const base64 = dataUrl.includes(',') ? dataUrl.split(',')[1] : dataUrl;
-      if (!base64) throw new Error('Immagine vuota');
-      return { dataUrl, base64, width: viewport.width, height: viewport.height };
-    } finally {
-      try { renderTask?.cancel?.(); } catch { }
-      canvas.width = 0;
-      canvas.height = 0;
+      const canvas = document.createElement('canvas');
+      let renderTask: any = null;
+      try {
+        const baseRotation = (((page?.rotate || 0) + extraRotation) % 360 + 360) % 360;
+        const viewport = page.getViewport({ scale, rotation: baseRotation });
+        canvas.width = viewport.width;
+        canvas.height = viewport.height;
+
+        const ctx = canvas.getContext('2d', { alpha: false });
+        if (ctx) {
+          ctx.fillStyle = 'white';
+          ctx.fillRect(0, 0, canvas.width, canvas.height);
+        }
+
+        renderTask = page.render({ canvasContext: ctx as any, viewport });
+        await withTimeout(renderTask.promise, PAGE_RENDER_TIMEOUT_MS, () => {
+          try { renderTask?.cancel?.(); } catch { }
+        });
+        if (signal?.aborted) throw new Error('Operazione annullata');
+
+        const dataUrl = canvas.toDataURL('image/jpeg', jpegQuality);
+        const base64 = dataUrl.includes(',') ? dataUrl.split(',')[1] : dataUrl;
+        if (!base64) throw new Error('Immagine vuota');
+        return { dataUrl, base64, width: viewport.width, height: viewport.height };
+      } finally {
+        try { renderTask?.cancel?.(); } catch { }
+        canvas.width = 0;
+        canvas.height = 0;
+      }
+    } catch (e: any) {
+      if (isPdfDestructionError(e)) {
+        throw new Error('cancelled'); // Rethrow as simple cancelled error
+      }
+      throw e;
     }
   }, []);
 
@@ -170,38 +206,52 @@ export const usePdfDocument = () => {
     const replacement = pageReplacements[pageNum];
     const doc = replacement?.filePath ? await loadReplacementPdfDoc(replacement.filePath) : pdfDoc;
     const srcPage = replacement?.filePath ? replacement.sourcePage : pageNum;
-    const page: any = await withTimeout<any>(doc.getPage(srcPage), PAGE_RENDER_TIMEOUT_MS);
-    if (signal?.aborted) throw new Error('Operazione annullata');
+    
+    // Safety checks
+    if (!doc) throw new Error('Documento non caricato');
+    if (srcPage < 1 || (doc.numPages && srcPage > doc.numPages)) {
+       throw new Error(`Pagina sorgente non valida: ${srcPage}`);
+    }
 
-    const canvas = document.createElement('canvas');
-    let renderTask: any = null;
     try {
-      const userRotation = pageRotations[pageNum] || 0;
-      const baseRotation = (((page?.rotate || 0) + userRotation) % 360 + 360) % 360;
-      const viewport = page.getViewport({ scale, rotation: baseRotation });
-      canvas.width = viewport.width;
-      canvas.height = viewport.height;
-
-      const ctx = canvas.getContext('2d', { alpha: false });
-      if (ctx) {
-        ctx.fillStyle = 'white';
-        ctx.fillRect(0, 0, canvas.width, canvas.height);
-      }
-
-      renderTask = page.render({ canvasContext: ctx as any, viewport });
-      await withTimeout(renderTask.promise, PAGE_RENDER_TIMEOUT_MS, () => {
-        try { renderTask?.cancel?.(); } catch { }
-      });
+      const page: any = await withTimeout<any>(doc.getPage(srcPage), PAGE_RENDER_TIMEOUT_MS);
       if (signal?.aborted) throw new Error('Operazione annullata');
 
-      const full = canvas.toDataURL('image/jpeg', jpegQuality);
-      const base64 = full.includes(',') ? full.split(',')[1] : full;
-      if (!base64) throw new Error('Immagine vuota');
-      return base64;
-    } finally {
-      try { renderTask?.cancel?.(); } catch { }
-      canvas.width = 0;
-      canvas.height = 0;
+      const canvas = document.createElement('canvas');
+      let renderTask: any = null;
+      try {
+        const userRotation = pageRotations[pageNum] || 0;
+        const baseRotation = (((page?.rotate || 0) + userRotation) % 360 + 360) % 360;
+        const viewport = page.getViewport({ scale, rotation: baseRotation });
+        canvas.width = viewport.width;
+        canvas.height = viewport.height;
+
+        const ctx = canvas.getContext('2d', { alpha: false });
+        if (ctx) {
+          ctx.fillStyle = 'white';
+          ctx.fillRect(0, 0, canvas.width, canvas.height);
+        }
+
+        renderTask = page.render({ canvasContext: ctx as any, viewport });
+        await withTimeout(renderTask.promise, PAGE_RENDER_TIMEOUT_MS, () => {
+          try { renderTask?.cancel?.(); } catch { }
+        });
+        if (signal?.aborted) throw new Error('Operazione annullata');
+
+        const full = canvas.toDataURL('image/jpeg', jpegQuality);
+        const base64 = full.includes(',') ? full.split(',')[1] : full;
+        if (!base64) throw new Error('Immagine vuota');
+        return base64;
+      } finally {
+        try { renderTask?.cancel?.(); } catch { }
+        canvas.width = 0;
+        canvas.height = 0;
+      }
+    } catch (e: any) {
+      if (isPdfDestructionError(e)) {
+        throw new Error('cancelled');
+      }
+      throw e;
     }
   }, [loadReplacementPdfDoc, pdfDoc]);
 

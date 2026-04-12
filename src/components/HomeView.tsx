@@ -1,22 +1,22 @@
-import React from 'react';
-import { Upload, BookOpen, Trash2, ArrowRight, Settings, Pencil, MoreHorizontal, FileDown, Tag, Plus, AlertCircle, X } from 'lucide-react';
-import { ReadingProgress, PDFMetadata } from '../types';
+import React, { useState } from 'react';
+import { Upload, ArrowRight, FileDown, X, Settings } from 'lucide-react';
+import { PDFMetadata } from '../types';
 import { getLanguageFlag } from '../utils/languageUtils';
+import { GroupFilterBar } from './home/GroupFilterBar';
+import { RecentBooksGrid } from './home/RecentBooksGrid';
+import { HomeTranslationSummaryButton } from './home/HomeTranslationSummaryButton';
+import { TranslationActivityModal } from './translation/TranslationActivityModal';
 
 interface HomeViewProps {
   hasSession: boolean;
   metadata: PDFMetadata | null;
   docInputLanguage?: string;
   currentPage: number;
-  recentBooks: Record<string, ReadingProgress>;
-  availableGroups: string[];
-  selectedGroupFilters: string[];
-  currentProjectFileId: string | null;
   isDragging: boolean;
   isApiConfigured: boolean;
   openMenuId: string | null;
   pkgVersion: string;
-  onCloseSession: () => void;
+  onRequestCloseSession: () => void;
   onReturnToSession: () => void;
   onBrowseClick: () => void;
   onDragOver: (e: React.DragEvent) => void;
@@ -24,15 +24,21 @@ interface HomeViewProps {
   onDrop: (e: React.DragEvent) => void;
   onImportProject: () => void;
   onOpenProject: (fileId: string) => void;
-  onRenameProject: (fileId: string, currentName: string, e: React.MouseEvent) => void;
+  onRenameProject: (fileId: string, currentName: string, e: React.MouseEvent, currentLanguage?: string) => void;
   onDeleteProject: (fileId: string, e: React.MouseEvent) => void;
-  onToggleGroupFilter: (group: string) => void;
+  onEditLanguageProject?: (fileId: string, currentLang: string) => void;
   onCreateGroup: () => void;
   onSetOpenMenuId: (id: string | null) => void;
   onOpenSettings: () => void;
   onManageGroups: (fileId: string) => void;
   onExportGpt: (fileId: string) => void;
-  onDeleteGroup: (group: string) => void;
+  isConsultationMode?: boolean;
+  isActiveProjectPaused: boolean;
+  activeProjectQueueStats: { active: number; queued: number };
+  onPauseActiveProject: () => void;
+  onStopActiveProject: () => void;
+  isOpeningProject?: string | null;
+  isClosingSession?: boolean;
 }
 
 export const HomeView: React.FC<HomeViewProps> = ({
@@ -40,15 +46,11 @@ export const HomeView: React.FC<HomeViewProps> = ({
   metadata,
   docInputLanguage,
   currentPage,
-  recentBooks,
-  availableGroups,
-  selectedGroupFilters,
-  currentProjectFileId,
   isDragging,
   isApiConfigured,
   openMenuId,
   pkgVersion,
-  onCloseSession,
+  onRequestCloseSession,
   onReturnToSession,
   onBrowseClick,
   onDragOver,
@@ -58,263 +60,214 @@ export const HomeView: React.FC<HomeViewProps> = ({
   onOpenProject,
   onRenameProject,
   onDeleteProject,
-  onToggleGroupFilter,
+  onEditLanguageProject,
   onCreateGroup,
   onSetOpenMenuId,
   onOpenSettings,
   onManageGroups,
   onExportGpt,
-  onDeleteGroup
+  isConsultationMode,
+  isActiveProjectPaused,
+  activeProjectQueueStats,
+  onPauseActiveProject,
+  onStopActiveProject,
+  isOpeningProject,
+  isClosingSession
 }) => {
+  const [isActivityModalOpen, setIsActivityModalOpen] = useState(false);
+
   return (
-    <div className="flex-1 flex flex-col items-center justify-start pt-12 p-4 overflow-y-auto select-none">
-      {hasSession && (
-        <div className="w-full max-w-2xl mt-6 mb-4">
-          <div
-            onClick={onReturnToSession}
-            title="Torna alla sessione"
-            aria-label="Torna alla sessione"
-            className="group cursor-pointer bg-white/5 hover:bg-white/10 border border-white/10 hover:border-white/20 rounded-2xl px-4 py-3 shadow-xl backdrop-blur-xl transition-all"
-          >
-            <div className="flex items-center justify-between gap-4">
-              <div className="min-w-0">
-                <div className="text-[10px] font-black uppercase tracking-widest text-white/40">Sessione attiva</div>
-                <div className="font-serif text-xl text-white mt-1 truncate flex items-center gap-2">
-                  <span className="text-sm opacity-80" title={docInputLanguage}>{getLanguageFlag(docInputLanguage || "")}</span>
-                  {metadata?.name || 'Senza titolo'}
-                </div>
-                <div className="text-xs text-white/50 mt-1">Ultima pagina letta: {currentPage}</div>
-              </div>
-              <button 
-                onClick={(e) => { e.stopPropagation(); onCloseSession(); }}
-                title="Chiudi sessione"
-                className="w-10 h-10 flex items-center justify-center rounded-full bg-red-500/20 text-red-400 hover:bg-red-500 hover:text-white transition-all border border-red-500/20 hover:border-red-500/50"
-              >
-                <X size={20} />
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
-      <div className="w-full max-w-4xl grid lg:grid-cols-2 gap-10 items-start mt-2">
-        <div className="flex flex-col gap-4">
-          <div
-            className={`group bg-[#1e1e1e] border rounded-3xl p-10 text-center cursor-pointer transition-all duration-300 ease-out ${isDragging ? 'border-[#007AFF] bg-[#007AFF]/10 scale-[1.02]' : 'border-white/5 hover:border-[#007AFF]/40 hover:shadow-[0_0_50px_-10px_rgba(0,122,255,0.15)]'}`}
-            onClick={onBrowseClick}
-            onDragOver={onDragOver}
-            onDragEnter={onDragOver}
-            onDragLeave={onDragLeave}
-            onDrop={onDrop}
-          >
-            <div className="w-20 h-20 bg-gradient-to-br from-[#007AFF] to-[#0055b3] rounded-2xl shadow-xl flex items-center justify-center mx-auto mb-8 transition-transform group-hover:scale-105 group-hover:rotate-3 group-active:scale-95">
-              <Upload className="text-white w-9 h-9" />
-            </div>
-            <h2 className="text-2xl font-bold text-white mb-3 tracking-tight">Apri PDF</h2>
-            <p className="text-gray-400 text-sm mb-8 leading-relaxed">Trascina qui il tuo libro o clicca per selezionare un file dal computer.</p>
-            <div className="inline-flex items-center gap-2 px-5 py-2.5 bg-[#2a2a2a] text-white font-medium rounded-full text-xs hover:bg-[#007AFF] transition-all shadow-sm group-hover:shadow-md">
-              Sfoglia File <ArrowRight size={14} />
-            </div>
-          </div>
-
-          <button
-            onClick={onImportProject}
-            className="w-full bg-[#1e1e1e] border border-white/5 rounded-2xl p-4 text-center cursor-pointer hover:bg-[#252525] hover:border-white/10 transition-all flex items-center justify-center gap-3 text-gray-400 hover:text-white"
-          >
-            <FileDown size={18} />
-            <span className="text-sm font-medium">Importa Progetto (.gpt)</span>
-          </button>
-        </div>
-
-        <div className="space-y-6">
-          <div className="px-2">
-            <div className="flex items-center justify-between mb-3">
-              <h3 className="text-sm font-bold text-gray-400 uppercase tracking-wider flex items-center gap-2">
-                <Tag size={14} /> Gruppi
-              </h3>
-              <button
-                onClick={onCreateGroup}
-                className="text-gray-500 hover:text-white transition-colors p-1 hover:bg-white/10 rounded-md"
-                title="Crea nuovo gruppo"
-              >
-                <Plus size={14} />
-              </button>
-            </div>
-            <div className="flex flex-wrap gap-2">
-              {availableGroups.length === 0 && <span className="text-xs text-gray-600 italic pl-1">Nessun gruppo</span>}
-              {availableGroups.map(g => (
+    <div className="flex-1 w-full overflow-y-auto select-none custom-scrollbar">
+      <div className="mx-auto w-full max-w-6xl px-5 pt-8 pb-12">
+        {/* ── Active session card ── */}
+        {hasSession && (
+          <section className="w-full animate-fade-in">
+            <div className="rounded-xl border border-border-muted bg-surface-2/60 shadow-surface-lg overflow-hidden">
+              <div className="grid grid-cols-1 sm:grid-cols-[1fr_auto]">
                 <button
-                  key={g}
-                  onClick={() => onToggleGroupFilter(g)}
-                  className={`px-2.5 py-1 rounded-lg text-[10px] font-medium border transition-all flex items-center gap-1.5 group/gbtn ${selectedGroupFilters.includes(g)
-                    ? 'bg-[#007AFF]/20 border-[#007AFF]/50 text-[#007AFF]'
-                    : 'bg-white/5 border-white/10 text-gray-400 hover:bg-white/10 hover:text-gray-200'
-                    }`}
+                  type="button"
+                  onClick={onReturnToSession}
+                  className="text-left px-6 py-5 hover:bg-white/[0.02] focus:outline-none transition-colors duration-200"
+                  aria-label={`Torna alla sessione${metadata?.name ? `: ${metadata.name}` : ''}`}
                 >
-                  {g}
-                  <X 
-                    size={10} 
-                    className="opacity-0 group-hover/gbtn:opacity-50 hover:opacity-100 transition-opacity ml-0.5" 
-                    onClick={(e) => { e.stopPropagation(); onDeleteGroup(g); }}
-                  />
+                  <div className="text-[9px] font-bold uppercase tracking-[0.15em] text-txt-muted mb-1.5">Sessione attiva</div>
+                  <div className="flex items-center gap-2.5 min-w-0">
+                    <span className="text-sm opacity-80 shrink-0" title={docInputLanguage}>{getLanguageFlag(docInputLanguage || "")}</span>
+                    <span className="font-semibold text-[15px] text-txt-primary truncate min-w-0 tracking-tight" title={metadata?.name || 'Senza titolo'}>
+                      {metadata?.name || 'Senza titolo'}
+                    </span>
+                  </div>
+                  <div className="mt-1.5 flex items-center gap-2">
+                    <span className="text-[11px] text-txt-muted tabular-nums">Ultima pagina: {currentPage}</span>
+                    <span className="text-txt-faint">·</span>
+                    <span className="text-[11px] text-accent font-medium">Riprendi</span>
+                  </div>
                 </button>
-              ))}
-            </div>
-          </div>
-
-          <div className="flex items-center justify-between px-2">
-            <h3 className="flex items-center gap-2 text-sm font-bold text-gray-400 uppercase tracking-wider">
-              Recenti
-            </h3>
-            <button
-              onClick={onOpenSettings}
-              className={`flex items-center gap-1.5 text-[10px] font-medium uppercase transition-colors px-3 py-1.5 rounded-full border ${isApiConfigured ? 'text-emerald-400 bg-emerald-500/5 border-emerald-500/20 hover:bg-emerald-500/10' : 'text-rose-400 bg-rose-500/5 border-rose-500/20 hover:bg-rose-500/10'}`}
-            >
-              <Settings size={12} /> {isApiConfigured ? 'API Configurate' : 'Configura API'}
-            </button>
-          </div>
-
-          <div className="max-h-[min(600px,65vh)] overflow-y-auto pr-2 custom-scrollbar">
-            <div className="grid gap-2 pb-32">
-              {Object.values(recentBooks).length === 0 && (
-                <div className="flex flex-col items-center justify-center p-8 text-center border border-dashed border-white/10 rounded-2xl text-gray-600">
-                  <BookOpen size={24} className="mb-2 opacity-20" />
-                  <span className="text-xs">Nessun libro recente</span>
+                <div className="flex items-center justify-end gap-2 px-5 py-5 sm:border-l sm:border-border-muted">
+                  <button
+                    type="button"
+                    onClick={onRequestCloseSession}
+                    disabled={isClosingSession}
+                    title="Chiudi sessione"
+                    aria-label="Chiudi sessione"
+                    className="w-9 h-9 flex items-center justify-center rounded-lg bg-danger/8 text-danger/70 hover:bg-danger/15 hover:text-danger transition-all duration-200 border border-danger/10 hover:border-danger/20 focus:outline-none disabled:opacity-50 disabled:cursor-not-allowed"
+                  >
+                    {isClosingSession ? (
+                      <div className="w-4 h-4 border-2 border-danger/50 border-t-transparent rounded-full animate-spin" />
+                    ) : (
+                      <X size={16} />
+                    )}
+                  </button>
                 </div>
-              )}
-              {Object.values(recentBooks || {})
-                .filter((b): b is ReadingProgress => !!(b && b.fileId && b.fileId !== 'undefined'))
-                .filter(b => {
-                  if (selectedGroupFilters.length === 0) return true;
-                  if (!b || !b.groups) return false;
-                  // Logica AND: il libro deve avere TUTTI i gruppi selezionati
-                  return selectedGroupFilters.every(g => b.groups?.includes(g));
-                })
-                .sort((a, b) => b.timestamp - a.timestamp)
-                .map((book) => {
-                  const isActive = book.fileId === currentProjectFileId;
-                  return (
-                    <div
-                      key={book.fileId}
-                      className={`p-3.5 rounded-xl border flex items-center justify-between transition-all cursor-pointer group shadow-sm relative ${
-                        openMenuId === book.fileId ? 'z-30' : 'z-10'
-                      } ${isActive
-                        ? 'bg-[#1a2e1a] border-emerald-500/50 shadow-[0_0_15px_rgba(16,185,129,0.1)]'
-                        : 'bg-[#1e1e1e] border-white/5 hover:bg-[#252525] hover:border-white/10'
-                        }`}
-                      onClick={() => onOpenProject(book.fileId || "")}
-                    >
-                      {isActive && (
-                        <div className="absolute -left-[1px] top-3 bottom-3 w-[3px] bg-emerald-500 rounded-r-full shadow-[0_0_8px_rgba(16,185,129,0.8)]"></div>
-                      )}
-                      <div className="flex items-center gap-3.5">
-                        <div className="relative">
-                          {book.thumbnail ? (
-                            <img 
-                              src={book.thumbnail} 
-                              alt={book.fileName} 
-                              className="w-9 h-12 object-cover rounded-md shadow-sm border border-white/10" 
-                            />
-                          ) : (
-                            <div className="w-9 h-9 bg-[#2a2a2a] text-gray-300 rounded-lg flex items-center justify-center shadow-inner text-[10px] font-bold border border-white/5">PDF</div>
-                          )}
-                          {book.hasSafePdf === false && (
-                            <div className="absolute -top-1 -right-1 bg-red-500 text-white rounded-full p-0.5 border border-[#1e1e1e]" title="PDF originale mancante (vecchia versione)">
-                              <AlertCircle size={10} />
-                            </div>
-                          )}
-                        </div>
-                        <div className="flex flex-col">
-                          <p
-                            className="font-medium text-sm text-gray-200 truncate max-w-[180px] group-hover:text-white transition-colors flex items-center gap-1.5"
-                            onDoubleClick={(e) => { e.stopPropagation(); onRenameProject(book.fileId || "", book.fileName || "", e); }}
-                            title="Doppio click per rinominare"
-                          >
-                            <span className="text-xs shrink-0" title={book.inputLanguage}>{getLanguageFlag(book.inputLanguage || "")}</span>
-                            {book.fileName}
-                          </p>
-                          <div className="flex items-center gap-2 mt-0.5">
-                            <span className="text-[10px] text-gray-500 font-medium">Pagina {book.lastPage}</span>
-                            <span className="text-[10px] text-gray-600">•</span>
-                            <span className="text-[10px] text-gray-500">{new Date(book.timestamp).toLocaleDateString()}</span>
-                            {book.groups && book.groups.length > 0 && (
-                              <>
-                                <span className="text-[10px] text-gray-600">•</span>
-                                <div className="flex gap-1">
-                                  {book.groups.slice(0, 2).map((g: string) => (
-                                    <span key={g} className="text-[9px] bg-white/10 text-gray-300 px-1.5 rounded-sm">{g}</span>
-                                  ))}
-                                  {book.groups.length > 2 && <span className="text-[9px] text-gray-500">+{book.groups.length - 2}</span>}
-                                </div>
-                              </>
-                            )}
-                          </div>
-                        </div>
-                      </div>
-                      <div className="flex items-center gap-1">
-                        <button
-                          onClick={(e) => onRenameProject(book.fileId || "", book.fileName || "", e)}
-                          className="p-2 text-gray-600 hover:text-[#60a5fa] hover:bg-[#007AFF]/10 rounded-lg transition-all"
-                          title="Rinomina"
-                        >
-                          <Pencil size="14" />
-                        </button>
-                        <button
-                          onClick={(e) => onDeleteProject(book.fileId || "", e)}
-                          className="p-2 text-gray-600 hover:text-red-400 hover:bg-red-500/10 rounded-lg transition-all"
-                          title="Rimuovi dalla cronologia"
-                        >
-                          <Trash2 size={14} />
-                        </button>
-                        <button
-                          onClick={(e) => { e.stopPropagation(); onSetOpenMenuId(openMenuId === (book.fileId || "") ? null : (book.fileId || "")); }}
-                          className="p-2 text-gray-600 hover:text-white hover:bg-white/5 rounded-lg transition-all menu-trigger"
-                          title="Altro"
-                          aria-haspopup="menu"
-                          aria-expanded={openMenuId === book.fileId}
-                        >
-                          <MoreHorizontal size={14} />
-                        </button>
-                        {openMenuId === book.fileId && (
-                          <div className="absolute right-2 top-full mt-1 bg-[#1a1a1a] border border-white/10 rounded-xl shadow-xl overflow-hidden z-50 flex flex-col min-w-[160px] menu-container">
-                            <button
-                              onClick={(e) => { e.stopPropagation(); onSetOpenMenuId(null); onManageGroups(book.fileId || ""); }}
-                              className="flex items-center gap-2 w-full px-3 py-2 text-sm text-gray-200 hover:bg-white/5 text-left"
-                            >
-                              <Tag size={14} />
-                              Gestisci Gruppi
-                            </button>
-                            <button
-                              onClick={(e) => { e.stopPropagation(); onSetOpenMenuId(null); onRenameProject(book.fileId || "", book.fileName || "", e); }}
-                              className="flex items-center gap-2 w-full px-3 py-2 text-sm text-gray-200 hover:bg-white/5 text-left"
-                            >
-                              <Pencil size={14} />
-                              Rinomina
-                            </button>
-                            <button
-                              onClick={(e) => { e.stopPropagation(); onSetOpenMenuId(null); onExportGpt(book.fileId || ""); }}
-                              className="flex items-center gap-2 w-full px-3 py-2 text-sm text-gray-200 hover:bg-white/5 text-left"
-                            >
-                              <FileDown size={14} />
-                              Esporta (.gpt)
-                            </button>
-                            <button
-                              onClick={(e) => { e.stopPropagation(); onSetOpenMenuId(null); onDeleteProject(book.fileId || "", e); }}
-                              className="flex items-center gap-2 w-full px-3 py-2 text-sm text-gray-200 hover:bg-white/5 text-red-400 text-left"
-                            >
-                              <Trash2 size={14} />
-                              Rimuovi
-                            </button>
-                          </div>
-                        )}
-                      </div>
-                    </div>
-                  );
-                })}
+              </div>
             </div>
-          </div>
+          </section>
+        )}
+
+        {/* ── Main grid: Actions + Library ── */}
+        <div className="mt-8 grid grid-cols-12 gap-8 items-start">
+          {/* LEFT — Upload area */}
+          <section className="col-span-12 lg:col-span-5 space-y-5">
+            <div className="px-1">
+              <h2 className="text-[10px] font-bold text-txt-muted uppercase tracking-[0.15em]">Nuovo progetto</h2>
+            </div>
+
+            {/* Drop zone */}
+            <div
+              className={`group rounded-xl border p-8 text-left transition-all duration-300 ease-out ${
+                isConsultationMode
+                  ? 'opacity-40 cursor-not-allowed border-border-muted bg-surface-2/30'
+                  : isDragging
+                    ? 'border-accent/40 bg-accent/[0.04] scale-[1.005] shadow-glow-accent-lg'
+                    : 'border-border-muted bg-surface-2/40 hover:border-accent/20 hover:bg-surface-2/60 hover:shadow-glow-accent'
+              }`}
+              onClick={isConsultationMode ? undefined : onBrowseClick}
+              onKeyDown={(e) => {
+                if (isConsultationMode) return;
+                if (e.key === 'Enter' || e.key === ' ') {
+                  e.preventDefault();
+                  onBrowseClick();
+                }
+              }}
+              onDragOver={isConsultationMode ? undefined : onDragOver}
+              onDragEnter={isConsultationMode ? undefined : onDragOver}
+              onDragLeave={isConsultationMode ? undefined : onDragLeave}
+              onDrop={isConsultationMode ? undefined : onDrop}
+              role={isConsultationMode ? undefined : 'button'}
+              tabIndex={isConsultationMode ? -1 : 0}
+              aria-label={isConsultationMode ? 'Caricamento PDF disabilitato' : 'Carica nuovo PDF'}
+            >
+              <div className="flex items-start gap-4">
+                <div className={`w-12 h-12 rounded-xl flex items-center justify-center shrink-0 transition-all duration-300 ${
+                  isConsultationMode
+                    ? 'bg-surface-4 text-txt-muted'
+                    : 'bg-accent/10 border border-accent/15 group-hover:bg-accent/15 group-hover:scale-105 group-active:scale-95'
+                }`}>
+                  <Upload className="text-accent w-5 h-5" />
+                </div>
+                <div className="min-w-0 flex-1">
+                  <h3 className="text-[14px] font-semibold text-txt-primary tracking-tight">Carica PDF</h3>
+                  <p className="mt-1 text-[12px] text-txt-muted leading-relaxed">
+                    {isConsultationMode
+                      ? "Disabilitato in modalità consultazione."
+                      : "Trascina un file qui oppure selezionalo dal computer."}
+                  </p>
+                  {!isConsultationMode && (
+                    <div className="mt-5 flex flex-wrap items-center gap-3">
+                      <button
+                        type="button"
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          onBrowseClick();
+                        }}
+                        className="inline-flex items-center gap-2 px-4 py-2 bg-accent text-white font-semibold rounded-lg text-[11px] hover:bg-accent-hover transition-all duration-200 shadow-glow-accent focus:outline-none tracking-wide"
+                      >
+                        Sfoglia file <ArrowRight size={13} />
+                      </button>
+                      <span className="text-[10px] text-txt-muted">Solo PDF</span>
+                    </div>
+                  )}
+                </div>
+              </div>
+            </div>
+
+            {/* Import button */}
+            <button
+              type="button"
+              onClick={isConsultationMode ? undefined : onImportProject}
+              disabled={isConsultationMode}
+              className={`w-full rounded-xl px-5 py-4 text-left transition-all duration-200 flex items-center justify-between gap-4 border group focus:outline-none ${
+                isConsultationMode
+                  ? 'opacity-40 cursor-not-allowed border-border-muted bg-surface-2/30 text-txt-muted'
+                  : 'cursor-pointer border-border-muted bg-surface-2/40 hover:bg-surface-3/50 hover:border-border text-txt-secondary hover:text-txt-primary'
+              }`}
+              aria-disabled={isConsultationMode}
+            >
+              <div className="flex items-center gap-3">
+                <div className="w-8 h-8 rounded-lg bg-white/[0.03] border border-border-muted flex items-center justify-center">
+                  <FileDown size={16} className="text-txt-muted" />
+                </div>
+                <div className="min-w-0">
+                  <div className="text-[12px] font-semibold">Importa progetto</div>
+                  <div className="text-[10px] text-txt-muted mt-0.5">Riprendi un backup .gpt</div>
+                </div>
+              </div>
+              <ArrowRight size={15} className="text-txt-faint group-hover:text-txt-muted transition-colors" />
+            </button>
+          </section>
+
+          {/* RIGHT — Library */}
+          <section className="col-span-12 lg:col-span-7 space-y-5">
+            <div className="sticky top-0 z-20 -mx-1 px-1 py-2 bg-surface-0/90 backdrop-blur-lg">
+              <div className="flex items-center justify-between gap-3">
+                <div className="min-w-0">
+                  <h2 className="text-[10px] font-bold text-txt-muted uppercase tracking-[0.15em]">Libreria</h2>
+                </div>
+                <div className="flex items-center gap-2 shrink-0">
+                  <HomeTranslationSummaryButton onClick={() => setIsActivityModalOpen(true)} />
+                  <button
+                    type="button"
+                    onClick={onOpenSettings}
+                    className={`flex items-center gap-1.5 text-[9px] font-bold uppercase tracking-wider transition-all duration-200 px-2.5 py-1.5 rounded-lg border focus:outline-none ${
+                      isApiConfigured
+                        ? 'text-success bg-success/5 border-success/15 hover:bg-success/10'
+                        : 'text-danger bg-danger/5 border-danger/15 hover:bg-danger/10'
+                    }`}
+                    aria-label={isApiConfigured ? 'API configurate' : 'Configura API'}
+                  >
+                    <Settings size={11} /> {isApiConfigured ? 'API OK' : 'Configura API'}
+                  </button>
+                </div>
+              </div>
+            </div>
+            <GroupFilterBar onCreateGroup={onCreateGroup} />
+            <RecentBooksGrid
+              onOpenProject={onOpenProject}
+              onRenameProject={onRenameProject}
+              onDeleteProject={onDeleteProject}
+              onEditLanguageProject={onEditLanguageProject}
+              onManageGroups={onManageGroups}
+              onExportGpt={onExportGpt}
+              onSetOpenMenuId={onSetOpenMenuId}
+              openMenuId={openMenuId}
+              isActiveProjectPaused={isActiveProjectPaused}
+              activeProjectQueueStats={activeProjectQueueStats}
+              onPauseActiveProject={onPauseActiveProject}
+              onStopActiveProject={onStopActiveProject}
+              isOpeningProject={isOpeningProject}
+              onCreateNewProject={isConsultationMode ? undefined : onBrowseClick}
+            />
+          </section>
         </div>
       </div>
-      <div className="fixed bottom-3 right-3 text-[10px] font-bold text-white/50">v{pkgVersion}</div>
+
+      <div className="fixed bottom-3 right-4 text-[9px] font-semibold text-txt-faint tracking-wide">v{pkgVersion}</div>
+
+      <TranslationActivityModal
+        isOpen={isActivityModalOpen}
+        onClose={() => setIsActivityModalOpen(false)}
+        onOpenProject={onOpenProject}
+      />
     </div>
   );
 };
