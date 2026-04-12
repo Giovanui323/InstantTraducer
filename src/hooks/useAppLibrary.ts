@@ -2,21 +2,12 @@ import { useState, useEffect, useCallback, useRef, useMemo } from 'react';
 import { ReadingProgress, PDFMetadata, Group } from '../types';
 import { log } from '../services/logger';
 import equal from 'fast-deep-equal';
-import { 
-  isUuidV4FileId
-} from '../utils/idUtils';
+import { isUuidV4FileId } from '../utils/idUtils';
 import { buildProjectSavePayload, mergeSaveDelta } from '../utils/saveQueueUtils';
 import * as usageTracker from '../services/usageTracker';
-
-export type SavePriority = 'CRITICAL' | 'BACKGROUND' | 'BATCH';
-
-export interface SaveRequest {
-  fileId: string;
-  data: any;
-  priority: SavePriority;
-  timestamp: number;
-  attempts: number;
-}
+import { useSaveQueueManager, type SavePriority } from './saveQueue/SaveQueueManager';
+import { useGroupManager } from './library/GroupManager';
+import { useSaveBlockingManager } from './library/SaveBlockingManager';
 
 const MAX_QUEUE_SIZE = 50;
 const MAX_REQUEST_AGE = 5 * 60 * 1000; // 5 minutes
@@ -52,6 +43,58 @@ export const useAppLibrary = (
   useEffect(() => {
     recentBooksRef.current = recentBooks;
   }, [recentBooks]);
+
+  // Use extracted hooks - TEMPORARY: Keep old definitions for compatibility during transition
+  // Will be removed after full migration
+  const saveBlockingManager = useSaveBlockingManager({
+    setIsSaving,
+    showToast,
+    cancelPendingSaves: () => {}, // Placeholder - will use old implementation for now
+    currentProjectFileIdRef,
+    setCurrentProjectFileId: _setCurrentProjectFileId
+  });
+
+  const saveQueueManager = useSaveQueueManager({
+    setIsSaving,
+    showToast,
+    recentBooksRef,
+    blacklistedIdsRef: saveBlockingManager.blacklistedIdsRef,
+    transitioningIdsRef: saveBlockingManager.transitioningIdsRef,
+    processingSaveIdsRef,
+    renamedIdsRef: saveBlockingManager.renamedIdsRef,
+    stableIdNameMismatchLoggedRef,
+    blockSave: saveBlockingManager.blockSave,
+    currentProjectFileIdRef
+  });
+
+  const groupManager = useGroupManager({
+    showConfirm
+  });
+
+  // Override old function implementations with new ones
+  const {
+    processSaveQueue,
+    updateLibrary,
+    flushSaves,
+    cancelPendingSaves: newCancelPendingSaves,
+    blockedErrorCountRef: newBlockedErrorCountRef
+  } = saveQueueManager;
+
+  const {
+    loadGroups: newLoadGroups,
+    handleCreateGroup: newHandleCreateGroup,
+    handleDeleteGroup: newHandleDeleteGroup,
+    handleToggleGroupFilter: newHandleToggleGroupFilter,
+    handleAssignGroup: newHandleAssignGroup
+  } = groupManager;
+
+  const {
+    blockSave: newBlockSave,
+    unblockSave: newUnblockSave,
+    isBlocked: newIsBlocked,
+    registerRename: newRegisterRename,
+    registerNameChange: newRegisterNameChange
+  } = saveBlockingManager;
 
   const cancelPendingSaves = useCallback((fileId: string) => {
     let wasPending = false;
@@ -148,12 +191,12 @@ export const useAppLibrary = (
         // CRITICAL FIX: Block saves for the old project during transition to prevent data contamination
         if (oldId) {
              // Block for 2 seconds to allow UI to unmount and pending requests to be dropped
-             blockSave(oldId, 2000); 
+             newBlockSave(oldId, 2000);
         }
     }
     _setCurrentProjectFileId(id);
     currentProjectFileIdRef.current = id;
-  }, [blockSave]);
+  }, [newBlockSave]);
 
   const loadGroups = useCallback(async () => {
     try {
