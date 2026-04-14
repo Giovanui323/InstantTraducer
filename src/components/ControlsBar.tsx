@@ -1,4 +1,4 @@
-import { ZoomIn, ZoomOut, Sun, SunSnow, LayoutTemplate, BookOpen } from 'lucide-react';
+import { ZoomIn, ZoomOut, Sun, SunSnow, LayoutTemplate, BookOpen, Rows3 } from 'lucide-react';
 import { useZoomSystem } from '../hooks/useZoomSystem';
 import type { ReaderViewModePreference } from './reader/bookLayout';
 
@@ -15,6 +15,8 @@ interface ControlsBarProps {
   onViewModeChange: (v: ReaderViewModePreference) => void;
   columnLayout: number;
   onColumnLayoutChange: (l: number) => void;
+  navigationMode: 'scroll' | 'flip';
+  onNavigationModeChange: (m: 'scroll' | 'flip') => void;
 }
 
 export const ControlsBar: React.FC<ControlsBarProps> = ({
@@ -29,7 +31,9 @@ export const ControlsBar: React.FC<ControlsBarProps> = ({
   onThemeChange,
   onViewModeChange,
   columnLayout,
-  onColumnLayoutChange
+  onColumnLayoutChange,
+  navigationMode,
+  onNavigationModeChange
 }) => {
   const { zoomIn, zoomOut } = useZoomSystem({
     value: scale,
@@ -145,8 +149,23 @@ export const ControlsBar: React.FC<ControlsBarProps> = ({
           </div>
         </div>
 
-        {/* Row 3: Page mode */}
+        {/* Row 3: Navigation mode + Page layout */}
         <div className="flex items-center gap-2">
+          <div className="flex items-center bg-white/[0.03] rounded-lg px-2 py-1 border border-border-muted gap-2">
+            <Rows3 size={13} className="text-txt-muted shrink-0" />
+            <span className="text-[9px] text-txt-muted font-semibold uppercase tracking-wider">Vista</span>
+            <SegmentedControl
+              value={navigationMode}
+              options={[
+                { value: 'scroll', label: 'Scroll', title: 'Scroll continuo' },
+                { value: 'flip', label: 'Pagina', title: 'Una pagina alla volta' },
+              ]}
+              onChange={onNavigationModeChange}
+            />
+          </div>
+
+          <div className="h-4 w-px bg-border-muted" />
+
           <div className="flex items-center bg-white/[0.03] rounded-lg px-2 py-1 border border-border-muted gap-2">
             <BookOpen size={13} className="text-txt-muted shrink-0" />
             <span className="text-[9px] text-txt-muted font-semibold uppercase tracking-wider">Pagine</span>

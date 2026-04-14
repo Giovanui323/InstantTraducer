@@ -77,7 +77,14 @@ export const executePageTranslation = async (
   let pdfTimeout = false;
   let aiTimeout = false;
   let page: any = null;
-  const providerLabel = aiSettings.provider === 'gemini' ? 'Gemini' : aiSettings.provider === 'claude' ? 'Claude' : 'OpenAI';
+  const providerLabel = aiSettings.provider === 'gemini' ? 'Gemini'
+    : aiSettings.provider === 'claude' ? 'Claude'
+    : aiSettings.provider === 'groq' ? 'Groq'
+    : aiSettings.provider === 'modal' ? 'Modal'
+    : aiSettings.provider === 'zai' ? 'Z.ai'
+    : aiSettings.provider === 'openrouter' ? 'OpenRouter'
+    : aiSettings.provider === 'custom' ? 'Custom'
+    : 'OpenAI';
 
   try {
     // PIPELINING SYNCHRONIZATION (Optimized: Before Rendering)
@@ -132,6 +139,11 @@ export const executePageTranslation = async (
     let apiKey = '';
     if (aiSettings.provider === 'gemini') apiKey = aiSettings.gemini.apiKey || '';
     else if (aiSettings.provider === 'claude') apiKey = aiSettings.claude?.apiKey || '';
+    else if (aiSettings.provider === 'groq') apiKey = aiSettings.groq?.apiKey || '';
+    else if (aiSettings.provider === 'modal') apiKey = aiSettings.modal?.apiKey || '';
+    else if (aiSettings.provider === 'zai') apiKey = aiSettings.zai?.apiKey || '';
+    else if (aiSettings.provider === 'openrouter') apiKey = aiSettings.openrouter?.apiKey || '';
+    else if (aiSettings.provider === 'custom') apiKey = aiSettings.customProviders?.find(cp => cp.id === aiSettings.activeCustomProviderId)?.apiKey || '';
     else apiKey = aiSettings.openai.apiKey || '';
     if (apiKey.trim().length === 0) {
       setters.updatePageStatus(targetPage, {
@@ -403,7 +415,16 @@ export const executePageTranslation = async (
 
     // 1. Initial Draft (Minimally cleaned)
     let normalizedText = result.text;
-    const modelLabel = result.modelUsed || (aiSettings.provider === 'gemini' ? aiSettings.gemini.model : aiSettings.provider === 'claude' ? aiSettings.claude?.model : aiSettings.openai.model);
+    const modelLabel = result.modelUsed || (
+      aiSettings.provider === 'gemini' ? aiSettings.gemini.model
+      : aiSettings.provider === 'claude' ? aiSettings.claude?.model
+      : aiSettings.provider === 'groq' ? aiSettings.groq?.model
+      : aiSettings.provider === 'modal' ? 'zai-org/GLM-5.1-FP8'
+      : aiSettings.provider === 'zai' ? aiSettings.zai?.model
+      : aiSettings.provider === 'openrouter' ? aiSettings.openrouter?.model
+      : aiSettings.provider === 'custom' ? aiSettings.customProviders?.find(cp => cp.id === aiSettings.activeCustomProviderId)?.model
+      : aiSettings.openai.model
+    ) || 'sconosciuto';
     const savedAt = Date.now();
     const metaUpdate = { model: modelLabel, savedAt };
 

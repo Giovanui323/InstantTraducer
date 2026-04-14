@@ -1,4 +1,4 @@
-import { GEMINI_MODELS_LIST, CLAUDE_MODELS_LIST, OPENAI_MODELS_LIST, GROQ_MODELS_LIST, ModelInfo } from "../constants";
+import { GEMINI_MODELS_LIST, CLAUDE_MODELS_LIST, OPENAI_MODELS_LIST, GROQ_MODELS_LIST, ZAI_MODELS_LIST, MODAL_MODELS_LIST, OPENROUTER_MODELS_LIST, ModelInfo } from "../constants";
 
 export interface ModelUsage {
     cost: number;
@@ -44,8 +44,16 @@ const parsePrice = (price?: string): number => {
 
 const getModelCost = (modelId: string): { input: number, output: number } | null => {
     // Cerca in tutte le liste standard
-    const allLists = [GEMINI_MODELS_LIST, CLAUDE_MODELS_LIST, OPENAI_MODELS_LIST, GROQ_MODELS_LIST];
-    
+    const allLists = [
+        GEMINI_MODELS_LIST,
+        CLAUDE_MODELS_LIST,
+        OPENAI_MODELS_LIST,
+        GROQ_MODELS_LIST,
+        ZAI_MODELS_LIST,
+        MODAL_MODELS_LIST,
+        OPENROUTER_MODELS_LIST
+    ];
+
     for (const list of allLists) {
         const found = list.find(m => m.id === modelId);
         if (found?.pricing) {

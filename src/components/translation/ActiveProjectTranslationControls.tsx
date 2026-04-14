@@ -103,7 +103,7 @@ export const ActiveProjectTranslationControls: React.FC<Props> = ({
                     <div className="flex flex-col gap-0.5 mb-2">
                       {activeItems.map((item, i) => (
                         <div key={`${item.page}-${item.type}-${item.status}-${i}`} className="flex items-center gap-3 px-2 py-1.5 rounded-lg hover:bg-white/[0.03] text-[11px] text-txt-secondary transition-colors">
-                          <div className={`w-1.5 h-1.5 rounded-full ${item.type === 'translation' ? 'bg-accent shadow-[0_0_6px_rgba(88,166,255,0.4)]' : 'bg-success shadow-[0_0_6px_rgba(63,185,80,0.4)]'}`} />
+                          <div className={`w-1.5 h-1.5 rounded-full ${item.type === 'translation' ? 'bg-accent shadow-[0_0_6px_rgba(245,158,11,0.4)]' : 'bg-success shadow-[0_0_6px_rgba(63,185,80,0.4)]'}`} />
                           <span className="font-medium font-mono tabular-nums">P.{item.page}</span>
                           <span className={`text-[8px] ml-auto uppercase font-bold px-1.5 py-0.5 rounded ${
                             item.type === 'translation'
@@ -126,7 +126,7 @@ export const ActiveProjectTranslationControls: React.FC<Props> = ({
                     <div className="flex flex-col gap-0.5">
                       {queuedItems.map((item, i) => (
                         <div key={`${item.page}-${item.type}-${item.status}-${i}`} className="flex items-center gap-3 px-2 py-1.5 rounded-lg hover:bg-white/[0.03] text-[11px] text-txt-secondary transition-colors">
-                          <div className={`w-1.5 h-1.5 rounded-full ${item.type === 'translation' ? 'bg-accent shadow-[0_0_6px_rgba(88,166,255,0.4)]' : 'bg-success shadow-[0_0_6px_rgba(63,185,80,0.4)]'}`} />
+                          <div className={`w-1.5 h-1.5 rounded-full ${item.type === 'translation' ? 'bg-accent shadow-[0_0_6px_rgba(245,158,11,0.4)]' : 'bg-success shadow-[0_0_6px_rgba(63,185,80,0.4)]'}`} />
                           <span className="font-medium font-mono tabular-nums">P.{item.page}</span>
                           <span className={`text-[8px] ml-auto uppercase font-bold px-1.5 py-0.5 rounded ${
                             item.type === 'translation'

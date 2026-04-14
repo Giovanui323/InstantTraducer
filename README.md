@@ -1,74 +1,208 @@
-<div align="center">
-<img width="1200" height="475" alt="InstantTraducer Banner" src="https://github.com/user-attachments/assets/0aa67016-6eaf-458a-adb2-6e31a0763ed6" />
+# InstantTraducer
 
-# InstantTraducer 📚⚡
-### *Il tuo libro gemello, finalmente nella tua lingua*
-
-[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
-[![Built with Gemini](https://img.shields.io/badge/Built%20with-Gemini-blue.svg)](https://ai.google.dev/)
-[![Built with OpenAI](https://img.shields.io/badge/Built%20with-OpenAI-green.svg)](https://openai.com/)
-
-</div>
+Electron-based desktop application for translating PDF documents while preserving the original layout structure. The system combines OCR-based page analysis with large language models to produce page-by-page translations that maintain visual fidelity with the source document.
 
 ---
 
-Hai presente quel PDF o quel libro che hai sul computer, con tutte le sue pagine, i capitoli e la sua struttura originale? Ecco, immagina di premere un tasto e vederlo trasformarsi esattamente com'è, ma nella tua lingua.
+## Project Overview
 
-Il vero punto di forza di **InstantTraducer** non è solo che "traduce", ma che ti restituisce il tuo **libro gemello**:
+InstantTraducer is designed as a bilingual book reproduction tool: given a PDF input, it produces a translated counterpart where each page mirrors the structure, dimensions, and annotation placement of the original. Translation is performed on a per-page basis using multimodal AI models that analyze the rendered page image directly, rather than relying on extracted text alone. This approach preserves footnotes, sidebars, and complex multi-column layouts that traditional text-extraction pipelines cannot handle.
 
-- **Stessa struttura, altra lingua**: Se il tuo PDF originale ha 200 pagine, ne avrai uno nuovo di 200 pagine. Se in una pagina c'è una nota a fondo pagina o un commento particolare, lo ritroverai nello stesso identico punto, ma tradotto perfettamente.
-- **Un "Clona-Libri" intelligente**: Il programma non si limita a estrarre il testo. Legge la pagina come farebbe un occhio umano, ne capisce la forma e la ricostruisce da zero nella tua lingua. È come se il libro fosse stato scritto originariamente in italiano.
-- **Nessuna confusione**: Spesso, quando si traduce un PDF, il testo si sballa o le frasi finiscono sopra le immagini. InstantTraducer lavora con una precisione chirurgica per fare in modo che l'aspetto visivo rimanga pulito e ordinato, proprio come l'originale che avevi tra le mani.
-- **Esporta il tuo "Nuovo Originale"**: Quando hai finito, puoi scaricare un nuovo file PDF. Se li metti uno accanto all'altro, sembreranno lo stesso libro, solo che uno finalmente puoi leggerlo senza sforzo.
-
-In pratica: **non perdi nulla del libro originale, tranne la barriera della lingua.**
+The application manages a local library of translation projects, each identified by a UUID-based file ID. Project state (translations, annotations, verification results, user highlights and notes) is persisted to disk via an asynchronous save queue with priority-based debouncing. A built-in verification system evaluates translation quality and can suggest corrections through an automated feedback loop.
 
 ---
 
-## ✨ Caratteristiche Tecniche
+## System Architecture
 
-- 🧠 **Traduzione Multimodale**: Sfrutta Gemini 3 Pro/Flash e OpenAI (o1/o3) per analizzare visivamente le pagine.
-- 📖 **Consistenza Contestuale**: Mantiene il filo logico tra i capitoli per una narrazione fluida.
-- 🗂️ **Libreria Personale**: Gestisci i tuoi libri, crea gruppi e non perdere mai il segno.
-- 🔍 **Ricerca Visuale**: Trova termini istantaneamente sia nell'originale che nella traduzione.
-- 🛠️ **Controllo Totale**: Regola i parametri dell'AI per adattarli a testi tecnici, legali o letterari.
+The application follows a standard Electron two-process architecture:
 
-## 📂 Riferimenti al Codice (Core Logic)
+```
++-------------------+       IPC (ipcMain/ipcRenderer)       +-------------------+
+|   Renderer Process | <----------------------------------> |   Main Process     |
+|   (React + Vite)   |                                     |   (Node.js)        |
+|                    |                                     |                    |
+|  - PDF rendering   |                                     |  - File system I/O |
+|  - Translation UI  |                                     |  - PDF operations  |
+|  - State management|                                     |  - Settings store  |
+|  - AI API calls    |                                     |  - Write sequencer |
++-------------------+                                       +-------------------+
+         |
+         | HTTPS
+         v
++-------------------+
+|   AI Providers    |
+|  - Google Gemini  |
+|  - OpenAI         |
+|  - Anthropic      |
+|  - Groq           |
++-------------------+
+```
 
-Per gli sviluppatori che vogliono esplorare il cuore di InstantTraducer:
+**Renderer Process**: A React 19 single-page application compiled with Vite. PDF rendering is handled client-side via `pdfjs-dist`. AI API calls are initiated from the renderer using provider-specific SDKs (`@google/genai`, `@anthropic-ai/sdk`). The translation queue, save queue, and verification pipeline are managed through a set of composable React hooks.
 
-- **Mantenimento Layout**: La logica che preserva le dimensioni e la struttura delle pagine originali durante l'esportazione si trova in [exportHtml.js](file:///Users/lucasicignano/Lavoro%20temporaneo/UNIVERSITA/FIVER/gemini-pdf-translator-di-libri-2/electron/exportHtml.js).
-- **Ricostruzione Testuale**: Il sistema che ricostruisce il testo mantenendo note e annotazioni è gestito in [useAppTranslation.ts](file:///Users/lucasicignano/Lavoro%20temporaneo/UNIVERSITA/FIVER/gemini-pdf-translator-di-libri-2/src/hooks/useAppTranslation.ts).
-- **Vista Specchio**: La visualizzazione sincronizzata per confrontare l'originale con la traduzione è implementata in [ReaderView.tsx](file:///Users/lucasicignano/Lavoro%20temporaneo/UNIVERSITA/FIVER/gemini-pdf-translator-di-libri-2/src/components/ReaderView.tsx).
+**Main Process**: Handles file system operations (project CRUD, image storage, PDF manipulation), settings persistence, and application lifecycle. A write sequencer ensures serialized disk writes to prevent data corruption. Fingerprint-based deduplication prevents importing the same PDF twice.
 
-## 🚀 Inizia Subito
-
-### Installazione Locale
-
-1. **Clona il repository**:
-   ```bash
-   git clone https://github.com/Giovanui323/InstantTraducer.git
-   cd InstantTraducer
-   ```
-
-2. **Installa le dipendenze**:
-   ```bash
-   npm install
-   ```
-
-3. **Configura le chiavi API**:
-   Crea un file `.env.local` nella root:
-   ```bash
-   GEMINI_API_KEY=tua_chiave_qui
-   ```
-
-4. **Avvia l'applicazione**:
-   ```bash
-   npm run electron:dev
-   ```
+**IPC Boundary**: Communication between processes uses Electron's `ipcMain`/`ipcRenderer` with a typed `electronAPI` bridge exposed on the `window` object. Operations include `loadTranslation`, `saveTranslation`, `deleteTranslation`, `exportProjectPackage`, and file dialog interactions.
 
 ---
 
-<div align="center">
-Fatto con ❤️ per gli amanti dei libri di tutto il mondo.
-</div>
+## Core Functionalities
+
+- **Multimodal Page Translation**: Each page is rendered to a JPEG image and sent to the configured AI model along with a structured translation prompt. The model returns the translated text while preserving structural elements (headings, footnotes, captions).
+
+- **Priority-Based Save Queue**: All project mutations are routed through `SaveQueueManager`, which implements priority levels (`CRITICAL`, `BACKGROUND`, `BATCH`), deduplication by file ID, debounce timers per priority, and automatic retry on transient failures. Critical saves are flushed immediately; background saves are debounced at 30 seconds.
+
+- **Save Blocking Manager**: During project transitions (open, close, rename), a blocking mechanism temporarily prevents saves to avoid race conditions. Blocks are time-bounded with automatic release and backend synchronization.
+
+- **Multi-Provider Support**: The translation and verification pipelines support multiple AI providers (Gemini, OpenAI, Anthropic, Groq) with per-provider model lists and automatic fallback chains. Cooldown tracking prevents repeated calls to rate-limited models.
+
+- **Translation Verification**: An optional quality verification pass evaluates completed translations using a separate model. Verification results include severity ratings and correction suggestions. The verification queue runs independently from the translation queue.
+
+- **Library Management**: UUID-based project identification with fingerprint deduplication. Projects can be organized into named groups. Library state is refreshed from disk with preservation of in-memory projects that have pending saves.
+
+- **Synchronized PDF Rendering**: The reader view renders original PDF pages side-by-side with translations using `pdfjs-dist` canvas rendering. Supports single-page, spread, and auto-split views with per-page rotation and crop tools.
+
+- **Annotation System**: User highlights (with color coding) and text notes are stored per page and persisted as part of the project state. Annotations support precise character-level offsets for accurate positioning.
+
+- **Export**: Translated content can be exported as a standalone PDF (via `jspdf`), as a project package (for import on another machine), or as the original PDF file.
+
+---
+
+## Technical Stack
+
+| Component | Technology | Version |
+|---|---|---|
+| Framework | React | 19.2 |
+| Language | TypeScript | 5.8 |
+| Build Tool | Vite | 6.2 |
+| Desktop Runtime | Electron | 39.2 |
+| PDF Rendering | pdfjs-dist | 5.4.624 |
+| Styling | Tailwind CSS | 3.4 |
+| AI SDK (Gemini) | @google/genai | 1.35 |
+| AI SDK (Anthropic) | @anthropic-ai/sdk | 0.88 |
+| Testing | Vitest | 2.1 |
+| Packaging | electron-builder | 26.4 |
+| PDF Export | jspdf | 2.5 |
+
+---
+
+## Installation and Deployment
+
+### Prerequisites
+
+- Node.js >= 18
+- npm >= 9
+
+### Local Development
+
+```bash
+# Clone the repository
+git clone https://github.com/Giovanui323/InstantTraducer.git
+cd InstantTraducer
+
+# Install dependencies
+npm install
+
+# Configure API keys (see Environment Variables section)
+cp .env.local.example .env.local
+# Edit .env.local with your API keys
+
+# Start the development environment (Vite dev server + Electron)
+npm run electron:dev
+```
+
+### Production Build
+
+```bash
+# Build the Vite frontend
+npm run build
+
+# Generate application icons
+npm run generate:icons
+
+# Package for macOS (Apple Silicon)
+npm run package:mac:arm64
+
+# Package for macOS (DMG installer)
+npm run package:mac:arm64:dmg
+```
+
+The packaged application is output to the `release/` directory.
+
+### Running Tests
+
+```bash
+# Run the full test suite
+npm test
+
+# Run a specific test file
+npx vitest run tests/criticalFlows.test.ts
+
+# Run with coverage report
+npx vitest run --coverage
+```
+
+---
+
+## Environment Variables
+
+Configuration is provided through a `.env.local` file in the project root. This file is not committed to version control.
+
+| Variable | Required | Description |
+|---|---|---|
+| `GEMINI_API_KEY` | Yes | Google Gemini API key for translation and verification |
+| `LOG_LEVEL` | No | Application log verbosity. Accepted values: `debug`, `info`, `warn`, `error`. Defaults to `info`. |
+
+Additional provider API keys are configured at runtime through the application settings interface:
+
+| Setting | Description |
+|---|---|
+| OpenAI API Key | Required for OpenAI models (o1, o3, GPT-4o) |
+| Anthropic API Key | Required for Claude models |
+| Groq API Key | Required for Groq-hosted models |
+
+These runtime keys are stored in the Electron `userData` directory via `electron-store` and are not written to `.env.local`.
+
+---
+
+## Project Structure
+
+```
+src/
+  components/        React UI components (ReaderView, Header, HomeView, etc.)
+  constants.ts       Application-wide constants (models, timeouts, prompts)
+  contexts/          React context providers (LibraryContext)
+  hooks/
+    library/         Extracted hooks: GroupManager, SaveBlockingManager
+    saveQueue/       SaveQueueManager with priority queue and deduplication
+    useAppLibrary.ts Main library orchestration hook
+    useAppTranslation.ts  Translation queue and page-level translation logic
+    useAppQuality.ts      Verification and quality assessment pipeline
+    useAppAnnotations.ts  Highlight and note management
+  services/
+    geminiService.ts      Gemini API integration with cooldown and retry
+    geminiCooldown.ts     Per-model and global cooldown tracking
+    geminiModelLogic.ts   Fallback chain resolution
+    usageTracker.ts       Token and cost tracking per project
+  types.ts           TypeScript type definitions
+  utils/
+    saveQueueUtils.ts     mergeSaveDelta, buildProjectSavePayload
+    idUtils.ts            UUID validation and project ID normalization
+    textUtils.ts          Column splitting and text processing
+
+electron/
+  main.js            Application entry point, window management
+  projectHandlers.js Project CRUD operations
+  pdfHandlers.js     PDF file reading and manipulation
+  settingsLogic.js   Settings persistence
+  writeSequencer.js  Serialized write operations with timeout protection
+  fileUtils.js       File system utilities and directory management
+
+tests/               Vitest test files
+```
+
+---
+
+## License
+
+This project is licensed under the MIT License.

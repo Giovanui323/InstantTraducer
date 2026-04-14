@@ -27,7 +27,7 @@
   font-variant-numeric: tabular-nums;
 }
 
-/* ─── Scrollbar — Dark Pro ─── */
+/* ─── Scrollbar — Premium Night ─── */
 ::-webkit-scrollbar {
   width: 6px;
   height: 6px;
@@ -36,11 +36,11 @@
   background: transparent;
 }
 ::-webkit-scrollbar-thumb {
-  background: rgba(139, 148, 158, 0.2);
+  background: rgba(148, 163, 184, 0.15);
   border-radius: 999px;
 }
 ::-webkit-scrollbar-thumb:hover {
-  background: rgba(139, 148, 158, 0.35);
+  background: rgba(245, 158, 11, 0.3);
 }
 ::-webkit-scrollbar-corner {
   background: transparent;
@@ -51,18 +51,18 @@
   height: 5px;
 }
 .custom-scrollbar::-webkit-scrollbar-thumb {
-  background: rgba(139, 148, 158, 0.15);
+  background: rgba(148, 163, 184, 0.1);
   border-radius: 999px;
 }
 .custom-scrollbar::-webkit-scrollbar-thumb:hover {
-  background: rgba(139, 148, 158, 0.3);
+  background: rgba(245, 158, 11, 0.25);
 }
 
 .custom-scrollbar-dark::-webkit-scrollbar {
   width: 4px;
 }
 .custom-scrollbar-dark::-webkit-scrollbar-thumb {
-  background: rgba(139, 148, 158, 0.12);
+  background: rgba(148, 163, 184, 0.08);
 }
 
 .custom-scrollbar-light::-webkit-scrollbar {
@@ -84,25 +84,25 @@
   scrollbar-width: none;
 }
 
-/* ─── Focus ring — accessible & elegant ─── */
+/* ─── Focus ring — Amber/Gold accessible ─── */
 *:focus-visible {
   outline: none;
-  box-shadow: 0 0 0 2px #0d1117, 0 0 0 4px rgba(88, 166, 255, 0.5);
-  border-radius: 4px;
+  box-shadow: 0 0 0 2px #060b18, 0 0 0 4px rgba(245, 158, 11, 0.5);
+  border-radius: 8px;
 }
 button:focus-visible,
 [role="button"]:focus-visible,
 a:focus-visible {
-  box-shadow: 0 0 0 2px #0d1117, 0 0 0 3px rgba(88, 166, 255, 0.5);
+  box-shadow: 0 0 0 2px #060b18, 0 0 0 3px rgba(245, 158, 11, 0.5);
 }
 
-/* ─── Range input ─── */
+/* ─── Range input — Amber accent ─── */
 input[type="range"] {
   -webkit-appearance: none;
   appearance: none;
   height: 3px;
   border-radius: 999px;
-  background: #30363d;
+  background: #1e2f5e;
   outline: none;
 }
 input[type="range"]::-webkit-slider-thumb {
@@ -111,15 +111,15 @@ input[type="range"]::-webkit-slider-thumb {
   width: 14px;
   height: 14px;
   border-radius: 50%;
-  background: #58a6ff;
+  background: #f59e0b;
   cursor: pointer;
-  border: 2px solid #0d1117;
+  border: 2px solid #060b18;
   box-shadow: 0 1px 4px rgba(0,0,0,0.4);
   transition: transform 120ms ease-out, box-shadow 120ms ease-out;
 }
 input[type="range"]::-webkit-slider-thumb:hover {
   transform: scale(1.15);
-  box-shadow: 0 2px 8px rgba(88, 166, 255, 0.3);
+  box-shadow: 0 2px 8px rgba(245, 158, 11, 0.35);
 }
 input[type="range"]::-webkit-slider-thumb:active {
   transform: scale(1.25);
@@ -127,12 +127,12 @@ input[type="range"]::-webkit-slider-thumb:active {
 
 /* ─── Checkbox / Toggle ─── */
 input[type="checkbox"] {
-  accent-color: #58a6ff;
+  accent-color: #f59e0b;
 }
 
 /* ─── Select ─── */
 select {
-  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 12 12' fill='none'%3E%3Cpath d='M3 4.5L6 7.5L9 4.5' stroke='%238b949e' stroke-width='1.5' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E");
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 12 12' fill='none'%3E%3Cpath d='M3 4.5L6 7.5L9 4.5' stroke='%2394a3b8' stroke-width='1.5' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E");
   background-repeat: no-repeat;
   background-position: right 8px center;
   padding-right: 28px;
@@ -140,20 +140,20 @@ select {
   appearance: none;
 }
 
-/* ─── Glass panel mixin ─── */
+/* ─── Glass panel mixin — Night Blue ─── */
 @layer components {
   .glass-panel {
-    background: rgba(22, 27, 34, 0.85);
+    background: rgba(15, 26, 54, 0.88);
     backdrop-filter: blur(20px) saturate(1.2);
     -webkit-backdrop-filter: blur(20px) saturate(1.2);
-    border: 1px solid rgba(48, 54, 61, 0.6);
-    box-shadow: 0 4px 24px rgba(0, 0, 0, 0.35), inset 0 1px 0 rgba(255,255,255,0.03);
+    border: 1px solid rgba(30, 47, 94, 0.6);
+    box-shadow: 0 4px 24px rgba(0, 0, 0, 0.4), inset 0 1px 0 rgba(245, 158, 11, 0.04);
   }
   .glass-panel-sm {
-    background: rgba(22, 27, 34, 0.7);
+    background: rgba(15, 26, 54, 0.72);
     backdrop-filter: blur(12px);
     -webkit-backdrop-filter: blur(12px);
-    border: 1px solid rgba(48, 54, 61, 0.4);
+    border: 1px solid rgba(30, 47, 94, 0.4);
   }
 }
 
@@ -176,9 +176,9 @@ select {
 .skeleton {
   background: linear-gradient(
     90deg,
-    rgba(48, 54, 61, 0.3) 25%,
-    rgba(48, 54, 61, 0.6) 50%,
-    rgba(48, 54, 61, 0.3) 75%
+    rgba(30, 47, 94, 0.3) 25%,
+    rgba(30, 47, 94, 0.6) 50%,
+    rgba(30, 47, 94, 0.3) 75%
   );
   background-size: 200% 100%;
   animation: shimmer 1.8s ease-in-out infinite;

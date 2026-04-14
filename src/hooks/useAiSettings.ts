@@ -17,12 +17,17 @@ export const useAiSettings = () => {
     openai: { apiKey: '', model: 'gpt-4o-mini', reasoningEffort: 'medium', verbosity: 'medium' },
     claude: { apiKey: '', model: CLAUDE_MODELS_LIST[0].id },
     groq: { apiKey: '', model: 'llama-3.3-70b-versatile' },
+    modal: { apiKey: '' },
+    zai: { apiKey: '', model: 'glm-4v-plus' },
+    openrouter: { apiKey: '', model: 'anthropic/claude-sonnet-4.5' },
+    customProviders: [],
     legalContext: true,
     verboseLogs: true,
     customProjectsPath: '',
     customPrompt: '',
     customVerificationPrompt: '',
     customMetadataPrompt: '',
+    disabledProviders: [],
     forceFixTranslationModel: '',
     exportOptions: {
       splitSpreadIntoTwoPages: true,
@@ -49,6 +54,9 @@ export const useAiSettings = () => {
                 openai: { ...prev.openai, ...(settings.openai || {}) },
                 claude: { ...prev.claude, ...(settings.claude || {}) },
                 groq: { ...prev.groq, ...(settings.groq || {}) },
+                modal: { ...prev.modal, ...(settings.modal || {}) },
+                zai: { ...prev.zai, ...(settings.zai || {}) },
+                openrouter: { ...prev.openrouter, ...(settings.openrouter || {}) },
                 qualityCheck: settings.qualityCheck
                   ? { ...prev.qualityCheck, ...settings.qualityCheck }
                   : prev.qualityCheck,
@@ -155,6 +163,13 @@ export const useAiSettings = () => {
     if (aiSettings.provider === 'openai') return aiSettings.openai.apiKey;
     if (aiSettings.provider === 'claude') return aiSettings.claude.apiKey;
     if (aiSettings.provider === 'groq') return aiSettings.groq?.apiKey || '';
+    if (aiSettings.provider === 'modal') return aiSettings.modal?.apiKey || '';
+    if (aiSettings.provider === 'zai') return aiSettings.zai?.apiKey || '';
+    if (aiSettings.provider === 'openrouter') return aiSettings.openrouter?.apiKey || '';
+    if (aiSettings.provider === 'custom') {
+      const active = aiSettings.customProviders?.find(cp => cp.id === aiSettings.activeCustomProviderId);
+      return active?.apiKey || '';
+    }
     return '';
   })().trim().length > 0;
 

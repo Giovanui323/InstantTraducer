@@ -40,7 +40,7 @@ const PageThumb: React.FC<{
     onClick={() => onSelect(page)}
     className={`snap-start group relative w-[60px] h-[85px] flex-shrink-0 rounded-lg overflow-hidden border-2 transition-all duration-200 ease-out-expo ${
       isActive
-        ? 'border-accent shadow-[0_0_0_2px_rgba(88,166,255,0.25)] scale-110 z-10'
+        ? 'border-accent shadow-[0_0_0_2px_rgba(245,158,11,0.25)] scale-110 z-10'
         : status === 'done'
           ? 'border-success/40 hover:border-success/70 hover:scale-105'
           : status === 'error'
@@ -169,7 +169,7 @@ export const PagePreviewStrip: React.FC<PagePreviewStripProps> = ({
   const themeStyles = {
     light: { bg: 'bg-[#faf9f6]', text: 'text-stone-900', border: 'border-stone-200' },
     sepia: { bg: 'bg-[#f5eedd]', text: 'text-[#5b4636]', border: 'border-[#e3d7bf]' },
-    dark: { bg: 'bg-[#1a1d23]', text: 'text-[#c9d1d9]', border: 'border-white/[0.06]' }
+    dark: { bg: 'bg-[#0c1631]', text: 'text-[#c8d6f0]', border: 'border-accent/[0.08]' }
   };
   const currentTheme = themeStyles[theme] || themeStyles.dark;
 

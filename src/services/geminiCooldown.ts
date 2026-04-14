@@ -8,8 +8,16 @@ const modelCooldowns: Record<string, number> = {};
 // Global cooldown timestamp (0 means inactive)
 let globalGeminiCooldownUntil = 0;
 
-// Export for external access
+// Export for external access - use functions to modify
 export { globalGeminiCooldownUntil };
+
+export const setGlobalCooldownUntil = (timestamp: number) => {
+  globalGeminiCooldownUntil = timestamp;
+};
+
+export const getGlobalCooldownUntil = (): number => {
+  return globalGeminiCooldownUntil;
+};
 
 // Enhanced cooldown tracking with statistics
 const cooldownStats: Record<string, {

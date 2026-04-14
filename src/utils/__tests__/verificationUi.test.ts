@@ -12,7 +12,7 @@ describe("getVerificationUiState", () => {
 
   it("mappa verifying", () => {
     expect(getVerificationUiState({ state: "verifying" })).toEqual({
-      dotClass: "bg-blue-500",
+      dotClass: "bg-accent",
       label: "Verifica in corso…",
       severityLabel: undefined
     });

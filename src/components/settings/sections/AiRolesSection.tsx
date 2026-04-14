@@ -9,6 +9,9 @@ import {
   GROQ_MODELS_LIST,
   OPENAI_MODELS_LIST,
   GEMINI_MODELS_LIST,
+  MODAL_MODELS_LIST,
+  ZAI_MODELS_LIST,
+  OPENROUTER_MODELS_LIST,
   availableGeminiModels,
   availableClaudeModels,
   isGroqVisionModel,
@@ -16,6 +19,7 @@ import {
 } from '../../../constants';
 import { SettingsSearchItem } from '../search';
 import { CustomModelManager } from '../../CustomModelManager';
+import { CustomProvidersSection } from './CustomProvidersSection';
 
 export const aiRolesSearchItems: SettingsSearchItem[] = [
   {
@@ -97,6 +101,9 @@ export const AiRolesSection = ({
   const claude = draftSettings.claude || { apiKey: '', model: 'claude-3-5-sonnet-20241022' as any };
   const groq = draftSettings.groq || { apiKey: '', model: 'llama-3.3-70b-versatile' as any };
 
+  const disabledProviders = draftSettings.disabledProviders || [];
+  const isProviderAvailable = (p: AIProvider) => !disabledProviders.includes(p);
+
   const qualityCheck = draftSettings.qualityCheck || { enabled: true, verifierProvider: 'gemini' as AIProvider, verifierModel: GEMINI_VERIFIER_MODEL, maxAutoRetries: 1 };
   const metadataExtraction = draftSettings.metadataExtraction || { enabled: true, provider: 'gemini' as AIProvider, model: GEMINI_TRANSLATION_FLASH_MODEL };
 
@@ -121,6 +128,9 @@ export const AiRolesSection = ({
     else if (p === 'openai') nextModel = 'gpt-4o-mini';
     else if (p === 'claude') nextModel = 'claude-3-5-haiku-20241022';
     else if (p === 'groq') nextModel = 'llama-3.3-70b-versatile';
+    else if (p === 'modal') nextModel = 'zai-org/GLM-5.1-FP8';
+    else if (p === 'zai') nextModel = 'glm-4-plus';
+    else if (p === 'openrouter') nextModel = 'anthropic/claude-haiku-4.5';
     updateDraft({ qualityCheck: { ...qualityCheck, verifierProvider: p, verifierModel: nextModel } });
   };
   const setQualityModel = (m: string) => updateDraft({ qualityCheck: { ...qualityCheck, verifierModel: m } });
@@ -133,6 +143,9 @@ export const AiRolesSection = ({
     else if (p === 'openai') nextModel = 'gpt-4o-mini';
     else if (p === 'claude') nextModel = 'claude-3-5-haiku-20241022';
     else if (p === 'groq') nextModel = 'meta-llama/llama-4-scout-17b-16e-instruct';
+    else if (p === 'modal') nextModel = 'zai-org/GLM-5.1-FP8';
+    else if (p === 'zai') nextModel = 'glm-4v-flash';
+    else if (p === 'openrouter') nextModel = 'anthropic/claude-haiku-4.5';
     updateDraft({ metadataExtraction: { ...metadataExtraction, provider: p, model: nextModel } });
   };
   const setMetadataModel = (m: string) => updateDraft({ metadataExtraction: { ...metadataExtraction, model: m } });
@@ -177,6 +190,65 @@ export const AiRolesSection = ({
             <option key={m.id} value={m.id}>{m.name}</option>
           ))}
         </select>
+      );
+    }
+    if (provider === 'modal') {
+      return (
+        <select
+          value="zai-org/GLM-5.1-FP8"
+          disabled
+          className={selectClasses}
+        >
+          {MODAL_MODELS_LIST.map((m) => (
+            <option key={m.id} value={m.id}>{m.name}</option>
+          ))}
+        </select>
+      );
+    }
+    if (provider === 'zai') {
+      const zai = draftSettings.zai || { apiKey: '', model: 'glm-4v-plus' };
+      return (
+        <select
+          value={zai.model || 'glm-4v-plus'}
+          onChange={(e) => updateDraft({ zai: { ...zai, model: e.target.value } })}
+          className={selectClasses}
+        >
+          {ZAI_MODELS_LIST.map((m) => (
+            <option key={m.id} value={m.id}>{m.name}</option>
+          ))}
+        </select>
+      );
+    }
+    if (provider === 'openrouter') {
+      const openrouter = draftSettings.openrouter || { apiKey: '', model: 'anthropic/claude-sonnet-4.5' };
+      return (
+        <div className="flex items-center gap-2">
+          <select
+            value={openrouter.model}
+            onChange={(e) => updateDraft({ openrouter: { ...openrouter, model: e.target.value } })}
+            className={selectClasses}
+          >
+            {OPENROUTER_MODELS_LIST.map((m) => (
+              <option key={m.id} value={m.id}>{m.name}</option>
+            ))}
+          </select>
+          <input
+            value={openrouter.model}
+            onChange={(e) => updateDraft({ openrouter: { ...openrouter, model: e.target.value } })}
+            placeholder="Oppure custom (es. provider/model)"
+            className={`${inputClasses} ml-1`}
+          />
+        </div>
+      );
+    }
+    if (provider === 'custom') {
+      const active = draftSettings.customProviders?.find(cp => cp.id === draftSettings.activeCustomProviderId);
+      return (
+        <input
+          value={active ? `${active.model} (${active.name})` : 'Nessun provider custom selezionato'}
+          readOnly
+          className={inputClasses}
+        />
       );
     }
     return (
@@ -232,6 +304,60 @@ export const AiRolesSection = ({
         </select>
       );
     }
+    if (provider === 'modal') {
+      return (
+        <input
+          value={v}
+          onChange={(e) => setForceFixTranslationModel(e.target.value)}
+          placeholder="zai-org/GLM-5.1-FP8"
+          readOnly
+          className={inputClasses}
+        />
+      );
+    }
+    if (provider === 'zai') {
+      return (
+        <select
+          value={v}
+          onChange={(e) => setForceFixTranslationModel(e.target.value)}
+          className={selectClasses}
+        >
+          <option value="">Usa modello primario</option>
+          {ZAI_MODELS_LIST.map((m) => (
+            <option key={m.id} value={m.id}>{m.name}</option>
+          ))}
+        </select>
+      );
+    }
+    if (provider === 'openrouter') {
+      return (
+        <div className="flex items-center gap-2">
+          <select
+            value={v}
+            onChange={(e) => setForceFixTranslationModel(e.target.value)}
+            className={selectClasses}
+          >
+            <option value="">Usa modello primario</option>
+            {OPENROUTER_MODELS_LIST.map((m) => (
+              <option key={m.id} value={m.id}>{m.name}</option>
+            ))}
+          </select>
+          {v && !OPENROUTER_MODELS_LIST.find(m => m.id === v) && (
+            <span className="text-[10px] text-accent">Custom</span>
+          )}
+        </div>
+      );
+    }
+    if (provider === 'custom') {
+      return (
+        <input
+          value={v}
+          onChange={(e) => setForceFixTranslationModel(e.target.value)}
+          placeholder="Vuoto = primario"
+          className={inputClasses}
+        />
+      );
+    }
     return (
       <select
         value={v}
@@ -274,6 +400,33 @@ export const AiRolesSection = ({
         </select>
       );
     }
+    if (qualityCheck.verifierProvider === 'modal') {
+      return (
+        <select value={qualityCheck.verifierModel} onChange={(e) => setQualityModel(e.target.value)} className={selectClasses}>
+          {MODAL_MODELS_LIST.map((m) => (
+            <option key={m.id} value={m.id}>{m.name}</option>
+          ))}
+        </select>
+      );
+    }
+    if (qualityCheck.verifierProvider === 'zai') {
+      return (
+        <select value={qualityCheck.verifierModel} onChange={(e) => setQualityModel(e.target.value)} className={selectClasses}>
+          {ZAI_MODELS_LIST.map((m) => (
+            <option key={m.id} value={m.id}>{m.name}</option>
+          ))}
+        </select>
+      );
+    }
+    if (qualityCheck.verifierProvider === 'openrouter') {
+      return (
+        <select value={qualityCheck.verifierModel} onChange={(e) => setQualityModel(e.target.value)} className={selectClasses}>
+          {OPENROUTER_MODELS_LIST.map((m) => (
+            <option key={m.id} value={m.id}>{m.name}</option>
+          ))}
+        </select>
+      );
+    }
     return (
       <select value={qualityCheck.verifierModel} onChange={(e) => setQualityModel(e.target.value)} className={selectClasses}>
         {GROQ_MODELS_LIST.map((m) => (
@@ -311,6 +464,33 @@ export const AiRolesSection = ({
         </select>
       );
     }
+    if (metadataExtraction.provider === 'modal') {
+      return (
+        <select value={metadataExtraction.model} onChange={(e) => setMetadataModel(e.target.value)} className={selectClasses}>
+          {MODAL_MODELS_LIST.map((m) => (
+            <option key={m.id} value={m.id}>{m.name}</option>
+          ))}
+        </select>
+      );
+    }
+    if (metadataExtraction.provider === 'zai') {
+      return (
+        <select value={metadataExtraction.model} onChange={(e) => setMetadataModel(e.target.value)} className={selectClasses}>
+          {ZAI_MODELS_LIST.map((m) => (
+            <option key={m.id} value={m.id}>{m.name}</option>
+          ))}
+        </select>
+      );
+    }
+    if (metadataExtraction.provider === 'openrouter') {
+      return (
+        <select value={metadataExtraction.model} onChange={(e) => setMetadataModel(e.target.value)} className={selectClasses}>
+          {OPENROUTER_MODELS_LIST.map((m) => (
+            <option key={m.id} value={m.id}>{m.name}</option>
+          ))}
+        </select>
+      );
+    }
     return (
       <select value={metadataExtraction.model} onChange={(e) => setMetadataModel(e.target.value)} className={selectClasses}>
         {GROQ_MODELS_LIST.map((m) => (
@@ -334,10 +514,16 @@ export const AiRolesSection = ({
               onChange={(e) => setProvider(e.target.value as AIProvider)}
               className={selectClasses}
             >
-              <option value="gemini">Google Gemini</option>
-              <option value="openai">OpenAI</option>
-              <option value="claude">Claude</option>
-              <option value="groq">Groq</option>
+              {isProviderAvailable('gemini') && <option value="gemini">Google Gemini</option>}
+              {isProviderAvailable('openai') && <option value="openai">OpenAI</option>}
+              {isProviderAvailable('claude') && <option value="claude">Claude</option>}
+              {isProviderAvailable('groq') && <option value="groq">Groq</option>}
+              {isProviderAvailable('modal') && <option value="modal">Modal (GLM-5.1)</option>}
+              {isProviderAvailable('zai') && <option value="zai">Z.ai (Zhipu AI)</option>}
+              {isProviderAvailable('openrouter') && <option value="openrouter">OpenRouter</option>}
+              {draftSettings.customProviders && draftSettings.customProviders.length > 0 && (
+                <option value="custom">Custom Provider</option>
+              )}
             </select>
           }
         />
@@ -432,10 +618,13 @@ export const AiRolesSection = ({
                   onChange={(e) => setVerifierProvider(e.target.value as AIProvider)}
                   className={selectClasses}
                 >
-                  <option value="gemini">Gemini</option>
-                  <option value="openai">OpenAI</option>
-                  <option value="claude">Claude</option>
-                  <option value="groq">Groq</option>
+                  {isProviderAvailable('gemini') && <option value="gemini">Gemini</option>}
+                  {isProviderAvailable('openai') && <option value="openai">OpenAI</option>}
+                  {isProviderAvailable('claude') && <option value="claude">Claude</option>}
+                  {isProviderAvailable('groq') && <option value="groq">Groq</option>}
+                  {isProviderAvailable('modal') && <option value="modal">Modal</option>}
+                  {isProviderAvailable('zai') && <option value="zai">Z.ai</option>}
+                  {isProviderAvailable('openrouter') && <option value="openrouter">OpenRouter</option>}
                 </select>
               }
             />
@@ -475,10 +664,13 @@ export const AiRolesSection = ({
                   onChange={(e) => setMetadataProvider(e.target.value as AIProvider)}
                   className={selectClasses}
                 >
-                  <option value="gemini">Gemini</option>
-                  <option value="openai">OpenAI</option>
-                  <option value="claude">Claude</option>
-                  <option value="groq">Groq</option>
+                  {isProviderAvailable('gemini') && <option value="gemini">Gemini</option>}
+                  {isProviderAvailable('openai') && <option value="openai">OpenAI</option>}
+                  {isProviderAvailable('claude') && <option value="claude">Claude</option>}
+                  {isProviderAvailable('groq') && <option value="groq">Groq</option>}
+                  {isProviderAvailable('modal') && <option value="modal">Modal</option>}
+                  {isProviderAvailable('zai') && <option value="zai">Z.ai</option>}
+                  {isProviderAvailable('openrouter') && <option value="openrouter">OpenRouter</option>}
                 </select>
               }
             />
@@ -496,6 +688,11 @@ export const AiRolesSection = ({
             updateDraft({ customModels: newS.customModels || [] });
           }}
         />
+      </div>
+
+      <div className="space-y-3">
+        <SectionTitle title="Provider Personalizzati" description="Aggiungi endpoint AI custom (OpenAI/Anthropic/Gemini/Zhipu compatibili)." />
+        <CustomProvidersSection draftSettings={draftSettings} updateDraft={updateDraft} />
       </div>
     </div>
   );

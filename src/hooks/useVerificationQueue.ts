@@ -2,7 +2,7 @@ import { useCallback, useRef, useState } from 'react';
 import { log } from '../services/logger';
 // import { globalConcurrency } from '../services/concurrencyManager'; // DISACCOPPIAMENTO: Rimosso uso concorrenza globale
 
-const SAFETY_TIMEOUT_MS = 45000; // 45 secondi timeout di sicurezza (evita STALLED infiniti)
+const SAFETY_TIMEOUT_MS = 95000; // 95 secondi timeout di sicurezza
 const HEARTBEAT_INTERVAL_MS = 15000; // 15 secondi heartbeat
 
 interface UseVerificationQueueProps {

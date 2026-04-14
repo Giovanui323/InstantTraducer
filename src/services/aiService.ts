@@ -2,6 +2,10 @@ import { translateWithGemini } from "./geminiService";
 import { translateWithOpenAI } from "./openaiService";
 import { translateWithClaude } from "./claudeService";
 import { translateWithGroq, validateGroqForTranslation } from "./groqService";
+import { translateWithModal } from "./modalService";
+import { translateWithZai } from "./zaiService";
+import { translateWithOpenRouter } from "./openrouterService";
+import { translateWithCustomProvider } from "./customProviderAdapter";
 import { verifyQualityAdapter, extractMetadataAdapter } from "./aiAdapter";
 import { getSafeModel } from "./modelManager";
 import { AISettings, GeminiModel, TranslationResult, OpenAIModel, ClaudeModel, PageVerification, PDFMetadata, GroqModel } from "../types";
@@ -11,13 +15,14 @@ import { GEMINI_TRANSLATION_MODEL, GEMINI_VERIFIER_MODEL } from "../constants";
 type ProviderReadyResult = { ok: boolean; fromCache: boolean };
 
 const ensureProviderReady = async (
-  provider: 'gemini' | 'openai' | 'claude' | 'groq',
+  provider: 'gemini' | 'openai' | 'claude' | 'groq' | 'openrouter',
   settings: AISettings,
   modelOverride?: string
 ): Promise<ProviderReadyResult> => {
   const apiKey = provider === 'gemini' ? settings.gemini.apiKey?.trim()
     : provider === 'openai' ? settings.openai.apiKey?.trim()
     : provider === 'claude' ? settings.claude?.apiKey?.trim()
+    : provider === 'openrouter' ? settings.openrouter?.apiKey?.trim()
     : settings.groq?.apiKey?.trim();
   
   if (!apiKey) return { ok: false, fromCache: false };
@@ -34,8 +39,11 @@ export const ensureOpenAIReady = (settings: AISettings, modelOverride?: OpenAIMo
 export const ensureClaudeReady = (settings: AISettings, modelOverride?: ClaudeModel) => 
   ensureProviderReady('claude', settings, modelOverride);
 
-export const ensureGroqReady = (settings: AISettings, modelOverride?: GroqModel) => 
+export const ensureGroqReady = (settings: AISettings, modelOverride?: GroqModel) =>
   ensureProviderReady('groq', settings, modelOverride);
+
+export const ensureOpenRouterReady = (settings: AISettings, modelOverride?: string) =>
+  ensureProviderReady('openrouter', settings, modelOverride);
 
 export const __resetAiReadinessCache = () => {
   // No-op: Cache removed
@@ -243,6 +251,123 @@ export const translatePage = async (
     return res;
   }
 
+  if (settings.provider === 'openrouter') {
+    const rawModel = config.translationModelOverride || settings.openrouter?.model || 'anthropic/claude-sonnet-4.5';
+    const model = getSafeModel(rawModel, 'openrouter', settings);
+    if (onProgress) onProgress(`Selezionato provider OpenRouter (model: ${model})`);
+
+    const apiKey = settings.openrouter?.apiKey || '';
+    const maskedKey = apiKey.length > 8 ? `...${apiKey.slice(-4)}` : '(short/invalid)';
+    log.info(`[OPENROUTER] Using API Key suffix: ${maskedKey}`);
+
+    const res = await translateWithOpenRouter(
+      config.imageBase64,
+      config.pageNumber,
+      config.sourceLanguage,
+      config.previousContext,
+      config.prevPageImageBase64,
+      config.prevPageNumber,
+      config.nextPageImageBase64,
+      config.nextPageNumber,
+      apiKey,
+      model,
+      config.extraInstruction,
+      onProgress,
+      options?.signal,
+      settings.legalContext ?? true,
+      settings.customPrompt,
+      config.skipPostProcessing
+    );
+    log.success(`Completata traduzione pagina ${config.pageNumber} con OpenRouter`, { elapsedMs: Math.round(performance.now() - startedAt), chars: res?.text?.length || 0, model });
+    return res;
+  }
+
+  if (settings.provider === 'modal') {
+    if (!settings.modal?.apiKey?.trim()) {
+      throw new Error("API Key Modal mancante.");
+    }
+    if (onProgress) onProgress('Selezionato provider Modal (GLM-5.1, 1 req alla volta)');
+
+    const res = await translateWithModal(
+      config.imageBase64,
+      config.pageNumber,
+      config.sourceLanguage,
+      config.previousContext,
+      config.prevPageImageBase64,
+      config.prevPageNumber,
+      config.nextPageImageBase64,
+      config.nextPageNumber,
+      settings.modal.apiKey,
+      config.extraInstruction,
+      onProgress,
+      options?.signal,
+      settings.legalContext ?? true,
+      settings.customPrompt,
+      config.skipPostProcessing
+    );
+    log.success(`Completata traduzione pagina ${config.pageNumber} con Modal`, { elapsedMs: Math.round(performance.now() - startedAt), chars: res?.text?.length || 0 });
+    return res;
+  }
+
+  if (settings.provider === 'zai') {
+    if (!settings.zai?.apiKey?.trim()) {
+      throw new Error("API Key Z.ai mancante.");
+    }
+    if (onProgress) onProgress('Selezionato provider Z.ai (Zhipu AI)');
+
+    const res = await translateWithZai(
+      config.imageBase64,
+      config.pageNumber,
+      config.sourceLanguage,
+      config.previousContext,
+      config.prevPageImageBase64,
+      config.prevPageNumber,
+      config.nextPageImageBase64,
+      config.nextPageNumber,
+      settings.zai.apiKey,
+      settings.zai.model || 'glm-4v-plus',
+      config.extraInstruction,
+      onProgress,
+      options?.signal,
+      settings.legalContext ?? true,
+      settings.customPrompt,
+      config.skipPostProcessing
+    );
+    log.success(`Completata traduzione pagina ${config.pageNumber} con Z.ai`, { elapsedMs: Math.round(performance.now() - startedAt), chars: res?.text?.length || 0 });
+    return res;
+  }
+
+  if (settings.provider === 'custom') {
+    const activeProvider = settings.customProviders?.find(cp => cp.id === settings.activeCustomProviderId);
+    if (!activeProvider) {
+      throw new Error("Nessun provider custom attivo selezionato.");
+    }
+    if (!activeProvider.apiKey?.trim()) {
+      throw new Error(`API Key per provider custom "${activeProvider.name}" mancante.`);
+    }
+    if (onProgress) onProgress(`Selezionato provider custom: ${activeProvider.name} (${activeProvider.apiFormat})`);
+
+    const res = await translateWithCustomProvider(
+      activeProvider,
+      config.imageBase64,
+      config.pageNumber,
+      config.sourceLanguage,
+      config.previousContext,
+      config.prevPageImageBase64,
+      config.prevPageNumber,
+      config.nextPageImageBase64,
+      config.nextPageNumber,
+      config.extraInstruction,
+      onProgress,
+      options?.signal,
+      settings.legalContext ?? true,
+      settings.customPrompt,
+      config.skipPostProcessing
+    );
+    log.success(`Completata traduzione pagina ${config.pageNumber} con custom "${activeProvider.name}"`, { elapsedMs: Math.round(performance.now() - startedAt), chars: res?.text?.length || 0 });
+    return res;
+  }
+
   throw new Error("Provider non supportato.");
 };
 
@@ -254,6 +379,13 @@ export const checkApiConfiguration = (settings: AISettings): boolean => {
   if (settings.provider === 'openai') return (settings.openai.apiKey || '').trim().length > 0;
   if (settings.provider === 'claude') return (settings.claude?.apiKey || '').trim().length > 0;
   if (settings.provider === 'groq') return (settings.groq?.apiKey || '').trim().length > 0;
+  if (settings.provider === 'modal') return (settings.modal?.apiKey || '').trim().length > 0;
+  if (settings.provider === 'zai') return (settings.zai?.apiKey || '').trim().length > 0;
+  if (settings.provider === 'openrouter') return (settings.openrouter?.apiKey || '').trim().length > 0;
+  if (settings.provider === 'custom') {
+    const active = settings.customProviders?.find(cp => cp.id === settings.activeCustomProviderId);
+    return Boolean(active?.apiKey?.trim());
+  }
   return false;
 };
 
@@ -305,6 +437,17 @@ export const verifyTranslationQuality = async (
     return await verifyQualityAdapter({ settings, ...rest });
   }
 
+  if (provider === 'modal' || provider === 'zai' || provider === 'custom') {
+    return await verifyQualityAdapter({ settings, ...rest });
+  }
+
+  if (provider === 'openrouter') {
+    const model = settings.qualityCheck?.verifierModel || settings.openrouter?.model || 'anthropic/claude-sonnet-4.5';
+    const ready = await ensureOpenRouterReady(settings, model);
+    if (!ready.ok) throw new Error("OpenRouter non pronto per la verifica.");
+    return await verifyQualityAdapter({ settings, ...rest });
+  }
+
   return null;
 };
 
@@ -347,6 +490,15 @@ export const extractPdfMetadata = async (
     if (!settings.groq?.apiKey?.trim()) throw new Error("API key Groq mancante per l'estrazione metadati.");
     const ready = await ensureGroqReady(settings, model as any);
     if (!ready.ok) throw new Error("Groq non pronto per l'estrazione metadati.");
+    return await extractMetadataAdapter(base64Images, settings, options);
+  }
+
+  if (provider === 'modal' || provider === 'zai' || provider === 'custom') {
+    return await extractMetadataAdapter(base64Images, settings, options);
+  }
+
+  if (provider === 'openrouter') {
+    if (!settings.openrouter?.apiKey?.trim()) throw new Error("API key OpenRouter mancante per l'estrazione metadati.");
     return await extractMetadataAdapter(base64Images, settings, options);
   }
 

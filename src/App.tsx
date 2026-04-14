@@ -81,7 +81,7 @@ const App: React.FC = () => {
   const sessionId = useMemo(() => Math.random().toString(36).slice(2, 10), []);
 
   // --- App Version State ---
-  const [appVersion, setAppVersion] = useState<string>('4.1.12');
+  const [appVersion, setAppVersion] = useState<string>('4.1.30');
 
   useEffect(() => {
     if (window.electronAPI?.getAppVersion) {
@@ -300,7 +300,12 @@ const App: React.FC = () => {
     const raw = rawNew ?? rawOld;
     if (raw === 'auto' || raw === 'single' || raw === 'spread') return raw;
     if (raw === 'side-by-side') return 'spread';
-    return 'auto';
+    return 'single';
+  });
+  const [navigationMode, setNavigationMode] = useState<'scroll' | 'flip'>(() => {
+    const raw = storage.getItem('reader_navigation_mode_v1');
+    if (raw === 'scroll' || raw === 'flip') return raw;
+    return 'scroll';
   });
   const [showPreviewStrip, setShowPreviewStrip] = useState<boolean>(false);
   const [previewThumbnails, setPreviewThumbnails] = useState<Record<number, string>>({});
@@ -333,6 +338,10 @@ const App: React.FC = () => {
     storage.setItem('reader_page_split_mode_v1', viewMode);
     storage.setItem('reader_view_mode_v1', viewMode);
   }, [viewMode]);
+
+  useEffect(() => {
+    storage.setItem('reader_navigation_mode_v1', navigationMode);
+  }, [navigationMode]);
 
   useEffect(() => {
     if (hasEffectiveScaleRef.current) return;
@@ -525,18 +534,6 @@ const App: React.FC = () => {
                     }
                   }
 
-                  // Salva su disco solo ogni 30 pagine scansionate per minimizzare IO
-                  /*
-                  if (hasNewData && (pagesSinceLastSave >= 30 || i + batchSize >= others.length)) {
-                    log.info(`Salvataggio consolidato dimensioni PDF (${pagesSinceLastSave} pagine)`);
-                    if (library.currentProjectFileId) {
-                      const fileId = library.currentProjectFileId;
-                      void library.updateLibrary(fileId, { fileId, pageDims: merged }, 'BACKGROUND', true);
-                    }
-                    pagesSinceLastSave = 0;
-                    accumulatedDims = {};
-                  }
-                  */
                   return merged;
                 });
 
@@ -610,21 +607,6 @@ const App: React.FC = () => {
     setActiveProject(projectId, projectName); 
   }, [library.currentProjectFileId, metadata?.name, metadata?.title]);
   useEffect(() => { pageDimsRef.current = pageDims; }, [pageDims]);
-
-  // Save reading progress (lastPage) automatically
-  // FIX: Removed aggressive saving on every page turn. 
-  // Last page is now saved only on session exit (Home) or app close.
-  /*
-  useEffect(() => {
-    if (!isHomeView && metadata?.name && library.currentProjectFileId) {
-      // Evitiamo chiamate ridondanti se la pagina non è cambiata rispetto all'ultimo salvataggio
-      if (currentPage !== lastSavedPageRef.current) {
-        lastSavedPageRef.current = currentPage;
-        void library.updateLibrary(metadata.name, { lastPage: currentPage });
-      }
-    }
-  }, [currentPage, isHomeView, metadata?.name, library.currentProjectFileId, library.updateLibrary]);
-  */
 
   // Track corrupted pages and failed renders
   const [corruptedPages, setCorruptedPages] = useState<Set<number>>(new Set());
@@ -1589,7 +1571,6 @@ const App: React.FC = () => {
       }
     }
 
-    // const sourcePath = (file as any).path || ''; // Hoisted to top
     const originalFileName = file.name;
     const fileId = ensureJsonExtension(stableFileId);
 
@@ -2706,6 +2687,7 @@ const App: React.FC = () => {
             onScale={setScale} onBrightnessChange={setBrightness} onTemperatureChange={setTemperature} onThemeChange={setTranslationTheme}
             viewMode={viewMode} onViewModeChange={setViewMode}
             columnLayout={columnLayout} onColumnLayoutChange={setColumnLayout}
+            navigationMode={navigationMode} onNavigationModeChange={setNavigationMode}
           />
         )}
 
@@ -2800,12 +2782,10 @@ const App: React.FC = () => {
               pages={allPages}
               pdfDoc={pdfDoc}
               currentPage={currentPage}
-              navigationMode="flip"
-              viewMode={viewMode}
+              navigationMode={navigationMode}
+              viewMode={viewMode === 'spread' ? 'side-by-side' : 'single'}
               pageDims={pageDims}
-              pageRotations={pageRotations}
               scale={scale}
-              onEffectiveScaleChange={handleEffectiveScaleChange}
               isTranslatedMode={isTranslatedMode || isReaderMode}
               isManualMode={isManualMode}
               previewPage={previewPage}
@@ -2827,8 +2807,6 @@ const App: React.FC = () => {
               isPaused={isPaused}
               copiedPage={copiedPage}
               translationLogs={geminiLogs}
-              isAutodetecting={isAutodetecting}
-              autodetectLogs={autodetectLogs}
               partialTranslations={translation.partialTranslations}
               originalImages={originalImages}
               croppedImages={croppedImages}
@@ -2846,20 +2824,18 @@ const App: React.FC = () => {
               onClearCrop={handleClearCrop}
               onReplacePage={handleReplacePage}
               onVerifyPage={quality.verifySingleTranslatedPage}
-              onForceVerifyPage={quality.forceVerificationSuccess}
               onReanalyzePage={(p: number) => quality.verifySingleTranslatedPage(p, { reanalyze: true })}
               onFixPage={(p, opts) => {
                 log.info(`[UI] Azione 'Rifai con suggerimenti' per pagina ${p}`, opts);
                 setIsPaused(false);
                 setIsManualMode(false);
-                // Piccola attesa per permettere allo stato di propagarsi? 
-                // Non necessaria grazie al fix in useTranslationQueue, ma utile per chiarezza
                 quality.fixTranslation(p, opts);
               }}
               onRetryAllCritical={handleRetryAllCritical}
 
               onScaleChange={setScale}
               showConfirm={showConfirm}
+              pageRotations={pageRotations}
               bottomPadding={bottomBarHeight + 120}
               translationTheme={translationTheme}
               notesPage={notesPage}
@@ -2875,10 +2851,6 @@ const App: React.FC = () => {
               onAddNote={annotations.addUserNote}
               onUpdateNote={annotations.updateUserNote}
               onRemoveNote={annotations.removeUserNote}
-              isConsultationMode={isConsultationMode}
-              columnLayout={columnLayout}
-              isApiConfigured={isApiConfigured}
-              onOpenSettings={() => setIsSettingsOpen(true)}
             />
           )}
 
@@ -2897,8 +2869,14 @@ const App: React.FC = () => {
               annotationMap={annotationMap}
               translationMap={translation.translationMap}
               currentPages={[currentPage]}
-              onPrevPage={() => setCurrentPage((p: number) => Math.max(1, p - 1))}
-              onNextPage={() => setCurrentPage((p: number) => Math.min(totalPages, p + 1))}
+              onPrevPage={() => {
+                const step = (navigationMode === 'flip' && viewMode === 'spread') ? 2 : 1;
+                setCurrentPage((p: number) => Math.max(1, p - step));
+              }}
+              onNextPage={() => {
+                const step = (navigationMode === 'flip' && viewMode === 'spread') ? 2 : 1;
+                setCurrentPage((p: number) => Math.min(totalPages, p + step));
+              }}
               onTogglePreviewStrip={() => setShowPreviewStrip(!showPreviewStrip)}
               onTogglePause={handleTogglePauseActiveProject}
               onStop={handleStopActiveProject}

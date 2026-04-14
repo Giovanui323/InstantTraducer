@@ -1,14 +1,16 @@
 import { AISettings, GeminiModel, OpenAIModel } from '../types';
-import { 
-  GEMINI_TRANSLATION_MODEL, 
-  GEMINI_TRANSLATION_FAST_MODEL, 
+import {
+  GEMINI_TRANSLATION_MODEL,
+  GEMINI_TRANSLATION_FAST_MODEL,
   GEMINI_TRANSLATION_FALLBACK_MODEL,
   GEMINI_TRANSLATION_FLASH_MODEL,
   GEMINI_VERIFIER_MODEL,
   GEMINI_VERIFIER_PRO_MODEL,
   GEMINI_VERIFIER_FALLBACK_MODEL,
   GEMINI_MODELS_LIST,
-  CLAUDE_MODELS_LIST
+  CLAUDE_MODELS_LIST,
+  MODAL_MODELS_LIST,
+  ZAI_MODELS_LIST
 } from '../constants';
 
 export interface ValidationResult {
@@ -26,7 +28,7 @@ export const validateSettings = (settings: AISettings): ValidationResult => {
   let safeSettings = { ...settings };
 
   // 1. Provider Integrity
-  if (settings.provider !== 'gemini' && settings.provider !== 'openai' && settings.provider !== 'claude' && settings.provider !== 'groq') {
+  if (settings.provider !== 'gemini' && settings.provider !== 'openai' && settings.provider !== 'claude' && settings.provider !== 'groq' && settings.provider !== 'modal' && settings.provider !== 'zai' && settings.provider !== 'openrouter' && settings.provider !== 'custom') {
     errors.push(`Provider non valido: ${settings.provider}. Reimpostato su 'gemini'.`);
     safeSettings.provider = 'gemini';
   }
@@ -68,7 +70,48 @@ export const validateSettings = (settings: AISettings): ValidationResult => {
     if (!safeSettings.groq.model) {
       safeSettings.groq.model = 'llama-3.3-70b-versatile';
     }
-    // Always preserve the saved model ID — don't override it
+  }
+
+  // 3.7 Modal Validation
+  if (!safeSettings.modal) {
+    safeSettings.modal = { apiKey: '' };
+  }
+
+  // 3.8 Z.ai Validation
+  if (!safeSettings.zai) {
+    safeSettings.zai = { apiKey: '', model: 'glm-4v-plus' };
+  } else {
+    if (!safeSettings.zai.model) {
+      safeSettings.zai.model = 'glm-4v-plus';
+    }
+  }
+
+  // 3.9 OpenRouter Validation
+  if (!safeSettings.openrouter) {
+    safeSettings.openrouter = { apiKey: '', model: 'anthropic/claude-sonnet-4.5' };
+  } else {
+    if (!safeSettings.openrouter.model) {
+      safeSettings.openrouter.model = 'anthropic/claude-sonnet-4.5';
+    }
+  }
+
+  // 3.9 Custom Providers Validation
+  if (safeSettings.customProviders && Array.isArray(safeSettings.customProviders)) {
+    safeSettings.customProviders = safeSettings.customProviders.filter(cp =>
+      cp.id && cp.name && cp.apiFormat && cp.baseUrl && cp.model && cp.apiKey
+    );
+  }
+
+  // If provider is 'custom', ensure activeCustomProviderId is valid
+  if (safeSettings.provider === 'custom') {
+    const activeId = safeSettings.activeCustomProviderId;
+    const exists = safeSettings.customProviders?.some(cp => cp.id === activeId);
+    if (!exists && safeSettings.customProviders && safeSettings.customProviders.length > 0) {
+      safeSettings.activeCustomProviderId = safeSettings.customProviders[0].id;
+    } else if (!exists) {
+      warnings.push("Provider custom selezionato ma nessun provider custom configurato.");
+      safeSettings.provider = 'gemini';
+    }
   }
 
   // 4. Conflict Resolution & Consistency
@@ -153,6 +196,11 @@ export const getSafeDefaults = (): AISettings => {
         openai: { apiKey: '', model: 'gpt-4o-mini', reasoningEffort: 'medium', verbosity: 'medium' },
         claude: { apiKey: '', model: CLAUDE_MODELS_LIST[0].id as any },
         groq: { apiKey: '', model: 'llama-3.3-70b-versatile' },
+        modal: { apiKey: '' },
+        zai: { apiKey: '', model: 'glm-4v-plus' },
+        openrouter: { apiKey: '', model: 'anthropic/claude-sonnet-4.5' },
+        customProviders: [],
+        disabledProviders: [],
         legalContext: true,
         verboseLogs: true,
         customProjectsPath: '',

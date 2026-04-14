@@ -216,8 +216,8 @@ export const PageStatusOverlay: React.FC<PageStatusOverlayProps> = ({
                   {isPaused ? 'Traduzione in Pausa' : (pageStatus[pageForTools]?.loading || pageStatus[pageForTools]?.processing || 'Preparazione traduzione...')}
                 </span>
                 {!isPaused && (
-                  <div className="w-48 h-1 bg-gray-100 rounded-full overflow-hidden shadow-inner">
-                    <div className="h-full bg-accent animate-progress w-full origin-left shadow-[0_0_8px_rgba(59,130,246,0.5)]" style={{ animationDuration: '2.5s' }} />
+                  <div className="w-48 h-1 bg-surface-5 rounded-full overflow-hidden shadow-inner">
+                    <div className="h-full bg-accent animate-progress w-full origin-left shadow-[0_0_8px_rgba(245,158,11,0.5)]" style={{ animationDuration: '2.5s' }} />
                   </div>
                 )}
 

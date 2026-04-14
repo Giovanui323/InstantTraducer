@@ -60,12 +60,12 @@ export const READER_THEMES = {
     gradient: "radial-gradient(1200px 600px at 15% 20%, rgba(139,90,43,0.03), transparent 55%), radial-gradient(1200px 600px at 85% 80%, rgba(139,90,43,0.03), transparent 55%)"
   },
   dark: {
-    bg: "bg-[#1a1d23]",
-    containerBg: "bg-[#0d1117]",
-    text: "text-[#c9d1d9]",
+    bg: "bg-[#0c1631]",
+    containerBg: "bg-[#060b18]",
+    text: "text-[#c8d6f0]",
     selection: "selection:bg-accent/25 selection:text-white",
-    ring: "ring-1 ring-white/[0.06]",
-    gradient: "radial-gradient(1000px 500px at 20% 25%, rgba(255,255,255,0.015), transparent 55%), radial-gradient(1000px 500px at 80% 75%, rgba(255,255,255,0.015), transparent 55%)"
+    ring: "ring-1 ring-accent/[0.08]",
+    gradient: "radial-gradient(1000px 500px at 20% 25%, rgba(245,158,11,0.015), transparent 55%), radial-gradient(1000px 500px at 80% 75%, rgba(245,158,11,0.015), transparent 55%)"
   }
 };
 

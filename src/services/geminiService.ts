@@ -32,21 +32,21 @@ import {
   getCooldownStats,
   isModelInExtendedCooldown
 } from "./geminiCooldown";
-import { globalGeminiCooldownUntil } from "./geminiCooldown";
+import { setGlobalCooldownUntil, getGlobalCooldownUntil } from "./geminiCooldown";
 
 // Re-export for backwards compatibility
 export { resetGeminiCooldowns, isGlobalCooldownActive, isModelInCooldown, setModelCooldown, getCooldownStats, isModelInExtendedCooldown };
 import {
   getRetryDelay,
   recordRetryAttempt,
-  resetRetryAttempts
+  resetRetryAttempts,
+  __resetGeminiRetryStateForTests
 } from "./geminiRetry";
+import { __resetGeminiCooldownStateForTests } from "./geminiCooldown";
 import { normalizeGeminiError } from "./geminiUtils";
 
 export const __resetGeminiStateForTests = () => {
   resetGeminiCooldowns();
-  const __resetGeminiCooldownStateForTests = require('./geminiCooldown').__resetGeminiCooldownStateForTests;
-  const __resetGeminiRetryStateForTests = require('./geminiRetry').__resetGeminiRetryStateForTests;
   __resetGeminiCooldownStateForTests();
   __resetGeminiRetryStateForTests();
 };
@@ -124,7 +124,7 @@ export const translateWithGemini = async (
 
   // Controllo cooldown Globale
   if (isGlobalCooldownActive()) {
-    const remainingS = Math.ceil((globalGeminiCooldownUntil - Date.now()) / 1000);
+    const remainingS = Math.ceil((getGlobalCooldownUntil() - Date.now()) / 1000);
     throw new Error(`Cooldown Globale Gemini attivo. Riprova tra ${remainingS} secondi (Quota esaurita su tutti i modelli).`);
   }
 
@@ -149,9 +149,9 @@ export const translateWithGemini = async (
       if (!isGlobalCooldownActive()) {
         // Fallback di sicurezza: se siamo qui ma il global non è attivo, lo attiviamo ora per evitare loop
         log.warning(`Tutti i modelli inclusi ${model} sono in cooldown. Attivazione Cooldown Globale.`);
-        globalGeminiCooldownUntil = Date.now() + GEMINI_COOLDOWN_MS;
+        setGlobalCooldownUntil(Date.now() + GEMINI_COOLDOWN_MS);
       }
-      const remainingS = Math.ceil((globalGeminiCooldownUntil - Date.now()) / 1000);
+      const remainingS = Math.ceil((getGlobalCooldownUntil() - Date.now()) / 1000);
       throw new Error(`Tutti i modelli Gemini sono occupati/quota esaurita. Riprova tra ${remainingS}s.`);
     }
 
@@ -554,7 +554,7 @@ export const translateWithGemini = async (
       // Tuttavia, per coerenza, se siamo a fine catena e abbiamo quota error, attiviamo subito il global.
       if (nextModel === model && (isQuota || isHardLimit)) {
         log.error(`[CRITICAL] Quota esaurita/Hard Limit sul modello finale ${model}. Attivo Cooldown Globale.`);
-        globalGeminiCooldownUntil = Date.now() + GEMINI_COOLDOWN_MS;
+        setGlobalCooldownUntil(Date.now() + GEMINI_COOLDOWN_MS);
       }
 
       // Se c'è un modello diverso da provare, o se vogliamo riprovare lo stesso (ma verrà bloccato dal check iniziale se in cooldown)
@@ -643,7 +643,7 @@ export const verifyTranslationQualityWithGemini = async (params: {
   } = params;
 
   if (isGlobalCooldownActive()) {
-    const remainingS = Math.ceil((globalGeminiCooldownUntil - Date.now()) / 1000);
+    const remainingS = Math.ceil((getGlobalCooldownUntil() - Date.now()) / 1000);
     throw new Error(`Cooldown Globale Gemini attivo. Riprova tra ${remainingS} secondi.`);
   }
 
@@ -781,7 +781,7 @@ export const verifyTranslationQualityWithGemini = async (params: {
         // Fine della catena
         if (isQuota || isHardLimit) {
           log.error(`[CRITICAL] Quota esaurita/Hard Limit su Verifier Fallback. Attivazione Cooldown Globale.`);
-          globalGeminiCooldownUntil = Date.now() + GEMINI_COOLDOWN_MS;
+          setGlobalCooldownUntil(Date.now() + GEMINI_COOLDOWN_MS);
         }
         // Non facciamo nulla, lascerà il throw finale
       } else {

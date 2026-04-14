@@ -1,5 +1,5 @@
 import { AIProvider, AISettings, CustomModel, GeminiModel, ClaudeModel, OpenAIModel, GroqModel } from '../types';
-import { GEMINI_MODELS_LIST, CLAUDE_MODELS_LIST, OPENAI_MODELS_LIST, GROQ_MODELS_LIST } from '../constants';
+import { GEMINI_MODELS_LIST, CLAUDE_MODELS_LIST, OPENAI_MODELS_LIST, GROQ_MODELS_LIST, MODAL_MODELS_LIST, ZAI_MODELS_LIST, OPENROUTER_MODELS_LIST } from '../constants';
 import { log } from './logger';
 
 export interface MergedModelInfo {
@@ -36,6 +36,12 @@ export const getAvailableModels = (provider: AIProvider, settings?: AISettings):
     merged.push(...OPENAI_MODELS_LIST.map(m => ({ ...m, provider: 'openai' as AIProvider, isCustom: false })));
   } else if (provider === 'groq') {
     merged.push(...GROQ_MODELS_LIST.map(m => ({ ...m, provider: 'groq' as AIProvider, isCustom: false })));
+  } else if (provider === 'modal') {
+    merged.push(...MODAL_MODELS_LIST.map(m => ({ ...m, provider: 'modal' as AIProvider, isCustom: false })));
+  } else if (provider === 'zai') {
+    merged.push(...ZAI_MODELS_LIST.map(m => ({ ...m, provider: 'zai' as AIProvider, isCustom: false })));
+  } else if (provider === 'openrouter') {
+    merged.push(...OPENROUTER_MODELS_LIST.map(m => ({ ...m, provider: 'openrouter' as AIProvider, isCustom: false })));
   }
 
   // Deduplica eventuali conflitti (il custom sovrascrive lo standard)
@@ -84,6 +90,27 @@ export const getSafeModel = (requestedId: string, provider: AIProvider, settings
     if (requestedId.includes('scout') || requestedId.includes('vision')) return 'meta-llama/llama-4-scout-17b-16e-instruct';
     if (requestedId.includes('70b')) return 'llama-3.3-70b-versatile';
     return 'llama-3.1-8b-instant';
+  } else if (provider === 'modal') {
+    return 'zai-org/GLM-5.1-FP8';
+  } else if (provider === 'zai') {
+    if (requestedId.includes('4v-plus') || requestedId.includes('vision')) return 'glm-4v-plus';
+    if (requestedId.includes('flash')) return 'glm-4-flash';
+    if (requestedId.includes('air')) return 'glm-4-air';
+    return 'glm-4-plus';
+  } else if (provider === 'openrouter') {
+    if (requestedId.includes('opus')) {
+      return requestedId.includes('fast') ? 'anthropic/claude-opus-4.6-fast' : 'anthropic/claude-opus-4.6';
+    }
+    if (requestedId.includes('sonnet')) return 'anthropic/claude-sonnet-4.5';
+    if (requestedId.includes('haiku')) return 'anthropic/claude-haiku-4.5';
+    if (requestedId.includes('flash-lite') || requestedId.includes('flash_lite')) return 'google/gemini-3.1-flash-lite-preview';
+    if (requestedId.includes('qwen')) return 'qwen/qwen3.6-plus';
+    if (requestedId.includes('grok')) return 'x-ai/grok-4.20-multi-agent';
+    if (requestedId.includes('glm-5-turbo') || requestedId.includes('glm-5.1-turbo') || requestedId.includes('glm-5v-turbo')) return 'z-ai/glm-5v-turbo';
+    if (requestedId.includes('glm')) return 'z-ai/glm-5.1';
+    if (requestedId.includes('mimo')) return 'xiaomi/mimo-v2-flash';
+    if (requestedId.includes('elephant')) return 'openrouter/elephant-alpha';
+    return 'anthropic/claude-sonnet-4.5';
   }
 
   return requestedId; // Fallback estremo se nulla matcha (rischia l'errore api, ma noi preverremo prima)

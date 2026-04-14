@@ -109,11 +109,7 @@ export const OriginalThumbnail: React.FC<OriginalThumbnailProps> = ({
           className={READER_STYLES.thumbnail.wrapper}
           style={dynamicStyles.thumbnail(currentW, currentH)}
         >
-          {((!isCropped) || !src) && pdfDoc && typeof page === 'number' ? (
-            <div className="w-full h-full flex items-center justify-center bg-gray-50 text-txt-muted">
-              <Loader2 size={20} className="animate-spin text-accent" />
-            </div>
-          ) : src ? (
+          {src ? (
             <img
               src={src}
               draggable={false}

@@ -1,10 +1,11 @@
 import { useCallback, useRef } from 'react';
+import { ReadingProgress } from '../../types';
 import { log } from '../../services/logger';
 
 export interface SaveBlockingManagerProps {
   setIsSaving?: (v: boolean) => void;
   showToast?: (message: string, type: 'info' | 'success' | 'warning' | 'error') => void;
-  cancelPendingSaves: (fileId: string) => void;
+  cancelPendingSavesRef: React.MutableRefObject<(fileId: string) => void>;
   currentProjectFileIdRef: React.MutableRefObject<string | null>;
   setCurrentProjectFileId: (id: string | null) => void;
 }
@@ -14,7 +15,7 @@ export interface SaveBlockingManagerResult {
   unblockSave: (fileId: string) => void;
   isBlocked: (fileId: string) => boolean;
   registerRename: (oldId: string, newId: string) => void;
-  registerNameChange: (fileId: string, newName: string, setRecentBooks: React.Dispatch<React.SetStateAction<any>>, recentBooksRef: React.MutableRefObject<any>) => void;
+  registerNameChange: (fileId: string, newName: string, setRecentBooks: React.Dispatch<React.SetStateAction<Record<string, ReadingProgress>>>, recentBooksRef: React.MutableRefObject<Record<string, ReadingProgress>>) => void;
   blacklistedIdsRef: React.MutableRefObject<Set<string>>;
   transitioningIdsRef: React.MutableRefObject<Set<string>>;
   renamedIdsRef: React.MutableRefObject<Map<string, string>>;
@@ -24,7 +25,7 @@ export interface SaveBlockingManagerResult {
 export const useSaveBlockingManager = ({
   setIsSaving,
   showToast,
-  cancelPendingSaves,
+  cancelPendingSavesRef,
   currentProjectFileIdRef,
   setCurrentProjectFileId
 }: SaveBlockingManagerProps): SaveBlockingManagerResult => {
@@ -41,7 +42,7 @@ export const useSaveBlockingManager = ({
 
     blacklistedIdsRef.current.add(fileId);
     transitioningIdsRef.current.add(fileId);
-    cancelPendingSaves(fileId);
+    cancelPendingSavesRef.current(fileId);
 
     // Notify backend to block saves for this ID
     window.electronAPI?.blockSave(fileId).catch(e => log.error("Failed to block save on backend", e));
@@ -75,7 +76,7 @@ export const useSaveBlockingManager = ({
     }, durationMs);
 
     blockSaveTimeoutsRef.current[fileId] = timeoutId;
-  }, [cancelPendingSaves, showToast]);
+  }, [cancelPendingSavesRef, showToast]);
 
   const unblockSave = useCallback((fileId: string) => {
     // Clear pending auto-unblock timeout
@@ -117,7 +118,7 @@ export const useSaveBlockingManager = ({
     }, 60000);
   }, [setCurrentProjectFileId]);
 
-  const registerNameChange = useCallback((fileId: string, newName: string, setRecentBooks: React.Dispatch<React.SetStateAction<any>>, recentBooksRef: React.MutableRefObject<any>) => {
+  const registerNameChange = useCallback((fileId: string, newName: string, setRecentBooks: React.Dispatch<React.SetStateAction<Record<string, ReadingProgress>>>, recentBooksRef: React.MutableRefObject<Record<string, ReadingProgress>>) => {
     if (!fileId || !newName) return;
 
     // Update Local Cache
@@ -131,7 +132,7 @@ export const useSaveBlockingManager = ({
       recentBooksRef.current = { ...recentBooksRef.current, [fileId]: updated };
 
       // 2. Update React State
-      setRecentBooks((prev: any) => ({ ...prev, [fileId]: updated }));
+      setRecentBooks((prev: Record<string, ReadingProgress>) => ({ ...prev, [fileId]: updated }));
     } else {
       // Recovery: If book not in memory but we are renaming it (rare), just update cache
       log.warning(`Registering name change for unloaded book ${fileId}: -> '${newName}'`);

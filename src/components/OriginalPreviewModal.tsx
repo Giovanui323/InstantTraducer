@@ -302,7 +302,7 @@ export const OriginalPreviewModal: React.FC<OriginalPreviewModalProps> = ({
             transform-origin: 0% 0%;
           }
           .pdf-reader-text-layer > span::selection {
-            background: rgba(88, 166, 255, 0.35);
+            background: rgba(245, 158, 11, 0.35);
           }
         `}</style>
 

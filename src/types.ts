@@ -1,5 +1,17 @@
 
-export type AIProvider = 'gemini' | 'openai' | 'claude' | 'groq';
+export type AIProvider = 'gemini' | 'openai' | 'claude' | 'groq' | 'modal' | 'zai' | 'openrouter' | 'custom';
+
+export type ApiFormat = 'openai' | 'anthropic' | 'gemini' | 'zhipu';
+
+export interface CustomProviderConfig {
+  id: string;
+  name: string;
+  apiFormat: ApiFormat;
+  baseUrl: string;
+  model: string;
+  apiKey: string;
+  concurrencyLimit?: number;
+}
 
 export type GeminiModel =
   | 'gemini-3.1-pro-preview'
@@ -34,7 +46,7 @@ export interface CustomModel {
 export type OpenAIModel = string;
 export type ReasoningEffort = 'none' | 'low' | 'medium' | 'high';
 export type VerbosityLevel = 'low' | 'medium' | 'high';
-export type SettingsSection = 'aiRoles' | 'apiKeys' | 'testAi' | 'translationLogic' | 'costs' | 'libraryTrash' | 'exportApp' | 'logsDiagnostic';
+export type SettingsSection = 'aiRoles' | 'apiKeys' | 'testAi' | 'prompts' | 'translationLogic' | 'costs' | 'libraryTrash' | 'exportApp' | 'logsDiagnostic';
 
 export type ClaudeModel =
   | 'claude-3-7-sonnet-20250219'
@@ -82,11 +94,25 @@ export interface AISettings {
     apiKey: string;
     model: GroqModel;
   };
+  modal: {
+    apiKey: string;
+  };
+  openrouter: {
+    apiKey: string;
+    model: string;
+  };
+  zai: {
+    apiKey: string;
+    model: string;
+  };
+  customProviders?: CustomProviderConfig[];
+  activeCustomProviderId?: string;
   customModels?: CustomModel[];
   legalContext?: boolean;
   customPrompt?: string;
   customVerificationPrompt?: string;
   customMetadataPrompt?: string;
+  disabledProviders?: AIProvider[];
   verboseLogs?: boolean;
   consultationMode?: boolean;
   customProjectsPath?: string;

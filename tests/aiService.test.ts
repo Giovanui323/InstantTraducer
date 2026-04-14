@@ -16,7 +16,10 @@ const makeSettings = (key: string, provider: 'gemini' | 'openai' = 'gemini'): AI
   gemini: { apiKey: key, model: 'gemini-3-pro-preview' },
   openai: { apiKey: 'sk-test', model: 'gpt-4o-mini', reasoningEffort: 'medium', verbosity: 'medium' },
   claude: { apiKey: '', model: 'claude-sonnet-4-6' },
-  groq: { apiKey: '', model: 'llama-3.3-70b-versatile' }
+  groq: { apiKey: '', model: 'llama-3.3-70b-versatile' },
+  modal: { apiKey: '' },
+  openrouter: { apiKey: '', model: 'anthropic/claude-sonnet-4-5-20250929' },
+  zai: { apiKey: '', model: 'glm-4v-plus' }
 });
 
 describe('ensureGeminiReady', () => {

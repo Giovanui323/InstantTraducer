@@ -22,7 +22,7 @@ export const getVerificationUiState = (report?: PageVerification) => {
   }
 
   if (report.state === 'verifying') {
-    return { dotClass: 'bg-blue-500', label: 'Verifica in corso…', severityLabel: undefined as string | undefined };
+    return { dotClass: 'bg-accent', label: 'Verifica in corso…', severityLabel: undefined as string | undefined };
   }
 
   if (report.state === 'failed') {

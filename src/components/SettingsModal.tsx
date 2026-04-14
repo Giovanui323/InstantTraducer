@@ -17,6 +17,8 @@ import {
     MAX_ALLOWED_CONCURRENCY,
     CLAUDE_MODELS_LIST,
     GROQ_MODELS_LIST,
+    MODAL_MODELS_LIST,
+    ZAI_MODELS_LIST,
     GEMINI_TRANSLATION_FLASH_MODEL,
     GEMINI_MODELS_LIST,
     OPENAI_MODELS_LIST,
@@ -31,6 +33,7 @@ import { testGeminiConnection } from '../services/geminiService';
 import { testOpenAIConnection } from '../services/openaiService';
 import { testClaudeConnection } from '../services/claudeService';
 import { testGroqConnection } from '../services/groqService';
+import { testOpenRouterConnection } from '../services/openrouterService';
 import { validateSettings } from '../services/configValidation';
 import * as usageTracker from '../services/usageTracker';
 import { getGeminiTranslateSystemPrompt, getGeminiTranslateUserInstruction } from '../services/prompts/gemini';
@@ -44,6 +47,8 @@ import { filterSettingsSearchItems } from './settings/search';
 import { ApiKeysSection, apiKeysSearchItems } from './settings/sections/ApiKeysSection';
 import { TranslationLogicSection, translationLogicSearchItems } from './settings/sections/TranslationLogicSection';
 import { AiRolesSection, aiRolesSearchItems } from './settings/sections/AiRolesSection';
+import { AiDiagnosticSection } from './settings/sections/AiDiagnosticSection';
+import { PromptsSection, promptsSearchItems } from './settings/sections/PromptsSection';
 
 interface SettingsModalProps {
     settings: AISettings;
@@ -144,6 +149,9 @@ export const SettingsModal = React.memo(({
     const groqKey = groq?.apiKey || '';
     const groqModel = groq?.model || 'llama-3.3-70b-versatile';
 
+    const openrouterKey = draftSettings.openrouter?.apiKey || '';
+    const openrouterModel = draftSettings.openrouter?.model || 'anthropic/claude-sonnet-4.5';
+
     const qualityEnabled = qualityCheck?.enabled ?? true;
     const verifierProvider = qualityCheck?.verifierProvider || 'gemini';
     const qualityModel = qualityCheck?.verifierModel || GEMINI_VERIFIER_MODEL;
@@ -217,6 +225,7 @@ export const SettingsModal = React.memo(({
             const model = provider === 'gemini' ? geminiModel
                 : provider === 'openai' ? openAIModel
                 : provider === 'claude' ? claudeModel
+                : provider === 'openrouter' ? openrouterModel
                 : groqModel;
 
             if (provider === 'gemini') {
@@ -225,6 +234,8 @@ export const SettingsModal = React.memo(({
                 result = await testOpenAIConnection(openAIKey, model);
             } else if (provider === 'claude') {
                 result = await testClaudeConnection(claudeKey, model);
+            } else if (provider === 'openrouter') {
+                result = await testOpenRouterConnection(openrouterKey, model);
             } else {
                 result = await testGroqConnection(groqKey, model as GroqModel);
             }
@@ -252,7 +263,7 @@ export const SettingsModal = React.memo(({
         }
 
         const roles: Array<{ role: 'primary' | 'secondary' | 'metadata', provider: AIProvider, model: string }> = [
-            { role: 'primary', provider, model: provider === 'gemini' ? geminiModel : provider === 'openai' ? openAIModel : provider === 'claude' ? claudeModel : groqModel },
+            { role: 'primary', provider, model: provider === 'gemini' ? geminiModel : provider === 'openai' ? openAIModel : provider === 'claude' ? claudeModel : provider === 'openrouter' ? openrouterModel : groqModel },
             { role: 'secondary', provider: verifierProvider, model: qualityModel },
             { role: 'metadata', provider: metadataProvider, model: metadataModel }
         ];
@@ -266,13 +277,14 @@ export const SettingsModal = React.memo(({
         const results = [...newResults.results];
         for (let i = 0; i < roles.length; i++) {
             const r = roles[i];
-            const key = r.provider === 'gemini' ? geminiKey : r.provider === 'openai' ? openAIKey : r.provider === 'claude' ? claudeKey : groqKey;
+            const key = r.provider === 'gemini' ? geminiKey : r.provider === 'openai' ? openAIKey : r.provider === 'claude' ? claudeKey : r.provider === 'openrouter' ? openrouterKey : groqKey;
 
             let res;
             try {
                 if (r.provider === 'gemini') res = await testGeminiConnection(key, r.model as any);
                 else if (r.provider === 'openai') res = await testOpenAIConnection(key, r.model);
                 else if (r.provider === 'claude') res = await testClaudeConnection(key, r.model);
+                else if (r.provider === 'openrouter') res = await testOpenRouterConnection(key, r.model);
                 else res = await testGroqConnection(key, r.model as any);
 
                 results[i] = { ...r, status: res.success ? 'success' : 'error', message: res.message, timestamp: Date.now() };
@@ -282,83 +294,6 @@ export const SettingsModal = React.memo(({
             updateDraft({ modelTests: { ...newResults, results: [...results] } });
         }
         setIsTestingAll(false);
-    };
-
-    const [loadedModelTests, setLoadedModelTests] = useState<Record<string, { status: 'idle' | 'testing' | 'success' | 'error', message?: string }>>({});
-    const [isTestingAllLoadedModels, setIsTestingAllLoadedModels] = useState(false);
-
-    const getApiKeyForProvider = (p: AIProvider) => {
-        if (p === 'gemini') return geminiKey;
-        if (p === 'openai') return openAIKey;
-        if (p === 'claude') return claudeKey;
-        return groqKey;
-    };
-
-    const handleTestLoadedModel = async (p: AIProvider, modelId: string) => {
-        const k = `${p}:${modelId}`;
-        setLoadedModelTests(prev => ({ ...prev, [k]: { status: 'testing' } }));
-        const key = (getApiKeyForProvider(p) || '').trim();
-        if (!key) {
-            setLoadedModelTests(prev => ({ ...prev, [k]: { status: 'error', message: 'API key mancante' } }));
-            return;
-        }
-        try {
-            let res: { success: boolean; message: string };
-            if (p === 'gemini') res = await testGeminiConnection(key, modelId as any);
-            else if (p === 'openai') res = await testOpenAIConnection(key, modelId);
-            else if (p === 'claude') res = await testClaudeConnection(key, modelId as any);
-            else res = await testGroqConnection(key, modelId as any);
-
-            setLoadedModelTests(prev => ({ ...prev, [k]: { status: res.success ? 'success' : 'error', message: res.message } }));
-        } catch (e: any) {
-            setLoadedModelTests(prev => ({ ...prev, [k]: { status: 'error', message: e?.message || 'Errore imprevisto' } }));
-        }
-    };
-
-    const loadedModelsByProvider = useMemo(() => {
-        const custom = (draftSettings.customModels || []).map((m: any) => ({
-            provider: m.provider as AIProvider,
-            id: String(m.id),
-            name: String(m.name || m.id),
-            source: 'custom' as const
-        }));
-
-        const builtins = [
-            ...GEMINI_MODELS_LIST.map(m => ({ provider: 'gemini' as const, id: m.id, name: m.name, source: 'builtin' as const })),
-            ...OPENAI_MODELS_LIST.map(m => ({ provider: 'openai' as const, id: m.id, name: m.name, source: 'builtin' as const })),
-            ...CLAUDE_MODELS_LIST.map(m => ({ provider: 'claude' as const, id: m.id, name: m.name, source: 'builtin' as const })),
-            ...GROQ_MODELS_LIST.map(m => ({ provider: 'groq' as const, id: m.id, name: m.name, source: 'builtin' as const })),
-        ];
-
-        const all = [...builtins, ...custom];
-        const grouped: Record<AIProvider, Array<{ id: string; name: string; source: 'builtin' | 'custom' }>> = {
-            gemini: [],
-            openai: [],
-            claude: [],
-            groq: []
-        };
-        for (const m of all) {
-            if (!grouped[m.provider]) continue;
-            grouped[m.provider].push({ id: m.id, name: m.name, source: m.source });
-        }
-        for (const p of Object.keys(grouped) as AIProvider[]) {
-            grouped[p] = grouped[p].filter((m, idx, arr) => arr.findIndex(x => x.id === m.id) === idx);
-            grouped[p].sort((a, b) => a.name.localeCompare(b.name));
-        }
-        return grouped;
-    }, [draftSettings.customModels]);
-
-    const handleTestAllLoadedModels = async () => {
-        if (isTestingAllLoadedModels) return;
-        setIsTestingAllLoadedModels(true);
-        const providers: AIProvider[] = ['gemini', 'openai', 'claude', 'groq'];
-        for (const p of providers) {
-            const list = loadedModelsByProvider[p] || [];
-            for (const m of list) {
-                await handleTestLoadedModel(p, m.id);
-            }
-        }
-        setIsTestingAllLoadedModels(false);
     };
 
     const handleChangeProjectsBaseDir = async () => {
@@ -505,7 +440,11 @@ export const SettingsModal = React.memo(({
         (provider === 'gemini' && geminiKey.trim()) ||
         (provider === 'openai' && openAIKey.trim()) ||
         (provider === 'claude' && claudeKey.trim()) ||
-        (provider === 'groq' && groqKey.trim())
+        (provider === 'groq' && groqKey.trim()) ||
+        (provider === 'modal' && (draftSettings.modal?.apiKey || '').trim()) ||
+        (provider === 'zai' && (draftSettings.zai?.apiKey || '').trim()) ||
+        (provider === 'openrouter' && (draftSettings.openrouter?.apiKey || '').trim()) ||
+        (provider === 'custom' && draftSettings.customProviders?.find(cp => cp.id === draftSettings.activeCustomProviderId)?.apiKey?.trim())
     );
     const canSave = providerKeyPresent && validationResult.valid && testStatus !== 'testing' && !isSaving;
 
@@ -525,6 +464,7 @@ export const SettingsModal = React.memo(({
         { id: 'aiRoles', label: 'Modelli & Ruoli', icon: <BrainCircuit size={14} /> },
         { id: 'apiKeys', label: 'API Keys', icon: <Key size={14} /> },
         { id: 'testAi', label: 'Test AI & Connessione', icon: <Activity size={14} /> },
+        { id: 'prompts', label: 'Gestione Prompt', icon: <MessageSquare size={14} /> },
         { id: 'translationLogic', label: 'Traduzione & Logica', icon: <Zap size={14} /> },
         { id: 'costs', label: 'Info & Costi Modelli', icon: <Info size={14} /> },
         { id: 'libraryTrash', label: 'Libreria & Cestino', icon: <Folder size={14} /> },
@@ -537,6 +477,7 @@ export const SettingsModal = React.memo(({
     const settingsSearchItems = useMemo(() => ([
         ...aiRolesSearchItems,
         ...apiKeysSearchItems,
+        ...promptsSearchItems,
         ...translationLogicSearchItems
     ]), []);
 
@@ -722,192 +663,11 @@ export const SettingsModal = React.memo(({
                             )}
 
                             {activeSection === 'testAi' && (
-                                <div className="space-y-8 animate-fade-in">
-                                    <div className="bg-gradient-to-r from-accent/10 to-success/10 border border-border-muted rounded-2xl p-5 space-y-4">
-                                        <div className="flex items-center justify-between">
-                                            <div className="flex items-center gap-3">
-                                                <div className="w-10 h-10 rounded-xl bg-accent/10 flex items-center justify-center text-accent">
-                                                    <Activity size={20} className={isTestingAll ? 'animate-spin' : ''} />
-                                                </div>
-                                                <div>
-                                                    <h3 className="text-sm font-bold text-txt-primary">Test di Configurazione AI</h3>
-                                                    <p className="text-[10px] text-txt-muted">Verifica simultanea di tutti i modelli configurati per i vari ruoli.</p>
-                                                </div>
-                                            </div>
-                                            <button
-                                                onClick={handleTestAllModels}
-                                                disabled={isTestingAll}
-                                                className={`flex items-center gap-2 px-4 py-2 rounded-xl text-xs font-bold transition-all duration-200 ${
-                                                    isTestingAll
-                                                    ? 'bg-accent/10 text-accent cursor-wait'
-                                                    : 'bg-accent text-white hover:bg-accent-hover shadow-surface-lg'
-                                                }`}
-                                            >
-                                                {isTestingAll ? (
-                                                    <><Loader2 size={14} className="animate-spin" /> Test in corso...</>
-                                                ) : (
-                                                    <><RotateCcw size={14} /> Avvia Test Completo</>
-                                                )}
-                                            </button>
-                                        </div>
+                                <AiDiagnosticSection draftSettings={draftSettings} updateDraft={updateDraft} />
+                            )}
 
-                                        {modelTests?.results && modelTests.results.length > 0 && (
-                                            <div className="grid grid-cols-1 md:grid-cols-3 gap-3 pt-2">
-                                                {modelTests.results.map((res) => (
-                                                    <div
-                                                        key={res.role}
-                                                        className={`p-3 rounded-xl border flex flex-col gap-1 transition-all duration-200 ${
-                                                            res.status === 'success' ? 'bg-success/5 border-success/20' :
-                                                            res.status === 'error' ? 'bg-danger/5 border-danger/20' :
-                                                            'bg-accent/5 border-accent/20 animate-pulse'
-                                                        }`}
-                                                    >
-                                                        <div className="flex items-center justify-between">
-                                                            <span className="text-[9px] font-bold uppercase tracking-widest text-txt-muted">
-                                                                {res.role === 'primary' ? '1. Traduzione' : res.role === 'secondary' ? '2. Verifica' : '3. Metadati'}
-                                                            </span>
-                                                            {res.status === 'success' ? (
-                                                                <Check size={12} className="text-success" />
-                                                            ) : res.status === 'error' ? (
-                                                                <X size={12} className="text-danger" />
-                                                            ) : (
-                                                                <Loader2 size={12} className="text-accent animate-spin" />
-                                                            )}
-                                                        </div>
-                                                        <div className="text-[11px] font-bold text-txt-primary truncate">{res.model}</div>
-                                                        <div className="text-[9px] text-txt-muted truncate uppercase">{res.provider}</div>
-                                                        {res.message && (
-                                                            <div className={`text-[9px] mt-1 leading-tight line-clamp-2 ${
-                                                                res.status === 'success' ? 'text-success' :
-                                                                res.status === 'error' ? 'text-danger' :
-                                                                'text-accent'
-                                                            }`}>{res.message}</div>
-                                                        )}
-                                                    </div>
-                                                ))}
-                                            </div>
-                                        )}
-                                        {modelTests?.lastTestAt && (
-                                            <p className="text-[9px] text-txt-muted text-right">Ultimo test eseguito il {new Date(modelTests.lastTestAt).toLocaleString()}</p>
-                                        )}
-                                    </div>
-
-                                    {/* Test Connessione Rapido per Provider Attivo */}
-                                    <div className="space-y-3">
-                                        <label className="text-xs font-bold text-txt-muted uppercase tracking-wider">Test Rapido Provider Corrente</label>
-                                        <div className="bg-surface-4/50 border border-border-muted rounded-xl p-4 space-y-4">
-                                            <div className="flex items-center justify-between">
-                                                <div className="flex items-center gap-3">
-                                                    <div className="w-8 h-8 rounded-lg bg-surface-4/50 flex items-center justify-center text-txt-secondary">
-                                                        <Activity size={16} />
-                                                    </div>
-                                                    <div>
-                                                        <div className="text-xs font-bold text-txt-primary uppercase">{provider}</div>
-                                                        <div className="text-[10px] text-txt-muted">Testa il modello primario impostato</div>
-                                                    </div>
-                                                </div>
-                                                <button
-                                                    onClick={handleTestConnection}
-                                                    disabled={testStatus === 'testing'}
-                                                    className={`px-4 py-2 text-[10px] font-bold rounded-lg transition-all duration-200 flex items-center gap-2 ${
-                                                        testStatus === 'success' ? 'bg-success/10 text-success border border-success/20' :
-                                                        testStatus === 'error' ? 'bg-danger/10 text-danger border border-danger/20' :
-                                                        testStatus === 'testing' ? 'bg-accent/10 text-accent border border-accent/20' :
-                                                        'bg-surface-4/50 text-txt-muted hover:text-txt-primary hover:bg-surface-5 border border-border-muted'
-                                                    }`}
-                                                >
-                                                    <Activity size={12} className={testStatus === 'testing' ? 'animate-spin' : ''} />
-                                                    {testStatus === 'idle' ? 'Esegui Test' : testStatus === 'testing' ? 'Verifica...' : testStatus === 'success' ? 'OK' : 'Fallito'}
-                                                </button>
-                                            </div>
-                                            {testMessage && (
-                                                <div className={`text-[10px] p-3 rounded-lg border ${testStatus === 'success' ? 'bg-success/5 border-success/10 text-success' : 'bg-danger/5 border-danger/10 text-danger'}`}>
-                                                    {testMessage}
-                                                </div>
-                                            )}
-                                        </div>
-                                    </div>
-
-                                    <div className="space-y-3">
-                                        <label className="text-xs font-bold text-txt-muted uppercase tracking-wider">Elenco di Tutti i Modelli Caricati</label>
-                                        <div className="bg-surface-4/50 border border-border-muted rounded-xl p-4 space-y-4">
-                                            <div className="flex items-center justify-between gap-3">
-                                                <div className="text-[10px] text-txt-muted">
-                                                    Mostra tutti i modelli disponibili (builtin + custom). Puoi testarli singolarmente o tutti in sequenza.
-                                                </div>
-                                                <button
-                                                    onClick={handleTestAllLoadedModels}
-                                                    disabled={isTestingAllLoadedModels}
-                                                    className={`px-3 py-2 text-[10px] font-bold rounded-lg transition-all duration-200 flex items-center gap-2 ${
-                                                        isTestingAllLoadedModels ? 'bg-accent/10 text-accent cursor-wait' : 'bg-surface-4/50 text-txt-secondary hover:text-txt-primary hover:bg-surface-5 border border-border-muted'
-                                                    }`}
-                                                >
-                                                    <RotateCcw size={12} className={isTestingAllLoadedModels ? 'animate-spin' : ''} />
-                                                    {isTestingAllLoadedModels ? 'Test in corso...' : 'Testa Tutti'}
-                                                </button>
-                                            </div>
-
-                                            {(['gemini', 'openai', 'claude', 'groq'] as AIProvider[]).map((p) => {
-                                                const apiKeyPresent = Boolean((p === 'gemini' ? geminiKey : p === 'openai' ? openAIKey : p === 'claude' ? claudeKey : groqKey)?.trim());
-                                                const list = loadedModelsByProvider[p] || [];
-                                                const title = p === 'gemini' ? 'Google Gemini' : p === 'openai' ? 'OpenAI' : p === 'claude' ? 'Claude' : 'Groq';
-                                                const color = p === 'gemini' ? 'text-accent' : p === 'openai' ? 'text-purple-400' : p === 'claude' ? 'text-orange-400' : 'text-success';
-
-                                                return (
-                                                    <div key={p} className="border border-border-muted rounded-xl overflow-hidden">
-                                                        <div className="px-3 py-2 bg-surface-4/50 flex items-center justify-between">
-                                                            <div className="flex items-center gap-2">
-                                                                <span className={`text-[10px] font-bold uppercase ${color}`}>{title}</span>
-                                                                <span className="text-[10px] text-txt-muted">({list.length})</span>
-                                                            </div>
-                                                            <div className={`text-[10px] ${apiKeyPresent ? 'text-success' : 'text-txt-muted'}`}>
-                                                                {apiKeyPresent ? 'API key OK' : 'API key mancante'}
-                                                            </div>
-                                                        </div>
-                                                        <div className="max-h-[260px] overflow-y-auto custom-scrollbar divide-y divide-border-muted">
-                                                            {list.map((m) => {
-                                                                const k = `${p}:${m.id}`;
-                                                                const t = loadedModelTests[k];
-                                                                const status = t?.status || 'idle';
-                                                                const icon =
-                                                                    status === 'success' ? <Check size={12} className="text-success" /> :
-                                                                    status === 'error' ? <X size={12} className="text-danger" /> :
-                                                                    status === 'testing' ? <Loader2 size={12} className="text-accent animate-spin" /> :
-                                                                    <div className="w-2 h-2 rounded-full bg-txt-faint" />;
-                                                                const msgColor = status === 'success' ? 'text-success' : status === 'error' ? 'text-danger' : 'text-txt-muted';
-
-                                                                return (
-                                                                    <div key={m.id} className="px-3 py-2 flex items-start justify-between gap-3">
-                                                                        <div className="min-w-0">
-                                                                            <div className="flex items-center gap-2">
-                                                                                {icon}
-                                                                                <div className="text-[11px] font-semibold text-txt-primary truncate">{m.name}</div>
-                                                                                {m.source === 'custom' && <span className="text-[9px] px-1.5 py-0.5 rounded bg-surface-4/50 text-txt-muted">CUSTOM</span>}
-                                                                            </div>
-                                                                            <div className="text-[9px] text-txt-muted font-mono truncate">{m.id}</div>
-                                                                            {t?.message && (
-                                                                                <div className={`text-[9px] mt-1 leading-tight line-clamp-2 ${msgColor}`}>{t.message}</div>
-                                                                            )}
-                                                                        </div>
-                                                                        <button
-                                                                            onClick={() => handleTestLoadedModel(p, m.id)}
-                                                                            disabled={status === 'testing'}
-                                                                            className={`shrink-0 px-3 py-1.5 text-[10px] font-bold rounded-lg transition-all duration-200 ${
-                                                                                status === 'testing' ? 'bg-accent/10 text-accent cursor-wait' : 'bg-surface-4/50 text-txt-secondary hover:text-txt-primary hover:bg-surface-5 border border-border-muted'
-                                                                            }`}
-                                                                        >
-                                                                            Test
-                                                                        </button>
-                                                                    </div>
-                                                                );
-                                                            })}
-                                                        </div>
-                                                    </div>
-                                                );
-                                            })}
-                                        </div>
-                                    </div>
-                                </div>
+                            {activeSection === 'prompts' && (
+                                <PromptsSection draftSettings={draftSettings} updateDraft={updateDraft} />
                             )}
 
                             {activeSection === 'aiRoles' && (
@@ -922,10 +682,10 @@ export const SettingsModal = React.memo(({
                                         <div className="bg-success/10 border border-success/20 rounded-xl p-4 relative overflow-hidden">
                                             <div className="text-[10px] uppercase font-bold tracking-widest text-success/80 mb-2">Traduzione Primaria</div>
                                             <div className="text-sm font-bold text-success">
-                                                {provider === 'gemini' ? 'Google Gemini' : provider === 'claude' ? 'Anthropic Claude' : provider === 'groq' ? 'Groq' : 'OpenAI'}
+                                                {provider === 'gemini' ? 'Google Gemini' : provider === 'claude' ? 'Anthropic Claude' : provider === 'groq' ? 'Groq' : provider === 'modal' ? 'Modal (GLM-5.1)' : provider === 'zai' ? 'Z.ai (Zhipu AI)' : provider === 'openrouter' ? 'OpenRouter' : provider === 'custom' ? (draftSettings.customProviders?.find(cp => cp.id === draftSettings.activeCustomProviderId)?.name || 'Custom') : 'OpenAI'}
                                             </div>
                                             <div className="text-xs text-txt-muted mt-1">
-                                                Modello: {provider === 'gemini' ? geminiModel : provider === 'claude' ? claudeModel : provider === 'groq' ? groqModel : openAIModel}
+                                                Modello: {provider === 'gemini' ? geminiModel : provider === 'claude' ? claudeModel : provider === 'groq' ? groqModel : provider === 'modal' ? 'zai-org/GLM-5.1-FP8' : provider === 'zai' ? draftSettings.zai?.model || 'glm-4v-plus' : provider === 'openrouter' ? openrouterModel : provider === 'custom' ? (draftSettings.customProviders?.find(cp => cp.id === draftSettings.activeCustomProviderId)?.model || '-') : openAIModel}
                                             </div>
                                             <div className="absolute -right-4 -bottom-4 text-success/10 rotate-12">
                                                 <BrainCircuit size={60} />
@@ -936,7 +696,7 @@ export const SettingsModal = React.memo(({
                                             <div className="text-sm font-bold text-accent">{qualityEnabled ? 'Attivo' : 'Disattivato'}</div>
                                             {qualityEnabled && (
                                                 <div className="text-xs text-txt-muted mt-1">
-                                                    Modello: {qualityModel || (provider === 'gemini' ? GEMINI_VERIFIER_MODEL : provider === 'claude' ? claudeModel : provider === 'groq' ? groqModel : openAIModel)}
+                                                    Modello: {qualityModel || (verifierProvider === 'gemini' ? GEMINI_VERIFIER_MODEL : verifierProvider === 'claude' ? claudeModel : verifierProvider === 'groq' ? groqModel : verifierProvider === 'openrouter' ? openrouterModel : openAIModel)}
                                                 </div>
                                             )}
                                             <div className="absolute -right-4 -bottom-4 text-accent/10 rotate-12">
@@ -1077,7 +837,9 @@ export const SettingsModal = React.memo(({
                                                 { name: 'Google Gemini', list: GEMINI_MODELS_LIST, color: 'text-accent' },
                                                 { name: 'OpenAI (ChatGPT)', list: OPENAI_MODELS_LIST, color: 'text-purple-400' },
                                                 { name: 'Anthropic Claude', list: CLAUDE_MODELS_LIST, color: 'text-orange-400' },
-                                                { name: 'Groq (Llama/Qwen)', list: GROQ_MODELS_LIST, color: 'text-success' }
+                                                { name: 'Groq (Llama/Qwen)', list: GROQ_MODELS_LIST, color: 'text-success' },
+                                                { name: 'Modal (GLM-5.1)', list: MODAL_MODELS_LIST, color: 'text-purple-300' },
+                                                { name: 'Z.ai (Zhipu AI)', list: ZAI_MODELS_LIST, color: 'text-blue-400' }
                                             ].map(providerInfo => (
                                                 <div key={providerInfo.name} className="bg-surface-3/50 border border-border-muted rounded-xl p-3">
                                                     <div className={`text-[10px] font-bold uppercase mb-2 ${providerInfo.color}`}>{providerInfo.name}</div>
@@ -1117,7 +879,7 @@ export const SettingsModal = React.memo(({
 
 
                             {activeSection === 'translationLogic' && (
-                                <TranslationLogicSection draftSettings={draftSettings} updateDraft={updateDraft} />
+                                <TranslationLogicSection draftSettings={draftSettings} updateDraft={updateDraft} onNavigateToSection={(id) => setActiveSection(id as SettingsSection)} />
                             )}
 
 

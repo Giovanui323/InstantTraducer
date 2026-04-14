@@ -64,11 +64,58 @@ export const GROQ_MODELS_LIST: ModelInfo[] = [
     { id: 'deepseek-r1-distill-llama-70b', name: 'DeepSeek R1 Distill Llama 70B', category: 'pro', pricing: { input: '$0.59', output: '$0.79' }, features: 'Modello reasoning avanzato' }
 ];
 
+export const MODAL_MODELS_LIST: ModelInfo[] = [
+    { id: 'zai-org/GLM-5.1-FP8', name: 'GLM-5.1 FP8 (Modal)', category: 'pro', pricing: { input: '$0.00', output: '$0.00' }, features: 'Modal GPU inference - 1 richiesta alla volta' }
+];
+
+export const ZAI_MODELS_LIST: ModelInfo[] = [
+    { id: 'glm-5.1', name: 'GLM-5.1 (Flagship)', category: 'pro', pricing: { input: '$0.10', output: '$0.10' }, features: 'Flagship agentic model - SWE-Bench Pro: 58.4' },
+    { id: 'glm-4v-plus', name: 'GLM-4V Plus (Vision)', category: 'pro', pricing: { input: '$0.075', output: '$0.075' }, features: 'Vision avanzata Z.ai' },
+    { id: 'glm-4v-flash', name: 'GLM-4V Flash (Vision)', category: 'flash', pricing: { input: '$0.01', output: '$0.01' }, features: 'Vision veloce ed economica' },
+    { id: 'glm-4-plus', name: 'GLM-4 Plus', category: 'pro', pricing: { input: '$0.075', output: '$0.075' }, features: 'Modello top Z.ai' },
+    { id: 'glm-4-flash', name: 'GLM-4 Flash', category: 'flash', pricing: { input: '$0.01', output: '$0.01' }, features: 'Veloce ed economico' },
+    { id: 'glm-4-air', name: 'GLM-4 Air', category: 'standard', pricing: { input: '$0.015', output: '$0.015' }, features: 'Bilanciato' }
+];
+
 export const availableGeminiModels = GEMINI_MODELS_LIST;
 export const availableClaudeModels = CLAUDE_MODELS_LIST;
 export const isGroqVisionModel = (modelId: string) => {
     return modelId.includes('vision') || modelId.includes('scout') || modelId.includes('llama-4');
 };
+
+export const OPENROUTER_TRANSLATION_MODEL = 'anthropic/claude-sonnet-4.5';
+
+export const OPENROUTER_MODELS_LIST: ModelInfo[] = [
+    { id: 'openrouter/auto', name: 'Auto Router (Ottimizzato)', category: 'pro', pricing: { input: 'Auto', output: 'Auto' }, features: 'OpenRouter instrada automaticamente al modello migliore/più efficiente' },
+    { id: 'openrouter/elephant-alpha', name: 'Elephant Alpha (Free)', category: 'pro', pricing: { input: '$0', output: '$0' }, features: '100B parametri, 256K contesto, ragionamento efficiente — GRATIS' },
+    { id: 'anthropic/claude-opus-4.6-fast', name: 'Claude Opus 4.6 Fast (OpenRouter)', category: 'pro', pricing: { input: '$30', output: '$150' }, features: '1M contesto, modalità veloce, massima intelligenza' },
+    { id: 'anthropic/claude-opus-4.6', name: 'Claude Opus 4.6 (OpenRouter)', category: 'pro', pricing: { input: '$5', output: '$25' }, features: '1M contesto, ottima combinazione di intelligenza e costi' },
+    { id: 'anthropic/claude-sonnet-4.5', name: 'Claude Sonnet 4.5 (OpenRouter)', category: 'pro', pricing: { input: '$3', output: '$15' }, features: '1M contesto, agenti avanzati, coding' },
+    { id: 'anthropic/claude-haiku-4.5', name: 'Claude Haiku 4.5 (OpenRouter)', category: 'flash', pricing: { input: '$1', output: '$5' }, features: '200K contesto, veloce e intelligente' },
+    { id: 'google/gemini-3.1-flash-lite-preview', name: 'Gemini 3.1 Flash Lite (OpenRouter)', category: 'flash', pricing: { input: '$0.25', output: '$1.50' }, features: '1M contesto, ultra-economico, traduzione forte' },
+    { id: 'qwen/qwen3.6-plus', name: 'Qwen 3.6 Plus (OpenRouter)', category: 'pro', pricing: { input: '$0.325', output: '$1.95' }, features: '1M contesto, coding avanzato, ragionamento' },
+    { id: 'z-ai/glm-5.1', name: 'GLM 5.1 (OpenRouter)', category: 'pro', pricing: { input: '$0.95', output: '$3.15' }, features: '203K contesto, coding lungo termine, agenti' },
+    { id: 'z-ai/glm-5v-turbo', name: 'GLM 5V Turbo (OpenRouter)', category: 'pro', pricing: { input: '$1.20', output: '$4' }, features: '203K contesto, inferenza veloce, agenti, vision' },
+    { id: 'x-ai/grok-4.20-multi-agent', name: 'Grok 4.20 Multi-Agent (OpenRouter)', category: 'pro', pricing: { input: '$2.00', output: '$6.00' }, features: '2M contesto, multi-agent reasoning, deep research' },
+    { id: 'xiaomi/mimo-v2-flash', name: 'MiMo V2 Flash (OpenRouter)', category: 'flash', pricing: { input: '$0.09', output: '$0.29' }, features: '262K contesto, top open-source, ragionamento — economico' },
+    
+    // Nuovi Modelli Aggiunti
+    { id: 'xiaomi/mimo-v2-omni', name: 'MiMo V2 Omni (OpenRouter)', category: 'pro', pricing: { input: '$0.40', output: '$2.00' }, features: '262K contesto, omni-modal, reasoning' },
+    { id: 'xiaomi/mimo-v2-pro', name: 'MiMo V2 Pro (OpenRouter)', category: 'pro', pricing: { input: '$1.00', output: '$3.00' }, features: '1.05M contesto, ottimizzato per agenti e workflow' },
+    { id: 'minimax/minimax-m2.7', name: 'MiniMax M2.7 (OpenRouter)', category: 'pro', pricing: { input: '$0.30', output: '$1.20' }, features: '197K contesto, autonomous workflows' },
+    { id: 'openai/gpt-5.4-nano', name: 'GPT-5.4 Nano (OpenRouter)', category: 'mini', pricing: { input: '$0.20', output: '$1.25' }, features: '400K contesto, lightweight & low-latency' },
+    { id: 'openai/gpt-5.4-mini', name: 'GPT-5.4 Mini (OpenRouter)', category: 'mini', pricing: { input: '$0.75', output: '$4.50' }, features: '400K contesto, veloce e scalabile' },
+    { id: 'mistralai/mistral-small-4', name: 'Mistral Small 4 (OpenRouter)', category: 'flash', pricing: { input: '$0.15', output: '$0.60' }, features: '262K contesto, strong reasoning & multimodality' },
+    { id: 'nvidia/nemotron-3-super-120b-a12b:free', name: 'NVIDIA: Nemotron 3 Super (free)', category: 'pro', pricing: { input: '$0.00', output: '$0.00' }, features: '262K contesto, MoE 120B (12B attivi), 1M window — GRATIS' },
+    { id: 'nvidia/nemotron-3-super:free', name: 'Nemotron 3 Super - Free (OpenRouter)', category: 'pro', pricing: { input: '$0.00', output: '$0.00' }, features: '262K contesto, hybrid MoE architecture — GRATIS' },
+    { id: 'nvidia/nemotron-3-super', name: 'Nemotron 3 Super (OpenRouter)', category: 'pro', pricing: { input: '$0.10', output: '$0.50' }, features: '262K contesto, compute efficiency e agentic coherence' },
+    { id: 'bytedance-seed/seed-2.0-lite', name: 'Seed-2.0-Lite (OpenRouter)', category: 'flash', pricing: { input: '$0.25', output: '$2.00' }, features: '262K contesto, velocità e agentic capabilities' },
+    { id: 'qwen/qwen3.5-9b', name: 'Qwen3.5-9B (OpenRouter)', category: 'flash', pricing: { input: '$0.05', output: '$0.15' }, features: '256K contesto, efficient reasoning' },
+    { id: 'openai/gpt-5.4-pro', name: 'GPT-5.4 Pro (OpenRouter)', category: 'pro', pricing: { input: '$30.00', output: '$180.00' }, features: '1.05M contesto, problem solving estremo' },
+    { id: 'openai/gpt-5.4', name: 'GPT-5.4 (OpenRouter)', category: 'pro', pricing: { input: '$2.50', output: '$15.00' }, features: '1.05M contesto, reasoning & agentic coding' }
+];
+
+export const availableOpenRouterModels = OPENROUTER_MODELS_LIST;
 
 export const DEFAULT_TRANSLATION_PROMPT_TEMPLATE = `RUOLO: Sei un traduttore editoriale professionista di alto livello, esperto nella traduzione integrale di libri {{sourceLang}} all'ITALIANO.
 {{legalContext}}

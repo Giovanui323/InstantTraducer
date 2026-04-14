@@ -79,18 +79,18 @@ export const READER_THEMES: Record<string, ReaderTheme> = {
   dark: {
     name: 'Dark',
     text: {
-      primary: '#e5e7eb',
-      secondary: '#d1d5db',
-      muted: '#9ca3af'
+      primary: '#c8d6f0',
+      secondary: '#94a3b8',
+      muted: '#64748b'
     },
     background: {
-      primary: '#111827',
-      secondary: '#1f2937',
-      highlight: 'rgba(255, 255, 0, 0.15)'
+      primary: '#0c1631',
+      secondary: '#121e3e',
+      highlight: 'rgba(245, 158, 11, 0.15)'
     },
     border: {
-      primary: '#374151',
-      secondary: '#4b5563'
+      primary: '#1e2f5e',
+      secondary: '#2d4270'
     },
     highlight: {
       yellow: 'rgba(255, 255, 0, 0.5)',
@@ -371,10 +371,10 @@ export const THEME_CLASSES = {
   },
   dark: {
     text: 'text-gray-100',
-    secondary: 'text-gray-300',
-    muted: 'text-gray-400',
-    background: 'bg-gray-900',
-    border: 'border-gray-700'
+    secondary: 'text-slate-300',
+    muted: 'text-slate-400',
+    background: 'bg-slate-900',
+    border: 'border-slate-700'
   }
 };
 
