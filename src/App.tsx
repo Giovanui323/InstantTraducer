@@ -81,7 +81,7 @@ const App: React.FC = () => {
   const sessionId = useMemo(() => Math.random().toString(36).slice(2, 10), []);
 
   // --- App Version State ---
-  const [appVersion, setAppVersion] = useState<string>('4.1.30');
+  const [appVersion, setAppVersion] = useState<string>('4.1.31');
 
   useEffect(() => {
     if (window.electronAPI?.getAppVersion) {

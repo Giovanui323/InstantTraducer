@@ -94,7 +94,7 @@ export const OPENROUTER_MODELS_LIST: ModelInfo[] = [
     { id: 'anthropic/claude-haiku-4.5', name: 'Claude Haiku 4.5 (OpenRouter)', category: 'flash', pricing: { input: '$1', output: '$5' }, features: '200K contesto, veloce e intelligente' },
     { id: 'google/gemini-3.1-flash-lite-preview', name: 'Gemini 3.1 Flash Lite (OpenRouter)', category: 'flash', pricing: { input: '$0.25', output: '$1.50' }, features: '1M contesto, ultra-economico, traduzione forte' },
     { id: 'qwen/qwen3.6-plus', name: 'Qwen 3.6 Plus (OpenRouter)', category: 'pro', pricing: { input: '$0.325', output: '$1.95' }, features: '1M contesto, coding avanzato, ragionamento' },
-    { id: 'z-ai/glm-5.1', name: 'GLM 5.1 (OpenRouter)', category: 'pro', pricing: { input: '$0.95', output: '$3.15' }, features: '203K contesto, coding lungo termine, agenti' },
+    { id: 'z-ai/glm-5.1', name: 'Z.ai: GLM 5.1', category: 'pro', pricing: { input: '$0.95', output: '$3.15' }, features: '203K contesto, coding avanzato (8h+), agentic planning, SWE-Bench Pro: 58.4' },
     { id: 'z-ai/glm-5v-turbo', name: 'GLM 5V Turbo (OpenRouter)', category: 'pro', pricing: { input: '$1.20', output: '$4' }, features: '203K contesto, inferenza veloce, agenti, vision' },
     { id: 'x-ai/grok-4.20-multi-agent', name: 'Grok 4.20 Multi-Agent (OpenRouter)', category: 'pro', pricing: { input: '$2.00', output: '$6.00' }, features: '2M contesto, multi-agent reasoning, deep research' },
     { id: 'xiaomi/mimo-v2-flash', name: 'MiMo V2 Flash (OpenRouter)', category: 'flash', pricing: { input: '$0.09', output: '$0.29' }, features: '262K contesto, top open-source, ragionamento — economico' },

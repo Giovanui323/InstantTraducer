@@ -12,6 +12,7 @@ interface PageSlotProps {
   page: number;
   idx: number;
   dims: { width: number; height: number };
+  frameDims: { width: number; height: number };
   effectiveScale: number;
   isTranslatedMode: boolean;
   isManualMode: boolean;
@@ -56,6 +57,7 @@ export const PageSlot: React.FC<PageSlotProps> = ({
   page: p,
   idx,
   dims,
+  frameDims,
   effectiveScale,
   isTranslatedMode,
   isManualMode,
@@ -97,6 +99,12 @@ export const PageSlot: React.FC<PageSlotProps> = ({
   const [copiedErrorPages, setCopiedErrorPages] = useState<Record<number, boolean>>({});
   const [copiedLogPages, setCopiedLogPages] = useState<Record<number, boolean>>({});
 
+  const cRef = canvasRefsMap ? canvasRefsMap[p] : canvasRefs?.[idx];
+  
+  // Normalization logic: every page is scaled to match the frameDims.width
+  const pageScale = (dims.width > 0 && frameDims.width > 0) ? (frameDims.width / dims.width) : 1;
+  const totalScale = pageScale * effectiveScale;
+
   const verification = verificationMap[p];
   const hasTranslation = typeof translationMap[p] === 'string' && translationMap[p].trim().length > 0;
   const translatedText = hasTranslation ? translationMap[p] : null;
@@ -106,7 +114,6 @@ export const PageSlot: React.FC<PageSlotProps> = ({
   const rightText = isSplit ? (splitText?.[1] ?? '') : null;
   const rightBaseOffset = isSplit ? ((leftText?.length ?? 0) + PAGE_SPLIT.length) : 0;
   const isIndexPage = Boolean(translatedText?.includes('[[INDEX]]'));
-  const cRef = canvasRefsMap ? canvasRefsMap[p] : canvasRefs?.[idx];
 
   const themeClass = translationTheme === 'dark' ? 'dark' : translationTheme === 'sepia' ? 'sepia' : 'light';
   const highlights = showHighlights ? (userHighlights[p] || []) : [];
@@ -117,9 +124,9 @@ export const PageSlot: React.FC<PageSlotProps> = ({
       <div
         className={`relative group shrink-0 ${isTranslatedMode ? 'bg-white shadow-[0_2px_12px_rgba(0,0,0,0.15)] border border-black/[0.06] rounded-sm' : 'bg-transparent shadow-none border-0 rounded-none overflow-visible'}`}
         style={{
-          width: (dims.width * effectiveScale),
-          minHeight: (dims.height * effectiveScale),
-          ...(navigationMode === 'flip' ? { height: (dims.height * effectiveScale), overflow: 'hidden' } : {}),
+          width: (dims.width * totalScale),
+          minHeight: (dims.height * totalScale),
+          ...(navigationMode === 'flip' ? { height: (dims.height * totalScale), overflow: 'hidden' } : {}),
           maxWidth: 'none'
         }}
       >
@@ -129,8 +136,8 @@ export const PageSlot: React.FC<PageSlotProps> = ({
             <canvas
               ref={cRef}
               style={{
-                width: `${dims.width * effectiveScale}px`,
-                height: `${dims.height * effectiveScale}px`
+                width: `${dims.width * totalScale}px`,
+                height: `${dims.height * totalScale}px`
               }}
             />
           ) : (originalImages?.[p] || croppedImages?.[p]) ? (
@@ -154,7 +161,7 @@ export const PageSlot: React.FC<PageSlotProps> = ({
             <div
               className={`${getThemeClasses(translationTheme)} ${navigationMode === 'flip' ? 'h-full overflow-auto' : 'min-h-full'} relative select-text custom-scrollbar-light shadow-inner ${isSplit ? 'px-[5%] py-[5.5%]' : 'px-[10%] py-[8%]'}`}
               style={{
-                fontSize: `${13.5 * effectiveScale}px`,
+                fontSize: `${13.5 * totalScale}px`,
                 fontFamily: "Georgia, 'Times New Roman', serif",
                 lineHeight: '1.65',
                 backgroundImage: READER_THEMES[translationTheme ?? 'light']?.gradient || READER_THEMES.light.gradient
