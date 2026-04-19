@@ -18,7 +18,7 @@ import {
   applyAntiReflowStrategy,
   HIGHLIGHT_STYLES
 } from '../utils/antiReflowUtils';
-import { getHighlightClasses } from '../utils/highlightStyles';
+import { getHighlightClasses, HighlightColor, shouldBlendMultiply } from '../utils/highlightStyles';
 
 interface MarkdownTextProps {
   text: string;
@@ -37,6 +37,7 @@ interface MarkdownTextProps {
   onUpdateNote?: (id: string, content: string) => void;
   onRemoveNote?: (id: string) => void;
   isHighlightToolActive?: boolean;
+  highlightColor?: HighlightColor;
   isNoteToolActive?: boolean;
   isEraserToolActive?: boolean;
   onNoteClick?: (id: string) => void;
@@ -64,7 +65,7 @@ const NoteList: React.FC<NoteListProps> = ({ notes, theme, renderTextWithHighlig
       <div className="block w-full mb-2" data-ignore-offset="true">
         <div className={`block h-px w-full ${isDark ? 'bg-gray-600' : (isSepia ? 'bg-amber-200' : 'bg-stone-400')}`} />
       </div>
-      <div className={`w-full leading-tight ${isDark ? 'text-gray-300' : (isSepia ? 'text-amber-900/80' : 'text-stone-800')}`} style={{ fontSize: '0.9em' }}>
+      <div className={`w-full leading-tight ${isDark ? 'text-reader-dark-text-soft' : (isSepia ? 'text-reader-sepia-text-soft' : 'text-reader-light-text-soft')}`} style={{ fontSize: '0.88em' }}>
         {notes.map((note) => {
           const noteNumStr = String(note.n);
           const wordStr = note.word || '';
@@ -76,8 +77,8 @@ const NoteList: React.FC<NoteListProps> = ({ notes, theme, renderTextWithHighlig
           if (wordStr) {
             wordNode = (
               <>
-                <span className={`italic ${isDark ? 'text-gray-100' : (isSepia ? 'text-amber-950' : 'text-stone-900')}`}>{wordStr}</span>
-                <span className={isDark ? 'text-gray-400' : (isSepia ? 'text-amber-700/50' : 'text-stone-500')}> </span>
+                <span className={`italic ${isDark ? 'text-reader-dark-text' : (isSepia ? 'text-reader-sepia-text' : 'text-reader-light-text')}`}>{wordStr}</span>
+                <span className={isDark ? 'text-reader-dark-text-soft' : (isSepia ? 'text-reader-sepia-text-soft' : 'text-reader-light-text-soft')}> </span>
               </>
             );
             currentOffset += wordStr.length;
@@ -87,12 +88,15 @@ const NoteList: React.FC<NoteListProps> = ({ notes, theme, renderTextWithHighlig
           const textElement = renderTextWithHighlights(note.text, currentOffset);
           currentOffset += note.text.length;
 
+          const numClass = `font-semibold ${isDark ? 'text-reader-dark-text-soft' : (isSepia ? 'text-reader-sepia-text-soft' : 'text-reader-light-text-soft')}`;
+          const bodyClass = isDark ? 'text-reader-dark-text-soft' : (isSepia ? 'text-reader-sepia-text-soft' : 'text-reader-light-text-soft');
+
           return (
-            <span key={note.id || note.n} className="block mb-1">
-              <span className={`font-semibold ${isDark ? 'text-gray-300' : (isSepia ? 'text-amber-900' : 'text-stone-800')}`}>{note.n}</span>
-              <span className={isDark ? 'text-gray-300' : (isSepia ? 'text-amber-900' : 'text-stone-800')}> </span>
+            <span key={note.id || note.n} className="block mb-1.5">
+              <span className={numClass}>{note.n}</span>
+              <span className={bodyClass}> </span>
               {wordNode}
-              <span className={isDark ? 'text-gray-300' : (isSepia ? 'text-amber-900' : 'text-stone-800')}>{textElement}</span>
+              <span className={bodyClass}>{textElement}</span>
             </span>
           );
         })}
@@ -118,6 +122,7 @@ export const MarkdownText: React.FC<MarkdownTextProps> = ({
   onUpdateNote,
   onRemoveNote,
   isHighlightToolActive = false,
+  highlightColor = 'yellow',
   isEraserToolActive = false,
   isNoteToolActive = false,
   onNoteClick,
@@ -156,6 +161,33 @@ export const MarkdownText: React.FC<MarkdownTextProps> = ({
 
   const paragraphs = React.useMemo(() => bodyText.split(/\n\s*\n/), [bodyText]);
 
+  const splitRegex = React.useMemo(() => getSplitRegex(), []);
+  const inlineSplitRegex = React.useMemo(() => getInlineSplitRegex(), []);
+
+  // Inline notes discovered via [[word|comment]] markdown in the body. They
+  // are rendered in the DOM (between PDF footnotes and user notes) but
+  // previously were NOT included in selectableText — so DOM-derived offsets
+  // for anything after them drifted relative to what the resolver searched,
+  // mis-anchoring highlights.
+  const inlineNotesData = React.useMemo(() => {
+    const list: Array<{ n: number; word: string; comment: string }> = [];
+    let counter = noteOffset;
+    for (const paragraph of paragraphs) {
+      const paragraphText = preserveLayout
+        ? paragraph
+        : paragraph.replace(/\n+/g, ' ').replace(/\s{2,}/g, ' ').trim();
+      if (!paragraphText) continue;
+      const parts = paragraphText.split(splitRegex);
+      for (const part of parts) {
+        collectInlineNotes(part, (word, comment) => {
+          counter += 1;
+          list.push({ n: counter, word, comment });
+        });
+      }
+    }
+    return list;
+  }, [paragraphs, preserveLayout, splitRegex, noteOffset]);
+
   const selectableText = React.useMemo(() => {
     let fullText = buildSelectableText(bodyText, preserveLayout);
 
@@ -165,6 +197,14 @@ export const MarkdownText: React.FC<MarkdownTextProps> = ({
     if (!hideFootnotes && hasPdfFootnotes) {
       fullText += '\n'; // Newline for the block separator
       fullText += parsedFootnotes.map(f => `${f.n} ${f.text}`).join('');
+    }
+
+    if (!hideFootnotes && inlineNotesData.length > 0) {
+      if (fullText.length > 0) fullText += '\n'; // Newline for the block separator
+      fullText += inlineNotesData.map(n => {
+        const word = n.word ? `${n.word} ` : '';
+        return `${n.n} ${word}${n.comment}`;
+      }).join('');
     }
 
     if (!hideFootnotes && userNotes && userNotes.length > 0) {
@@ -185,7 +225,7 @@ export const MarkdownText: React.FC<MarkdownTextProps> = ({
     }
 
     return fullText;
-  }, [bodyText, preserveLayout, hideFootnotes, hasPdfFootnotes, parsedFootnotes, userNotes, externalNotes]);
+  }, [bodyText, preserveLayout, hideFootnotes, hasPdfFootnotes, parsedFootnotes, inlineNotesData, userNotes, externalNotes]);
 
   const normalizedHighlights = React.useMemo(() => {
     const valid = normalizeHighlights(highlights || []);
@@ -193,9 +233,6 @@ export const MarkdownText: React.FC<MarkdownTextProps> = ({
     // using offsets only as a disambiguation hint
     return resolveHighlightsByQuote(valid, selectableText, baseOffsetSafe);
   }, [highlights, selectableText, baseOffsetSafe]);
-
-  const splitRegex = React.useMemo(() => getSplitRegex(), []);
-  const inlineSplitRegex = React.useMemo(() => getInlineSplitRegex(), []);
 
   // === FIX: Pre-compute all paragraph offsets, inline notes, and NoteList start offsets ===
   // This replaces the mutable variables that were mutated during render (React anti-pattern).
@@ -238,25 +275,18 @@ export const MarkdownText: React.FC<MarkdownTextProps> = ({
         const partInfo = calculateVisibleLength(part);
         offset += partInfo.length;
 
-        // Track inline notes (same logic as registerNote)
+        // Track inline notes — must traverse the same nested markdown that
+        // renderInlineMarkdown walks, otherwise notes inside **[[..|..]]** or
+        // *[[..|..]]* are missed and downstream NoteList offsets desync.
         if (partInfo.notesCount > 0) {
-          // Extract note info from the part
-          if (part.startsWith('[[') && part.endsWith(']]')) {
-            const content = part.slice(2, -2);
-            if (content !== 'PAGE_SPLIT') {
-              const [wordRaw, commentRaw] = content.split('|');
-              const word = (wordRaw || '').trim();
-              const comment = (commentRaw || '').trim();
-              if (comment.length > 0) {
-                noteNum += 1;
-                inlineNotes.push({ n: noteNum, word: word.trim(), comment: comment.trim() });
-              }
-            }
-          }
+          collectInlineNotes(part, (word, comment) => {
+            noteNum += 1;
+            inlineNotes.push({ n: noteNum, word, comment });
+          });
         }
       }
 
-      paragraphMeta.push({ startOffset: offset - (partOffsets.length > 0 ? offset - partOffsets[0] : 0), partOffsets, isFirst: isFirstRendered });
+      paragraphMeta.push({ startOffset: partOffsets[0] ?? offset, partOffsets, isFirst: isFirstRendered });
     }
 
     // Compute the final offset after all paragraphs (this is what globalVisibleOffset would be)
@@ -389,10 +419,15 @@ export const MarkdownText: React.FC<MarkdownTextProps> = ({
       const element = isHighlighted
         ? <span
           key={`s-${segStart}`}
-          className={`${getHighlightClasses(isHighlighted.color, theme)} rounded-[2px] cursor-pointer hover:brightness-95`}
+          className={`${getHighlightClasses(isHighlighted.color, theme)} rounded-[2px] cursor-pointer transition-all duration-150 hover:brightness-[0.97]`}
           style={{
             boxDecorationBreak: 'clone',
             WebkitBoxDecorationBreak: 'clone',
+            // Marker effect: tint multiplies on the underlying paper color so the
+            // glyphs stay full-contrast (Notion/Readwise-style). On dark theme we
+            // skip the blend mode (handled by getHighlightClasses).
+            mixBlendMode: shouldBlendMultiply(theme) ? 'multiply' : 'normal',
+            paddingInline: '1px',
             // Stili anti-reflow per minimizzare spostamenti
             fontVariantLigatures: 'no-common-ligatures',
             WebkitFontVariantLigatures: 'no-common-ligatures',
@@ -540,25 +575,13 @@ export const MarkdownText: React.FC<MarkdownTextProps> = ({
     if (!selectedText || selectedText.trim().length === 0) return;
     if (!validateSelectionRange(start, end, selectableText.length)) return;
 
-    // Use the selection offsets directly — applyAntiReflowStrategy handles expansion.
-    // expandToWordBoundaries was causing double-expansion (grabbing extra words).
-    // IMPORTANT: Pass only the SELECTED text to anti-reflow check, not the full page text.
-    // Otherwise isTextReflowSensitive always triggers on Italian text (contains 'fi'/'fl').
-    const selectedSlice = selectableText.slice(start, end);
-    const antiReflowResult = applyAntiReflowStrategy(
-      selectableText,
-      start,
-      end,
-      align === 'justify'
-    );
-
-    // Only use anti-reflow expansion if the SELECTED text is reflow-sensitive
-    // (not the entire page text which always contains ligatures in Italian)
-    const useAntiReflow = selectedSlice.length < 10 || /fi|fl|ff|ffi|ffl/.test(selectedSlice);
-
-    const adjustedStart = (useAntiReflow ? antiReflowResult.adjustedStart : start) + baseOffsetSafe;
-    const adjustedEnd = (useAntiReflow ? antiReflowResult.adjustedEnd : end) + baseOffsetSafe;
-    const adjustedText = useAntiReflow ? antiReflowResult.adjustedText : selectedText;
+    // Use the selection offsets directly — no anti-reflow expansion.
+    // Anti-reflow expansion was causing highlights to cover extra text
+    // (e.g. expanding to adjacent words when Italian text contains 'fi'/'fl').
+    // The user selects exactly what they want highlighted.
+    const adjustedStart = start + baseOffsetSafe;
+    const adjustedEnd = end + baseOffsetSafe;
+    const adjustedText = selectedText;
 
     if (isEraserToolActive && onRemoveHighlight) {
       const overlapping = normalizedHighlights.filter(h => h.start < adjustedEnd && h.end > adjustedStart);
@@ -602,7 +625,7 @@ export const MarkdownText: React.FC<MarkdownTextProps> = ({
       const newPrefix = selectableText.slice(preStart, localStart);
       const newSuffix = selectableText.slice(localEnd, sufEnd);
 
-      onAddHighlight(adjustedStart, adjustedEnd, adjustedText, undefined, { exact: adjustedText, prefix: newPrefix, suffix: newSuffix }, pdfRect);
+      onAddHighlight(adjustedStart, adjustedEnd, adjustedText, highlightColor, { exact: adjustedText, prefix: newPrefix, suffix: newSuffix }, pdfRect);
       sel.removeAllRanges();
       return;
     }
@@ -620,18 +643,20 @@ export const MarkdownText: React.FC<MarkdownTextProps> = ({
   ]);
 
   return (
-    <div ref={containerRef} onMouseUp={(e) => handleMouseUp(e.clientX, e.clientY, e.target as HTMLElement)} lang="it" className={`${isDark ? 'text-gray-200' : (isSepia ? 'text-amber-900' : 'text-gray-900')} leading-relaxed book-text min-h-full flex flex-col`} style={{
-      fontFamily: 'Iowan Old Style, Palatino, "Palatino Linotype", "Book Antiqua", Georgia, Cambria, "Times New Roman", Times, serif',
+    <div ref={containerRef} onMouseUp={(e) => handleMouseUp(e.clientX, e.clientY, e.target as HTMLElement)} lang="it" className={`${isDark ? 'text-reader-dark-text' : (isSepia ? 'text-reader-sepia-text' : 'text-reader-light-text')} font-reader book-text min-h-full flex flex-col`} style={{
       fontSize: '1em',
-      lineHeight: 1.28,
+      // Reading-optimized leading: Literata at ~17px renders best at 1.55-1.6.
+      lineHeight: 1.55,
       textRendering: 'optimizeLegibility',
       fontKerning: 'normal',
-      // Stili anti-reflow per maggiore stabilità
-      fontVariantLigatures: 'common-ligatures',
-      WebkitFontVariantLigatures: 'common-ligatures',
-      fontFeatureSettings: '"kern" 1, "liga" 1, "clig" 1',
-      letterSpacing: 'normal',
-      wordSpacing: 'normal'
+      // Anti-reflow stability while keeping common ligatures (fi/fl) for serif aesthetics
+      fontVariantLigatures: 'common-ligatures contextual',
+      WebkitFontVariantLigatures: 'common-ligatures contextual',
+      fontFeatureSettings: '"kern" 1, "liga" 1, "clig" 1, "calt" 1, "onum" 1',
+      letterSpacing: '0.005em',
+      wordSpacing: 'normal',
+      overflowWrap: 'break-word',
+      wordBreak: 'break-word'
     }}>
       <div ref={bodyRef} className="flex-1">
         {paragraphs.map((paragraph, pIndex) => {
@@ -652,7 +677,7 @@ export const MarkdownText: React.FC<MarkdownTextProps> = ({
           const headingSpacingClass = looksLikeHeading ? (isFirstRendered ? ' mt-0' : ' mt-5') : '';
           const containerClass = hasBlockElements
             ? `mb-6 ${alignClass}`
-            : `mb-[1em] ${alignClass}${looksLikeHeading ? ` font-semibold${headingSpacingClass} mb-3 tracking-[0.01em] ${isDark ? 'text-gray-100' : (isSepia ? 'text-amber-950' : 'text-stone-900')}` : ''}`;
+            : `mb-[1em] ${alignClass}${looksLikeHeading ? ` font-semibold${headingSpacingClass} mb-3 tracking-[0.01em] ${isDark ? 'text-reader-dark-text' : (isSepia ? 'text-reader-sepia-text' : 'text-reader-light-text')}` : ''}`;
 
           return (
             <Container key={pIndex} className={containerClass} style={preserveLayout ? { whiteSpace: 'pre-wrap' } : undefined}>
@@ -723,6 +748,38 @@ function escapeRegExp(s: string) {
   return s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 }
 
+function collectInlineNotes(part: string, onFound: (word: string, comment: string) => void): void {
+  if (part.startsWith('[FIGURA:') && part.endsWith(']')) return;
+
+  if (part.startsWith('[[') && part.endsWith(']]')) {
+    const content = part.slice(2, -2);
+    if (content === 'PAGE_SPLIT') return;
+    const [wordRaw, commentRaw] = content.split('|');
+    const word = (wordRaw || '').trim();
+    const comment = (commentRaw || '').trim();
+    if (comment.length > 0) onFound(word, comment);
+    return;
+  }
+
+  if ((part.startsWith('**') && part.endsWith('**')) || (part.startsWith('__') && part.endsWith('__'))) {
+    return walkInlineForNotes(part.slice(2, -2), onFound);
+  }
+  if ((part.startsWith('*') && part.endsWith('*')) || (part.startsWith('_') && part.endsWith('_'))) {
+    return walkInlineForNotes(part.slice(1, -1), onFound);
+  }
+  walkInlineForNotes(part, onFound);
+}
+
+function walkInlineForNotes(text: string, onFound: (word: string, comment: string) => void): void {
+  const regex = getInlineSplitRegex();
+  const subParts = text.split(regex);
+  if (subParts.length === 1 && subParts[0] === text) return;
+  for (const sub of subParts) {
+    if (!sub) continue;
+    collectInlineNotes(sub, onFound);
+  }
+}
+
 function renderInlineMarkdown(
   text: string,
   keyPrefix: string,
@@ -740,12 +797,11 @@ function renderInlineMarkdown(
   return parts.map((part, idx) => {
     const key = `${keyPrefix}${idx}`;
     const currentPartStart = internalOffset;
-    const currentNoteBase = getNoteNumber ? getNoteNumber() : 0;
 
     if ((part.startsWith('**') && part.endsWith('**')) || (part.startsWith('__') && part.endsWith('__'))) {
       const inner = part.startsWith('**') ? part.slice(2, -2) : part.slice(2, -2);
       const res = (
-        <strong key={key} className={`font-bold ${dark ? 'text-white' : (isSepia ? 'text-amber-950' : 'text-black')}`}>
+        <strong key={key} className={`font-bold ${dark ? 'text-reader-dark-text' : (isSepia ? 'text-reader-sepia-text' : 'text-reader-light-text')}`}>
           {renderInlineMarkdown(inner, `${keyPrefix}${idx}-b-`, splitRegex, renderTextWithHighlights, currentPartStart, getNoteNumber, dark, registerNote, isSepia)}
         </strong>
       );
@@ -757,7 +813,7 @@ function renderInlineMarkdown(
     if ((part.startsWith('*') && part.endsWith('*')) || (part.startsWith('_') && part.endsWith('_'))) {
       const inner = part.startsWith('*') ? part.slice(1, -1) : part.slice(1, -1);
       const res = (
-        <em key={key} className={`italic ${dark ? 'text-white' : (isSepia ? 'text-amber-950' : 'text-black')}`}>
+        <em key={key} className={`italic ${dark ? 'text-reader-dark-text' : (isSepia ? 'text-reader-sepia-text' : 'text-reader-light-text')}`}>
           {renderInlineMarkdown(inner, `${keyPrefix}${idx}-i-`, splitRegex, renderTextWithHighlights, currentPartStart, getNoteNumber, dark, registerNote, isSepia)}
         </em>
       );
@@ -784,7 +840,7 @@ function renderInlineMarkdown(
       }
       const n = registerNote(word, comment);
       return (
-        <span key={key} className="whitespace-nowrap">{wordNode}<sup data-ignore-offset="true" className="ml-0.5 text-[0.7em] leading-none align-super text-stone-700 font-semibold select-none">{n}</sup></span>
+        <span key={key} className="whitespace-nowrap">{wordNode}<sup data-ignore-offset="true" className={`ml-0.5 text-[0.7em] leading-none align-super font-semibold select-none ${dark ? 'text-reader-dark-text-soft' : (isSepia ? 'text-reader-sepia-text-soft' : 'text-reader-light-text-soft')}`}>{n}</sup></span>
       );
     }
 
@@ -813,13 +869,13 @@ function renderPart(
   if (part.startsWith('[FIGURA:') && part.endsWith(']')) {
     const description = part.slice(8, -1).trim();
     return (
-      <div key={key} data-ignore-offset="true" className={`my-8 p-6 ${isSepia ? 'bg-[#f4f1e8] border-amber-200' : 'bg-[#fbf7ef] border-stone-200'} border rounded-sm flex flex-col items-center gap-3 shadow-sm select-none mx-auto max-w-2xl`}>
-        <div className={isSepia ? 'text-amber-700' : 'text-stone-500'}>
+      <div key={key} data-ignore-offset="true" className={`my-8 p-6 ${dark ? 'bg-reader-dark-panel border-reader-dark-border' : (isSepia ? 'bg-reader-sepia-panel border-reader-sepia-border' : 'bg-reader-light-panel border-reader-light-border')} border rounded-lg flex flex-col items-center gap-3 shadow-elev-1 select-none mx-auto max-w-2xl`}>
+        <div className={dark ? 'text-reader-dark-text-soft' : (isSepia ? 'text-reader-sepia-text-soft' : 'text-reader-light-text-soft')}>
           <ImageIcon size={20} />
         </div>
         <div className="flex flex-col gap-1 text-center">
-          <span className={`text-[10px] font-bold uppercase tracking-[0.18em] ${isSepia ? 'text-amber-600' : 'text-stone-500'}`}>Elemento Visivo</span>
-          <span className={`text-sm italic ${isSepia ? 'text-amber-900' : 'text-stone-700'} leading-relaxed font-serif`}>{sanitizeHTML(description)}</span>
+          <span className={`text-[10px] font-bold uppercase tracking-[0.18em] ${dark ? 'text-reader-dark-text-soft' : (isSepia ? 'text-reader-sepia-text-soft' : 'text-reader-light-text-soft')}`}>Elemento Visivo</span>
+          <span className={`text-sm italic leading-relaxed font-reader ${dark ? 'text-reader-dark-text-soft' : (isSepia ? 'text-reader-sepia-text-soft' : 'text-reader-light-text-soft')}`}>{sanitizeHTML(description)}</span>
         </div>
       </div>
     );
@@ -843,7 +899,7 @@ function renderPart(
   if ((part.startsWith('**') && part.endsWith('**')) || (part.startsWith('__') && part.endsWith('__'))) {
     const inner = part.startsWith('**') ? part.slice(2, -2) : part.slice(2, -2);
     return (
-      <strong key={key} className={`font-bold ${dark ? 'text-white' : (isSepia ? 'text-amber-950' : 'text-black')}`}>
+      <strong key={key} className={`font-bold ${dark ? 'text-reader-dark-text' : (isSepia ? 'text-reader-sepia-text' : 'text-reader-light-text')}`}>
         {renderInlineMarkdown(inner, `p-${key}-b-`, inlineRegex, renderTextWithHighlights, paragraphStartOffset, getNoteNumber, dark, registerNote, isSepia)}
       </strong>
     );
@@ -852,7 +908,7 @@ function renderPart(
   if ((part.startsWith('*') && part.endsWith('*')) || (part.startsWith('_') && part.endsWith('_'))) {
     const inner = part.startsWith('*') ? part.slice(1, -1) : part.slice(1, -1);
     return (
-      <em key={key} className={`italic ${dark ? 'text-gray-200' : (isSepia ? 'text-amber-900' : 'text-gray-800')}`}>
+      <em key={key} className={`italic ${dark ? 'text-reader-dark-text' : (isSepia ? 'text-reader-sepia-text' : 'text-reader-light-text')}`}>
         {renderInlineMarkdown(inner, `p-${key}-i-`, inlineRegex, renderTextWithHighlights, paragraphStartOffset, getNoteNumber, dark, registerNote, isSepia)}
       </em>
     );
@@ -864,7 +920,6 @@ function renderPart(
     const chunks = part.split(re);
 
     let internalOffset = paragraphStartOffset || 0;
-    const currentNoteBase = getNoteNumber ? getNoteNumber() : 0;
 
     return (
       <span key={key}>
@@ -884,7 +939,7 @@ function renderPart(
               <mark
                 key={`${key}-h-${i}`}
                 data-search-id={matchId}
-                className={`${isActive ? 'bg-orange-500 text-white z-10 shadow-[0_0_8px_rgba(249,115,22,0.6)] scale-[1.05]' : (dark ? 'bg-yellow-500/40 text-white' : (isSepia ? 'bg-amber-200 text-amber-950' : 'bg-yellow-200 text-black'))} rounded-[2px] transition-all duration-300 inline`}
+                className={`${isActive ? 'bg-accent text-white z-10 shadow-glow-accent scale-[1.05]' : (dark ? 'bg-marker-yellow/30 text-reader-dark-text' : 'bg-marker-yellow text-reader-light-text')} rounded-[2px] transition-all duration-300 inline`}
                 style={{ boxDecorationBreak: 'clone', WebkitBoxDecorationBreak: 'clone' }}
               >
                 {c}

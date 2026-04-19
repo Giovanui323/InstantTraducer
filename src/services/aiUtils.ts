@@ -1,3 +1,9 @@
+import { LITE_PROMPT_MODELS } from '../constants';
+
+export function isLiteModel(modelId: string): boolean {
+  if (!modelId) return false;
+  return LITE_PROMPT_MODELS.includes(modelId);
+}
 
 export const ITALIAN_COMMON_WORDS = new Set([
   'IL', 'LO', 'LA', 'I', 'GLI', 'LE', 'DI', 'A', 'DA', 'IN', 'CON', 'SU', 'PER', 'TRA', 'FRA',
@@ -12,7 +18,8 @@ export const GERMAN_COMMON_WORDS = new Set([
   'AUF', 'FÜR', 'IST', 'SIND', 'WAR', 'WIRD', 'NICHT', 'WIE', 'ABER', 'WENN', 'DASS', 'ALS', 'AN',
   'DURCH', 'BEI', 'NACH', 'VOM', 'IM', 'AM', 'UM', 'ÜBER', 'VOR', 'ZUM', 'ZUR', 'SICH', 'ICH', 'DU', 'ER',
   'SIE', 'ES', 'WIR', 'IHR', 'SIE', 'MEIN', 'DEIN', 'SEIN', 'IHR', 'UNSER', 'EUER', 'IHR',
-  'AUCH', 'NOCH', 'NUR', 'ODER', 'DOCH', 'WIE', 'WAS', 'WIR'
+  'AUCH', 'NOCH', 'NUR', 'ODER', 'DOCH', 'WIE', 'WAS', 'WIR', 'MAN', 'EINE', 'BIS', 'ÜBER', 'DURCH',
+  'RECHT', 'GESETZ', 'KLAGE', 'FALL', 'GERICHT', 'URTEIL', 'BESTIMMUNG', 'VERFAHREN'
 ]);
 
 export function tokenizeForLangCheck(text: string): string[] {
@@ -81,8 +88,10 @@ export function looksLikeItalian(text: string, sourceLang?: string): boolean {
       const deScore = wordHitScore(tokens, GERMAN_COMMON_WORDS);
       const hasGermanChars = /[äöüß]/i.test(text);
       const deBias = deScore + (hasGermanChars ? 0.02 : 0);
-      // Se il punteggio tedesco è significativamente più alto dell'italiano, rifiutiamo
-      if (deBias > 0.08 && deBias > itBias * 1.5) return false;
+      
+      // Se è palesemente tedesco (>15% stopword o caratteri speciali) e l'italiano è debole, rifiutiamo.
+      // Esempio: "identico parola per parola" darà deBias altissimo.
+      if (deBias > 0.15 || (deBias > 0.05 && deBias > itBias * 1.2)) return false;
     }
   }
   
@@ -97,4 +106,37 @@ export function getArticledLanguage(lang: string): string {
   if (l === 'tedesco') return "il tedesco";
   if (l === 'francese') return "il francese";
   return lang;
+}
+
+/**
+ * Returns color and indicator based on model pricing.
+ */
+export function getModelPriceInfo(pricing?: { input: string | number; output: string | number }): { color: string; indicator: string; label: string } {
+  if (!pricing) return { color: '#94a3b8', indicator: '', label: '' };
+  
+  let price = 0;
+  if (typeof pricing.input === 'number') {
+    price = pricing.input;
+  } else if (typeof pricing.input === 'string') {
+    const inputStr = pricing.input.replace(/[^0-9.]/g, '');
+    price = parseFloat(inputStr);
+  }
+
+  if (isNaN(price) || price === 0) {
+    return { color: '#22c55e', indicator: '🟢', label: 'FREE' };
+  }
+  
+  if (price > 10) {
+    return { color: '#ef4444', indicator: '🔴', label: 'PREMIUM' };
+  }
+  
+  if (price > 2) {
+    return { color: '#f59e0b', indicator: '🔸', label: 'PRO' };
+  }
+  
+  if (price < 0.2) {
+    return { color: '#3b82f6', indicator: '🔹', label: 'CHEAP' };
+  }
+
+  return { color: '#94a3b8', indicator: '', label: '' };
 }

@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { Upload, ArrowRight, FileDown, X, Settings } from 'lucide-react';
+import { BookPlus, ArrowRight, FileDown, X, Settings } from 'lucide-react';
 import { PDFMetadata } from '../types';
 import { getLanguageFlag } from '../utils/languageUtils';
 import { GroupFilterBar } from './home/GroupFilterBar';
@@ -82,25 +82,26 @@ export const HomeView: React.FC<HomeViewProps> = ({
         {/* ── Active session card ── */}
         {hasSession && (
           <section className="w-full animate-fade-in">
-            <div className="rounded-xl border border-border-muted bg-surface-2/60 shadow-surface-lg overflow-hidden">
+            <div className="bookmark-card rounded-xl border border-border-muted bg-surface-2/60 shadow-surface-lg overflow-hidden">
+              <span className="bookmark-ribbon" aria-hidden="true" />
               <div className="grid grid-cols-1 sm:grid-cols-[1fr_auto]">
                 <button
                   type="button"
                   onClick={onReturnToSession}
-                  className="text-left px-6 py-5 hover:bg-white/[0.02] focus:outline-none transition-colors duration-200"
+                  className="text-left pl-12 pr-6 py-5 hover:bg-white/[0.02] focus:outline-none transition-colors duration-200"
                   aria-label={`Torna alla sessione${metadata?.name ? `: ${metadata.name}` : ''}`}
                 >
-                  <div className="text-[9px] font-bold uppercase tracking-[0.15em] text-txt-muted mb-1.5">Sessione attiva</div>
-                  <div className="flex items-center gap-2.5 min-w-0">
-                    <span className="text-sm opacity-80 shrink-0" title={docInputLanguage}>{getLanguageFlag(docInputLanguage || "")}</span>
-                    <span className="font-semibold text-[15px] text-txt-primary truncate min-w-0 tracking-tight" title={metadata?.name || 'Senza titolo'}>
+                  <div className="text-[10px] font-bold uppercase tracking-[0.22em] text-txt-muted mb-1.5">Segnalibro</div>
+                  <div className="flex items-baseline gap-2.5 min-w-0">
+                    <span className="text-base opacity-80 shrink-0 self-center" title={docInputLanguage}>{getLanguageFlag(docInputLanguage || "")}</span>
+                    <span className="font-reader font-semibold text-[21px] text-txt-primary truncate min-w-0 tracking-tight leading-tight" title={metadata?.name || 'Senza titolo'}>
                       {metadata?.name || 'Senza titolo'}
                     </span>
                   </div>
-                  <div className="mt-1.5 flex items-center gap-2">
-                    <span className="text-[11px] text-txt-muted tabular-nums">Ultima pagina: {currentPage}</span>
+                  <div className="mt-2 flex items-center gap-2">
+                    <span className="text-[11.5px] text-txt-muted tabular-nums">Pagina {currentPage}</span>
                     <span className="text-txt-faint">·</span>
-                    <span className="text-[11px] text-accent font-medium">Riprendi</span>
+                    <span className="text-[11.5px] text-accent font-semibold tracking-wide">Riprendi lettura</span>
                   </div>
                 </button>
                 <div className="flex items-center justify-end gap-2 px-5 py-5 sm:border-l sm:border-border-muted">
@@ -129,12 +130,13 @@ export const HomeView: React.FC<HomeViewProps> = ({
           {/* LEFT — Upload area */}
           <section className="col-span-12 lg:col-span-5 space-y-5">
             <div className="px-1">
-              <h2 className="text-[10px] font-bold text-txt-muted uppercase tracking-[0.15em]">Nuovo progetto</h2>
+              <div className="text-[10px] font-bold text-txt-muted uppercase tracking-[0.22em] mb-1">Caricamento</div>
+              <h2 className="font-reader text-[26px] font-semibold text-txt-primary tracking-tight leading-none">Nuovo progetto</h2>
             </div>
 
-            {/* Drop zone */}
+            {/* Drop zone — styled as an open book with spine + page-curl */}
             <div
-              className={`group rounded-xl border p-8 text-left transition-all duration-300 ease-out ${
+              className={`drop-zone-book group rounded-xl border pl-10 pr-7 py-7 text-left transition-all duration-300 ease-out ${
                 isConsultationMode
                   ? 'opacity-40 cursor-not-allowed border-border-muted bg-surface-2/30'
                   : isDragging
@@ -157,17 +159,18 @@ export const HomeView: React.FC<HomeViewProps> = ({
               tabIndex={isConsultationMode ? -1 : 0}
               aria-label={isConsultationMode ? 'Caricamento PDF disabilitato' : 'Carica nuovo PDF'}
             >
+              <span className="spine-stitch" aria-hidden="true" />
               <div className="flex items-start gap-4">
-                <div className={`w-12 h-12 rounded-xl flex items-center justify-center shrink-0 transition-all duration-300 ${
+                <div className={`w-12 h-14 rounded-md flex items-center justify-center shrink-0 transition-all duration-300 ${
                   isConsultationMode
                     ? 'bg-surface-4 text-txt-muted'
-                    : 'bg-accent/10 border border-accent/15 group-hover:bg-accent/15 group-hover:scale-105 group-active:scale-95'
+                    : 'bg-gradient-to-b from-accent/25 to-accent/[0.04] border border-accent/25 group-hover:from-accent/30 group-hover:scale-105 group-active:scale-95 shadow-[inset_0_1px_0_rgba(255,210,130,0.15)]'
                 }`}>
-                  <Upload className="text-accent w-5 h-5" />
+                  <BookPlus className="text-accent w-6 h-6" strokeWidth={1.5} />
                 </div>
                 <div className="min-w-0 flex-1">
-                  <h3 className="text-[14px] font-semibold text-txt-primary tracking-tight">Carica PDF</h3>
-                  <p className="mt-1 text-[12px] text-txt-muted leading-relaxed">
+                  <h3 className="font-reader text-[18px] font-semibold text-txt-primary tracking-tight leading-snug">Carica un PDF</h3>
+                  <p className="mt-1.5 text-[12.5px] text-txt-muted leading-relaxed">
                     {isConsultationMode
                       ? "Disabilitato in modalità consultazione."
                       : "Trascina un file qui oppure selezionalo dal computer."}
@@ -180,11 +183,11 @@ export const HomeView: React.FC<HomeViewProps> = ({
                           e.stopPropagation();
                           onBrowseClick();
                         }}
-                        className="inline-flex items-center gap-2 px-4 py-2 bg-accent text-white font-semibold rounded-lg text-[11px] hover:bg-accent-hover transition-all duration-200 shadow-glow-accent focus:outline-none tracking-wide"
+                        className="inline-flex items-center gap-2 px-4 py-2 bg-accent text-white font-semibold rounded-lg text-[12px] hover:bg-accent-hover transition-all duration-200 shadow-glow-accent focus:outline-none tracking-wide"
                       >
-                        Sfoglia file <ArrowRight size={13} />
+                        Sfoglia file <ArrowRight size={14} />
                       </button>
-                      <span className="text-[10px] text-txt-muted">Solo PDF</span>
+                      <span className="text-[11px] text-txt-muted tracking-wide">Solo PDF</span>
                     </div>
                   )}
                 </div>
@@ -204,12 +207,12 @@ export const HomeView: React.FC<HomeViewProps> = ({
               aria-disabled={isConsultationMode}
             >
               <div className="flex items-center gap-3">
-                <div className="w-8 h-8 rounded-lg bg-white/[0.03] border border-border-muted flex items-center justify-center">
+                <div className="w-9 h-9 rounded-lg bg-white/[0.03] border border-border-muted flex items-center justify-center">
                   <FileDown size={16} className="text-txt-muted" />
                 </div>
                 <div className="min-w-0">
-                  <div className="text-[12px] font-semibold">Importa progetto</div>
-                  <div className="text-[10px] text-txt-muted mt-0.5">Riprendi un backup .gpt</div>
+                  <div className="text-[13px] font-semibold tracking-tight">Importa progetto</div>
+                  <div className="text-[11px] text-txt-muted mt-0.5">Riprendi un backup .gpt</div>
                 </div>
               </div>
               <ArrowRight size={15} className="text-txt-faint group-hover:text-txt-muted transition-colors" />
@@ -221,47 +224,50 @@ export const HomeView: React.FC<HomeViewProps> = ({
             <div className="sticky top-0 z-20 -mx-1 px-1 py-2 bg-surface-0/90 backdrop-blur-lg">
               <div className="flex items-center justify-between gap-3">
                 <div className="min-w-0">
-                  <h2 className="text-[10px] font-bold text-txt-muted uppercase tracking-[0.15em]">Libreria</h2>
+                  <div className="text-[10px] font-bold text-txt-muted uppercase tracking-[0.22em] mb-1">Raccolta</div>
+                  <h2 className="font-reader text-[26px] font-semibold text-txt-primary tracking-tight leading-none">Libreria</h2>
                 </div>
                 <div className="flex items-center gap-2 shrink-0">
                   <HomeTranslationSummaryButton onClick={() => setIsActivityModalOpen(true)} />
                   <button
                     type="button"
                     onClick={onOpenSettings}
-                    className={`flex items-center gap-1.5 text-[9px] font-bold uppercase tracking-wider transition-all duration-200 px-2.5 py-1.5 rounded-lg border focus:outline-none ${
+                    className={`flex items-center gap-1.5 text-[10px] font-bold uppercase tracking-wider transition-all duration-200 px-2.5 py-1.5 rounded-lg border focus:outline-none ${
                       isApiConfigured
                         ? 'text-success bg-success/5 border-success/15 hover:bg-success/10'
                         : 'text-danger bg-danger/5 border-danger/15 hover:bg-danger/10'
                     }`}
                     aria-label={isApiConfigured ? 'API configurate' : 'Configura API'}
                   >
-                    <Settings size={11} /> {isApiConfigured ? 'API OK' : 'Configura API'}
+                    <Settings size={12} /> {isApiConfigured ? 'API OK' : 'Configura API'}
                   </button>
                 </div>
               </div>
             </div>
-            <GroupFilterBar onCreateGroup={onCreateGroup} />
-            <RecentBooksGrid
-              onOpenProject={onOpenProject}
-              onRenameProject={onRenameProject}
-              onDeleteProject={onDeleteProject}
-              onEditLanguageProject={onEditLanguageProject}
-              onManageGroups={onManageGroups}
-              onExportGpt={onExportGpt}
-              onSetOpenMenuId={onSetOpenMenuId}
-              openMenuId={openMenuId}
-              isActiveProjectPaused={isActiveProjectPaused}
-              activeProjectQueueStats={activeProjectQueueStats}
-              onPauseActiveProject={onPauseActiveProject}
-              onStopActiveProject={onStopActiveProject}
-              isOpeningProject={isOpeningProject}
-              onCreateNewProject={isConsultationMode ? undefined : onBrowseClick}
-            />
+            <div className="library-room space-y-4">
+              <GroupFilterBar onCreateGroup={onCreateGroup} />
+              <RecentBooksGrid
+                onOpenProject={onOpenProject}
+                onRenameProject={onRenameProject}
+                onDeleteProject={onDeleteProject}
+                onEditLanguageProject={onEditLanguageProject}
+                onManageGroups={onManageGroups}
+                onExportGpt={onExportGpt}
+                onSetOpenMenuId={onSetOpenMenuId}
+                openMenuId={openMenuId}
+                isActiveProjectPaused={isActiveProjectPaused}
+                activeProjectQueueStats={activeProjectQueueStats}
+                onPauseActiveProject={onPauseActiveProject}
+                onStopActiveProject={onStopActiveProject}
+                isOpeningProject={isOpeningProject}
+                onCreateNewProject={isConsultationMode ? undefined : onBrowseClick}
+              />
+            </div>
           </section>
         </div>
       </div>
 
-      <div className="fixed bottom-3 right-4 text-[9px] font-semibold text-txt-faint tracking-wide">v{pkgVersion}</div>
+      <div className="fixed bottom-3 right-4 text-[10px] font-semibold text-txt-faint tracking-[0.15em] uppercase">v{pkgVersion}</div>
 
       <TranslationActivityModal
         isOpen={isActivityModalOpen}

@@ -64,7 +64,25 @@ const getModelCost = (modelId: string): { input: number, output: number } | null
         }
     }
 
-    // Se non trovato, potrebbe essere un modello custom (gestito in trackUsage con info aggiuntive se necessario)
+    // Se non trovato, cerca nei modelli custom dell'utente
+    try {
+        const settingsRaw = localStorage.getItem('app_settings');
+        if (settingsRaw) {
+            const settings = JSON.parse(settingsRaw);
+            if (settings.customModels && Array.isArray(settings.customModels)) {
+                const found = settings.customModels.find((m: any) => m.id === modelId);
+                if (found?.pricing) {
+                    return {
+                        input: typeof found.pricing.input === 'number' ? found.pricing.input : parsePrice(found.pricing.input),
+                        output: typeof found.pricing.output === 'number' ? found.pricing.output : parsePrice(found.pricing.output)
+                    };
+                }
+            }
+        }
+    } catch {
+        // ignore
+    }
+
     return null;
 };
 
@@ -85,10 +103,35 @@ try {
     if (raw) {
         const parsed = JSON.parse(raw);
         if (parsed && typeof parsed === 'object') {
+            // Sanitizzazione dei dati caricati per prevenire crash (es. cost: null)
+            const sanitizedModels: Record<string, ModelUsage> = {};
+            if (parsed.models) {
+                Object.entries(parsed.models as Record<string, any>).forEach(([id, data]) => {
+                    sanitizedModels[id] = {
+                        cost: typeof data.cost === 'number' && !isNaN(data.cost) ? data.cost : 0,
+                        calls: typeof data.calls === 'number' ? data.calls : 0,
+                        inputTokens: typeof data.inputTokens === 'number' ? data.inputTokens : 0,
+                        outputTokens: typeof data.outputTokens === 'number' ? data.outputTokens : 0
+                    };
+                });
+            }
+
+            const sanitizedProjects: Record<string, ProjectUsage> = {};
+            if (parsed.projects) {
+                Object.entries(parsed.projects as Record<string, any>).forEach(([id, data]) => {
+                    sanitizedProjects[id] = {
+                        cost: typeof data.cost === 'number' && !isNaN(data.cost) ? data.cost : 0,
+                        calls: typeof data.calls === 'number' ? data.calls : 0,
+                        name: data.name,
+                        lastUpdated: data.lastUpdated
+                    };
+                });
+            }
+
             currentMetrics = {
                 lastCall: parsed.lastCall || defaultMetrics.lastCall,
-                models: parsed.models || {},
-                projects: parsed.projects || {}
+                models: sanitizedModels,
+                projects: sanitizedProjects
             };
         }
     }

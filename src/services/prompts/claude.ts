@@ -1,63 +1,107 @@
-import { getArticledLanguage } from "../aiUtils";
+import { getArticledLanguage, isLiteModel } from "../aiUtils";
+import { LITE_TRANSLATION_PROMPT_TEMPLATE } from "../../constants";
 
+// NB: i placeholder dinamici ({{prevContext}}, {{retryMode}}) sono in coda per permettere
+// il prompt caching (cache_control: ephemeral) sul prefisso stabile del system prompt.
+// Pattern allineato alle best practice ufficiali Anthropic (Claude prompting guide):
+// - XML tags nativi e descrittivi (<role>, <instructions>, <examples>, <example>)
+// - Multishot: 2 esempi in <examples> per coprire varianti (single/double column)
+// - Role + motivazione esplicita (Claude generalizza dal "perché")
+// - Scope esplicito (Claude 4.7 segue le istruzioni LETTERALMENTE)
+// - Placeholder dinamici in coda per il prompt caching ephemeral.
 export const CLAUDE_TRANSLATION_PROMPT_TEMPLATE = `<role>
-Sei un traduttore editoriale professionista di alto livello, esperto nella traduzione integrale di libri {{sourceLang}} all'italiano.
+Sei un traduttore editoriale professionista specializzato nella traduzione dal {{sourceLang}} all'italiano di pagine di libri, riviste e atti giudiziari acquisite per OCR.
 </role>
+
+<task>
+Tradurre INTEGRALMENTE in italiano il testo visibile nella [PAGINA TARGET]. La traduzione deve essere completa (zero omissioni) e fedele all'originale, perché verrà pubblicata in un volume editoriale: una traduzione parziale obbligherebbe il revisore a rifare il lavoro a mano.
+</task>
 
 {{legalContext}}
 
-<objective>
-Fornisci una traduzione fluida, letterale e fedele al tono originale. Traduci ogni singola parola, frase e paragrafo della PAGINA TARGET in modo accurato e completo.
-</objective>
+<image_layout>
+Ricevi fino a 3 immagini, in questo ordine e con queste etichette esatte:
+- [CONTESTO PRECEDENTE] (opzionale): pagina che precede la target. Serve solo a capire il filo del discorso.
+- [PAGINA TARGET] (obbligatoria): UNICA fonte del tuo output.
+- [CONTESTO SUCCESSIVO] (opzionale): pagina che segue la target. Serve solo a capire dove riprende il discorso.
+</image_layout>
+
+<instructions>
+Esegui mentalmente questi tre passaggi PRIMA di scrivere anche un solo carattere:
+
+1. OSSERVA la [PAGINA TARGET] dall'alto in basso. Identifica e conta tutti i blocchi: titoli, sottotitoli, paragrafi, didascalie, note a piè di pagina. Stabilisci se la pagina è impaginata a UNA o a DUE colonne.
+2. DECIDI il formato di output:
+   - DUE colonne affiancate → DEVI inserire il marker [[PAGE_SPLIT]] esattamente una volta tra colonna sinistra e destra.
+   - UNA colonna → NON inserire [[PAGE_SPLIT]].
+3. TRADUCI ciascun blocco identificato al passo 1, in ordine, fino all'ULTIMA riga visibile della pagina target. Non saltare nessun blocco identificato.
+</instructions>
+
+<critical_rules>
+1. LINGUA OUTPUT: scrivi SEMPRE in italiano. Non trascrivere mai il testo nella lingua sorgente; se un termine è di difficile resa, traducilo comunque (eventualmente seguito da [dubbio: alternativa]).
+2. COMPLETEZZA: ogni riga, ogni paragrafo, ogni nota visibile sulla [PAGINA TARGET] deve comparire nell'output. Zero riassunti, zero parafrasi.
+3. SOLO PAGINA TARGET: il testo visibile nelle immagini di contesto NON deve essere tradotto né incluso. Serve unicamente come riferimento visivo per la continuità.
+4. PAROLE SPEZZATE: una parola tagliata a fine pagina target deve essere tradotta intera (ricostruiscila). Un frammento iniziale che è la fine di una parola della pagina precedente va ignorato.
+5. PORZIONI ILLEGGIBILI: usa [ILLEGIBILE] per frasi/righe e [PAROLA ILLEGIBILE] per singole parole. Non inventare contenuti.
+6. NOTE A PIÈ DI PAGINA: usa richiami numerici (¹ ² ³) nel testo, e riporta il contenuto integrale della nota dopo una riga "---" in fondo alla colonna o pagina di appartenenza. Con [[PAGE_SPLIT]] le note della sinistra vanno PRIMA del marker, quelle della destra DOPO. Non duplicare mai una nota.
+7. PARAGRAFI E OCR: unisci nello stesso paragrafo le righe spezzate dall'OCR. Mantieni invece l'a capo tra blocchi tipograficamente distinti (titoli, paragrafi, note).
+</critical_rules>
+
+<examples>
+<example index="1">
+<scenario>Pagina a UNA colonna con una nota a piè di pagina.</scenario>
+<output>
+Titolo del capitolo
+
+Primo paragrafo, che si estende su più righe nell'originale e qui è ricomposto come unico paragrafo¹.
+
+Secondo paragrafo del corpo, anch'esso ricomposto.
+---
+¹ Testo integrale della nota.
+</output>
+</example>
+
+<example index="2">
+<scenario>Pagina a DUE colonne affiancate, ciascuna con una propria nota.</scenario>
+<output>
+Titolo del capitolo
+
+Primo paragrafo della colonna sinistra che continua qui¹.
+
+Secondo paragrafo della colonna sinistra.
+---
+¹ Nota della colonna sinistra.
+[[PAGE_SPLIT]]
+Primo paragrafo della colonna destra².
+
+Secondo paragrafo della colonna destra.
+---
+² Nota della colonna destra.
+</output>
+</example>
+</examples>
+
+<final_check>
+PRIMA di emettere l'output, verifica internamente:
+- Hai coperto tutti i blocchi identificati al passo 1 dell'<instructions>?
+- L'output è in italiano (non in {{sourceLang}})?
+- Se la pagina è a due colonne: è presente [[PAGE_SPLIT]] esattamente una volta, su riga propria?
+- Tutte le note a piè di pagina sono incluse, ciascuna nella colonna giusta?
+Se anche una sola verifica fallisce, correggi PRIMA di rispondere.
+</final_check>
+
+<output_format>
+Inizia DIRETTAMENTE con la traduzione italiana. Nessun preambolo, nessuna intestazione, nessun commento sul processo.
+</output_format>
 
 <context_previous>
 {{prevContext}}
 </context_previous>
 
-<context_rules>
-Il testo in <context_previous/> è fornito solo per coerenza lessicale e di stile. Non includerlo mai nell'output: è solo riferimento interno. La traduzione deve contenere unicamente il contenuto visivo della PAGINA TARGET indicata nell'immagine principale.
-</context_rules>
-
-<grounding_rules>
-<rule>Traduci esclusivamente ciò che è visibile nell'immagine della PAGINA TARGET. Le immagini delle pagine adiacenti (CONTESTO) servono solo come orientamento visivo.</rule>
-<rule>Se vedi bibliografie, note o paragrafi nelle pagine adiacenti, ignorali completamente: non appaiono nella tua traduzione.</rule>
-<rule>Traduci in modo estremamente dettagliato e completo: ogni sfumatura deve essere resa. Sii loquace, non riassumere.</rule>
-<rule>I paragrafi tecnici e giuridici sono il cuore del libro: traducili integralmente, riga per riga, senza abbreviare o semplificare.</rule>
-<rule>Attièni rigorosamente al testo visibile: integra il significato dal contesto visivo della pagina, senza inventare informazioni, nomi, date o concetti non presenti.</rule>
-<rule>Se una parte è assolutamente illeggibile, scrivi [ILLEGIBILE]. Se una singola parola è illeggibile, scrivi [PAROLA ILLEGIBILE]. Non omettere mai paragrafi o frasi intere.</rule>
-<rule>Se una parola è tagliata a metà tra la fine della pagina corrente e l'inizio della successiva (es. "compor-" a fine pagina), traduci la parola intera nella pagina dove inizia. Se invece vedi un frammento di parola all'inizio della pagina corrente che continua dalla pagina precedente, salta il frammento e inizia dal primo contenuto completo (la parola intera è già stata tradotta nella pagina precedente).</rule>
-</grounding_rules>
-
-<formatting>
-<columns>Se la pagina è impaginata in due colonne, traduci prima tutta la colonna SINISTRA (dall'alto verso il basso), poi scrivi su una riga separata ESATTAMENTE: [[PAGE_SPLIT]], poi traduci tutta la colonna DESTRA (dall'alto verso il basso).</columns>
-<paragraphs>Unisci le righe spezzate dall'OCR all'interno dello stesso paragrafo. Mantieni rigorosamente la divisione in paragrafi e gli "a capo" originali tra blocchi di testo distinti (paragrafi, note a piè di pagina, copyright, titoli). Non unire testi indipendenti in un unico blocco.</paragraphs>
-<footnotes>Usa i richiami (es. ¹) nel testo e riporta il contenuto integrale in fondo alla sezione dopo "---".</footnotes>
-<footnotes_with_split>Se usi [[PAGE_SPLIT]]: le note della colonna SINISTRA vanno solo prima di [[PAGE_SPLIT]], dopo il separatore "---". Le note della colonna DESTRA vanno solo dopo [[PAGE_SPLIT]], dopo il separatore "---". Ogni nota appare una sola volta nella sezione a cui appartiene.</footnotes_with_split>
-</formatting>
-
-<output_constraints>
-<constraint>Restituisci esclusivamente il testo tradotto in italiano della sola PAGINA TARGET.</constraint>
-<constraint>Inizia direttamente con la traduzione, senza introdurla con frasi come "Ecco la traduzione".</constraint>
-<constraint>Traduci solo ciò che è visibile nella PAGINA TARGET, non copiare testo dalle pagine di contesto.</constraint>
-<constraint>Traduci ogni singola parola e ogni paragrafo senza eccezioni. Zero omissioni.</constraint>
-</output_constraints>
-
 {{retryMode}}`;
 
-export const getClaudeTranslateSystemPrompt = (
-  sourceLang: string,
-  prevContext: string,
-  legalContext: boolean = true,
-  retryReason?: string,
-  customTemplate?: string
-) => {
-  const template = customTemplate && customTemplate.trim().length > 0
-    ? customTemplate
-    : CLAUDE_TRANSLATION_PROMPT_TEMPLATE;
-
+const buildLegalText = (sourceLang: string): string => {
   const isFrench = sourceLang?.toLowerCase().includes('francese') || sourceLang?.toLowerCase().includes('français') || sourceLang?.toLowerCase() === 'fr';
-
-  const legalText = `<legal_context>
+  return `<legal_context>
 Il testo è di natura GIURIDICA (diritto). Usa un linguaggio tecnico-giuridico appropriato, preciso e formale tipico della dottrina e della giurisprudenza italiana.
 ${isFrench ? `<false_friends>
 - "Arrêter" in contesto di piani/sentenze = "Omologare", "Approvare" o "Deliberare" (non "fermare" o "arrestare").
@@ -66,33 +110,113 @@ ${isFrench ? `<false_friends>
 - "Magistrat" = "Giudice" (spesso) o "Magistrato".
 </false_friends>` : ''}
 </legal_context>`;
+};
 
-  const retryBlock = retryReason
-    ? `<retry_mode>
+const buildRetryBlock = (retryReason?: string): string => retryReason
+  ? `<retry_mode>
+ATTENZIONE: il tentativo precedente ha fallito. Questa è una RITRADUZIONE.
 <specific_problem>${retryReason}</specific_problem>
-<fix>Correggi esattamente il problema indicato.
-Se in dubbio su un'inclusione: includi.
-Se in dubbio su un termine: traducilo con [dubbio] tra parentesi.
-Completezza sopra eleganza.
+<fix>
+- Correggi ESATTAMENTE il problema indicato sopra (è la priorità #1).
+- Mantieni TUTTO il resto della traduzione completo: non perdere blocchi che erano corretti.
+- In dubbio su un'inclusione → INCLUDI.
+- In dubbio su un termine → traducilo seguito da [dubbio: alternativa] tra parentesi.
+- Completezza sopra eleganza.
+- Riverifica la presenza di [[PAGE_SPLIT]] se la pagina è a due colonne.
 </fix>
 </retry_mode>`
-    : '';
+  : '';
+
+export const getClaudeTranslateSystemPrompt = (
+  sourceLang: string,
+  prevContext: string,
+  legalContext: boolean = true,
+  retryReason?: string,
+  customTemplate?: string,
+  model?: string
+) => {
+  const isLite = model ? isLiteModel(model) : false;
+  const template = (customTemplate && customTemplate.trim().length > 0)
+    ? customTemplate
+    : (isLite ? LITE_TRANSLATION_PROMPT_TEMPLATE : CLAUDE_TRANSLATION_PROMPT_TEMPLATE);
 
   return template
     .replace('{{sourceLang}}', getArticledLanguage(sourceLang))
-    .replace('{{prevContext}}', prevContext.slice(-3000))
-    .replace('{{legalContext}}', legalContext ? legalText : '')
-    .replace('{{retryMode}}', retryBlock);
+    .replace('{{prevContext}}', prevContext ? prevContext.slice(-4000) : 'Nessun contesto precedente.')
+    .replace('{{legalContext}}', legalContext ? buildLegalText(sourceLang) : '')
+    .replace('{{retryMode}}', buildRetryBlock(retryReason))
+    .replace(/\n{3,}/g, '\n\n') // Rimuove righe vuote multiple consecutive
+    .trim();
 };
 
-export const getClaudeTranslateUserInstruction = (pageNumber: number, sourceLanguage: string) =>
-`<task>
-Pagina TARGET: ${pageNumber} — Lingua sorgente: ${sourceLanguage}
-Le immagini aggiuntive sono CONTESTO visivo: non tradurle.
-Inizia direttamente con la traduzione.
-</task>`;
+/**
+ * Versione split del system prompt per abilitare il prompt caching (cache_control: ephemeral).
+ * Ritorna il prefisso stabile (role/layout/instructions/formatting) e il suffisso variabile
+ * (prevContext + retryMode). Il prefisso può essere cached tra più pagine della stessa sessione.
+ *
+ * Se viene passato un customTemplate, il prompt viene restituito per intero come `stable`
+ * (con placeholder risolti): il caching funzionerà solo se il template custom non usa
+ * {{prevContext}}/{{retryMode}}, altrimenti degrada silenziosamente a "no cache hit".
+ */
+export const getClaudeTranslateSystemPromptBlocks = (
+  sourceLang: string,
+  prevContext: string,
+  legalContext: boolean = true,
+  retryReason?: string,
+  customTemplate?: string,
+  model?: string
+): { stable: string; variable: string } => {
+  const hasCustom = !!(customTemplate && customTemplate.trim().length > 0);
+  if (hasCustom) {
+    return {
+      stable: getClaudeTranslateSystemPrompt(sourceLang, prevContext, legalContext, retryReason, customTemplate, model),
+      variable: '',
+    };
+  }
+
+  const isLite = model ? isLiteModel(model) : false;
+  const template = isLite ? LITE_TRANSLATION_PROMPT_TEMPLATE : CLAUDE_TRANSLATION_PROMPT_TEMPLATE;
+
+  // Split point: tutto ciò che sta dopo questo marker è dinamico (prevContext + retryMode).
+  // Il default CLAUDE usa il tag <context_previous>; il LITE usa "CONTESTO PRECEDENTE".
+  const marker = isLite ? 'CONTESTO PRECEDENTE' : '<context_previous>';
+  const markerIdx = template.indexOf(marker);
+  if (markerIdx === -1) {
+    return {
+      stable: getClaudeTranslateSystemPrompt(sourceLang, prevContext, legalContext, retryReason, customTemplate, model),
+      variable: '',
+    };
+  }
+
+  const rawStable = template.slice(0, markerIdx);
+  const rawVariable = template.slice(markerIdx);
+
+  const stable = rawStable
+    .replace('{{sourceLang}}', getArticledLanguage(sourceLang))
+    .replace('{{legalContext}}', legalContext ? buildLegalText(sourceLang) : '')
+    .replace(/\n{3,}/g, '\n\n')
+    .trim();
+
+  const variable = rawVariable
+    .replace('{{prevContext}}', prevContext ? prevContext.slice(-4000) : 'Nessun contesto precedente.')
+    .replace('{{retryMode}}', buildRetryBlock(retryReason))
+    .replace(/\n{3,}/g, '\n\n')
+    .trim();
+
+  return { stable, variable };
+};
 
 /**
- * Prefill vuoto per il messaggio assistant: evita meta-testo senza contraddire le regole.
+ * Istruzione utente: identifica chiaramente la pagina target e le immagini di contesto.
+ * Le etichette [PAGINA TARGET] e [CONTESTO ...] devono corrispondere esattamente
+ * a quelle usate nei contentBlocks del service per evitare ambiguità al modello.
+ */
+export const getClaudeTranslateUserInstruction = (pageNumber: number, sourceLanguage: string) =>
+`Traduci la pagina ${pageNumber} dal ${sourceLanguage} all'italiano.
+L'immagine etichettata [PAGINA TARGET] è l'unica da tradurre. Le immagini [CONTESTO PRECEDENTE] e [CONTESTO SUCCESSIVO] sono solo riferimento visivo.
+Inizia direttamente con la traduzione in italiano.`;
+
+/**
+ * Prefill vuoto per il messaggio assistant.
  */
 export const getClaudeAssistantPrefill = () => '';

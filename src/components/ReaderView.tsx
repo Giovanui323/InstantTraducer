@@ -59,7 +59,7 @@ interface ReaderViewProps {
   verificationsMeta?: Record<number, { model: string; savedAt: number }>;
   userHighlights: Record<number, UserHighlight[]>;
   userNotes: Record<number, UserNote[]>;
-  onAddHighlight: (page: number, start: number, end: number, text: string, color?: string) => void;
+  onAddHighlight: (page: number, start: number, end: number, text: string, color?: string, quote?: { exact: string; prefix: string; suffix: string }, pdfRect?: import('../utils/pdfCoordinates').PdfRect) => void;
   onRemoveHighlight: (page: number, id: string) => void;
   onAddNote: (page: number, start: number, end: number, text: string, content: string) => void;
   onUpdateNote: (page: number, id: string, content: string) => void;
@@ -420,16 +420,19 @@ export const ReaderView: React.FC<ReaderViewProps> = ({
   const frameDims = useMemo(() => {
     const dims = Object.values(pageDims) as { width: number; height: number }[];
     const valid = dims.filter((d) => Boolean(d?.width) && Boolean(d?.height));
+    if (valid.length === 0) return { width: 595, height: 842 };
+
     const portrait = valid.filter((d) => d.height >= d.width);
     const basis = portrait.length > 0 ? portrait : valid;
-    if (basis.length === 0) return { width: 595, height: 842 };
-    let maxW = 595;
-    let maxH = 842;
-    for (const d of basis) {
-      if (d.width > maxW) maxW = d.width;
-      if (d.height > maxH) maxH = d.height;
-    }
-    return { width: maxW, height: maxH };
+    
+    const sortedW = [...basis].sort((a, b) => a.width - b.width);
+    const sortedH = [...basis].sort((a, b) => a.height - b.height);
+    const midIdx = Math.floor(basis.length / 2);
+    
+    return { 
+      width: Math.max(300, sortedW[midIdx].width), 
+      height: Math.max(400, sortedH[midIdx].height) 
+    };
   }, [pageDims]);
 
   const effectiveScale = useMemo(() => {
@@ -612,6 +615,7 @@ export const ReaderView: React.FC<ReaderViewProps> = ({
                 page={p}
                 idx={idx}
                 dims={dims}
+                frameDims={frameDims}
                 effectiveScale={effectiveScale}
                 isTranslatedMode={isTranslatedMode}
                 isManualMode={isManualMode}
@@ -623,6 +627,7 @@ export const ReaderView: React.FC<ReaderViewProps> = ({
                 showHighlights={showHighlights}
                 showUserNotes={showUserNotes}
                 isHighlightToolActive={isHighlightToolActive}
+                highlightColor={highlightColor as import('../utils/highlightStyles').HighlightColor}
                 isNoteToolActive={isNoteToolActive}
                 isEraserToolActive={isEraserToolActive}
                 copiedPage={copiedPage}

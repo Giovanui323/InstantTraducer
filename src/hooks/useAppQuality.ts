@@ -241,6 +241,29 @@ export const useAppQuality = ({
       if (!report) throw new Error("Errore durante la verifica qualità.");
       if (verificationRunIdRef.current[page] !== nextRunId) return;
 
+      // HEURISTIC OVERRIDE: If the model mentioned errors or hallucinations but forgot to set severity to severe
+      const lowerSummary = (report.summary || "").toLowerCase();
+      const lowerHint = (report.retryHint || "").toLowerCase();
+      const combined = `${lowerSummary} ${lowerHint}`;
+
+      const isSevereErrorDetected = 
+        // Quality/Language
+        combined.includes("trascrizione") || combined.includes("lingua originale") || 
+        combined.includes("non è una traduzione") || combined.includes("identico parola per parola") ||
+        // Hallucinations/Accuracy
+        combined.includes("allucinazioni") || combined.includes("gravi errori") || 
+        combined.includes("errore di senso") || combined.includes("inverte il senso") ||
+        combined.includes("sostituito con") || combined.includes("sostituita con") ||
+        combined.includes("omesso") || combined.includes("omissione") ||
+        // English keywords for common OR models
+        combined.includes("hallucination") || combined.includes("wrong language") ||
+        combined.includes("sense inverted") || combined.includes("not a translation");
+      
+      if (isSevereErrorDetected && report.severity !== 'severe') {
+        log.warning(`[QUALITY] Heuristic override: errore grave o allucinazione rilevata ma severity='${report.severity}'. Forza a 'severe'.`);
+        report.severity = 'severe';
+      }
+
       updateProgress('Elaborazione risposta…');
       propsRef.current.appendPageConsole(page, `Verifica qualità: ${(report.severity || 'ok').toUpperCase()}${report.summary ? ` — ${report.summary}` : ''}`);
 

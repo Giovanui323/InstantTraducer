@@ -1,10 +1,10 @@
 {
   "name": "instanttraducer",
-  "productName": "InstantTraducer",
+  "productName": "iTraducer",
   "description": "The fastest way to translate your PDF books with AI",
   "author": "User",
   "private": true,
-  "version": "4.1.31",
+  "version": "4.4.3",
   "type": "module",
   "scripts": {
     "dev": "vite",
@@ -23,7 +23,7 @@
   },
   "build": {
     "appId": "com.instanttraducer.app",
-    "productName": "InstantTraducer",
+    "productName": "iTraducer",
     "artifactName": "${productName}-${version}-${arch}.${ext}",
     "forceCodeSigning": false,
     "npmRebuild": true,

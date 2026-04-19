@@ -4,6 +4,7 @@ import { executePageTranslation, TranslationExecutionContext, TranslationExecuti
 import { buildJpegDataUrlFromBase64, downscaleDataUrlToJpeg, estimateBytesFromBase64 } from '../../utils/imageUtils';
 import { PAGE_CACHE_JPEG_QUALITY, PAGE_CACHE_MAX_EDGE } from '../../constants';
 import { verifyQualityAdapter } from '../aiAdapter';
+import { sleep } from '../../utils/async';
 
 export interface BackgroundJobState {
   fileId: string;
@@ -364,13 +365,28 @@ export class TranslationJobRunner {
           if (data.translations) Object.assign(this.translationMap, data.translations);
           if (data.translationsMeta) Object.assign(this.translationsMeta, data.translationsMeta);
           if (data.annotations) Object.assign(this.annotations, data.annotations);
-          // verifications not usually in updateLibrary from executor, but safe to ignore if missing
+          
+          // CRITICAL FIX: Add retry logic for background saves
+          let success = false;
+          let saveAttempts = 0;
+          const MAX_SAVE_ATTEMPTS = 3;
 
-          // Use provided priority (defaults to BACKGROUND if not specified, but Executor sends CRITICAL on completion)
-          const success = await this.saveWithPriority(data, priority);
+          while (saveAttempts < MAX_SAVE_ATTEMPTS) {
+             success = await this.saveWithPriority({
+               ...data,
+               fileName: this.metadata.name
+             }, priority);
+             if (success) break;
+
+             saveAttempts++;
+             if (saveAttempts < MAX_SAVE_ATTEMPTS) {
+                 log.warn(`[Runner] Salvataggio respinto (Tentativo ${saveAttempts}/${MAX_SAVE_ATTEMPTS}). Riprovo tra 1s...`);
+                 await sleep(1000);
+             }
+          }
 
           if (!success) {
-            const msg = "Salvataggio su disco fallito (File bloccato o errore I/O). Job in pausa.";
+            const msg = "Salvataggio su disco fallito dopo vari tentativi. Verifica lo stato del progetto. Job in pausa.";
             log.error(`[Runner] ${msg}`);
             this.pause();
             throw new Error(msg);

@@ -4,7 +4,7 @@ import { log } from "./logger";
 import { cleanTranslationText } from "./textClean";
 import { retry, withTimeout } from "../utils/async";
 import { safeParseJsonObject } from "../utils/json";
-import { getClaudeTranslateSystemPrompt, getClaudeTranslateUserInstruction, getClaudeAssistantPrefill } from './prompts/claude';
+import { getClaudeTranslateSystemPromptBlocks, getClaudeTranslateUserInstruction, getClaudeAssistantPrefill } from './prompts/claude';
 import { getMetadataExtractionPrompt, buildRetryInstruction } from './prompts/shared';
 import { getVerifyQualitySystemPrompt } from "./verifierPrompts";
 import { AI_VERIFICATION_TIMEOUT_MS } from "../constants";
@@ -43,12 +43,15 @@ export const translateWithClaude = async (
   const imageBytesApprox = Math.floor((imageBase64.length * 3) / 4);
   const isRetry = Boolean(extraInstruction && extraInstruction.trim().length > 0);
   const retryReason = isRetry ? extraInstruction!.trim() : undefined;
-  const systemPrompt = getClaudeTranslateSystemPrompt(sourceLanguage, previousContext, legalContext ?? true, retryReason, customPrompt);
+  const { stable: systemStable, variable: systemVariable } = getClaudeTranslateSystemPromptBlocks(
+    sourceLanguage, previousContext, legalContext ?? true, retryReason, customPrompt, model
+  );
 
   if (onProgress) onProgress(`Preparazione richiesta Claude (${model})`);
   log.wait(`[CLAUDE-TRANSLATION] Richiesta (${model})...`, {
     imageKB: Math.round(imageBytesApprox / 1024),
-    systemPromptChars: systemPrompt.length,
+    systemStableChars: systemStable.length,
+    systemVariableChars: systemVariable.length,
     previousContextChars: previousContext?.length || 0,
     aborted: Boolean(signal?.aborted)
   });
@@ -62,15 +65,15 @@ export const translateWithClaude = async (
       contentBlocks.push({ type: 'text', text: instruction });
 
       if (prevPageImageBase64 && prevPageNumber) {
-        contentBlocks.push({ type: 'text', text: `CONTESTO (NON tradurre): pagina precedente ${prevPageNumber}` });
+        contentBlocks.push({ type: 'text', text: `[CONTESTO PRECEDENTE] Pagina ${prevPageNumber} — NON tradurre, solo riferimento visivo.` });
         contentBlocks.push({ type: 'image', source: { type: 'base64', media_type: 'image/jpeg', data: prevPageImageBase64 } });
       }
 
-      contentBlocks.push({ type: 'text', text: `PAGINA DA TRADURRE: Pagina ${pageNumber}` });
+      contentBlocks.push({ type: 'text', text: `[PAGINA TARGET] Pagina ${pageNumber} — TRADUCI QUESTA.` });
       contentBlocks.push({ type: 'image', source: { type: 'base64', media_type: 'image/jpeg', data: imageBase64 } });
 
       if (nextPageImageBase64 && nextPageNumber) {
-        contentBlocks.push({ type: 'text', text: `CONTESTO (NON tradurre): pagina successiva ${nextPageNumber}` });
+        contentBlocks.push({ type: 'text', text: `[CONTESTO SUCCESSIVO] Pagina ${nextPageNumber} — NON tradurre, solo riferimento visivo.` });
         contentBlocks.push({ type: 'image', source: { type: 'base64', media_type: 'image/jpeg', data: nextPageImageBase64 } });
       }
 
@@ -81,16 +84,42 @@ export const translateWithClaude = async (
         dangerouslyAllowBrowser: true
       });
 
+      // Determina se il modello supporta l'Adaptive Thinking (Claude 4.5+, 4.6+)
+      const supportsThinking = model.includes('4.5') || model.includes('4.6');
+
       const assistantPrefill = getClaudeAssistantPrefill();
-      messageResponse = await anthropic.messages.create({
+
+      // Prompt caching: il prefisso stabile è marcato come ephemeral così Anthropic
+      // può riutilizzarlo tra chiamate consecutive nella stessa sessione (TTL ~5 min).
+      // Il blocco variable (prevContext + retryMode) cambia per pagina e resta non-cacheato.
+      const systemBlocks: Anthropic.TextBlockParam[] = [
+        { type: 'text', text: systemStable, cache_control: { type: 'ephemeral' } },
+      ];
+      if (systemVariable && systemVariable.length > 0) {
+        systemBlocks.push({ type: 'text', text: systemVariable });
+      }
+
+      const createParams: any = {
         model: model,
-        max_tokens: 8192,
-        system: systemPrompt,
+        system: systemBlocks,
         messages: [
           ...messages,
           ...(assistantPrefill ? [{ role: 'assistant' as const, content: assistantPrefill }] : []),
         ],
-      }, { signal });
+      };
+
+      if (supportsThinking) {
+        // Modelli avanzati (Sonnet/Opus 4.5+): abilita Adaptive Thinking e alza i token.
+        // temperature: 1 è OBBLIGATORIO quando thinking è abilitato (requisito API Anthropic).
+        createParams.max_tokens = 16000;
+        createParams.thinking = { type: 'enabled', budget_tokens: 8000 };
+        createParams.temperature = 1;
+      } else {
+        // Haiku e modelli precedenti: chiamata standard senza thinking
+        createParams.max_tokens = 8192;
+      }
+
+      messageResponse = await anthropic.messages.create(createParams, { signal });
     } catch (e: any) {
       if (e?.name === 'AbortError') {
         log.warning("Richiesta Claude annullata (AbortError).");
@@ -104,7 +133,16 @@ export const translateWithClaude = async (
     if (onProgress) onProgress(`Risposta Claude ricevuta (request_id: ${requestId})`);
 
     if (messageResponse.usage) {
-       trackUsage(model, messageResponse.usage.input_tokens || 0, messageResponse.usage.output_tokens || 0);
+       const usage = messageResponse.usage as Anthropic.Usage & {
+         cache_creation_input_tokens?: number | null;
+         cache_read_input_tokens?: number | null;
+       };
+       trackUsage(model, usage.input_tokens || 0, usage.output_tokens || 0);
+       const cacheRead = usage.cache_read_input_tokens || 0;
+       const cacheCreate = usage.cache_creation_input_tokens || 0;
+       if (cacheRead > 0 || cacheCreate > 0) {
+         log.info(`[CLAUDE-CACHE] hit=${cacheRead} create=${cacheCreate} input=${usage.input_tokens || 0} output=${usage.output_tokens || 0}`);
+       }
     }
 
     const text = (messageResponse.content?.find(c => c.type === 'text') as Anthropic.TextBlock)?.text || "";
@@ -206,7 +244,11 @@ export const verifyTranslationQualityWithClaude = async (params: {
         return await anthropic.messages.create({
           model: verifierModel,
           max_tokens: 4096,
-          system: systemPrompt,
+          // Il verifier prompt è interamente stabile per sessione (dipende solo da
+          // legalContext/sourceLanguage): ephemeral caching riduce il costo di ogni pagina.
+          system: [
+            { type: 'text', text: systemPrompt, cache_control: { type: 'ephemeral' } },
+          ],
           messages: messages
         }, { signal });
       })(),
@@ -214,11 +256,19 @@ export const verifyTranslationQualityWithClaude = async (params: {
       () => log.warning(`Timeout verifica qualità Claude per pagina ${pageNumber} (${AI_VERIFICATION_TIMEOUT_MS}ms)`)
     );
     log.info(`[CLAUDE-HANDSHAKE] Risposta ricevuta per pagina ${pageNumber}.`);
-    
+
     // Track usage
     if (data.usage) {
-      const { input_tokens, output_tokens } = data.usage;
-      trackUsage(verifierModel, input_tokens || 0, output_tokens || 0);
+      const usage = data.usage as Anthropic.Usage & {
+        cache_creation_input_tokens?: number | null;
+        cache_read_input_tokens?: number | null;
+      };
+      trackUsage(verifierModel, usage.input_tokens || 0, usage.output_tokens || 0);
+      const cacheRead = usage.cache_read_input_tokens || 0;
+      const cacheCreate = usage.cache_creation_input_tokens || 0;
+      if (cacheRead > 0 || cacheCreate > 0) {
+        log.info(`[CLAUDE-VERIFY-CACHE] hit=${cacheRead} create=${cacheCreate} input=${usage.input_tokens || 0} output=${usage.output_tokens || 0}`);
+      }
     }
   } finally {
     clearTimeout(stalledTimer);

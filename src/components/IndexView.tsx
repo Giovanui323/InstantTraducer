@@ -53,9 +53,8 @@ export const IndexView: React.FC<IndexViewProps> = ({ text, onPageClick }) => {
   if (!isIndex) {
     return (
       <div className="mx-auto max-w-[70ch]">
-        <div className="text-stone-900 leading-relaxed book-text" style={{
-          fontFamily: 'Iowan Old Style, Palatino, "Palatino Linotype", "Book Antiqua", Georgia, Cambria, "Times New Roman", Times, serif',
-          lineHeight: 1.28
+        <div className="text-reader-light-text leading-relaxed book-text font-reader" style={{
+          lineHeight: 1.55
         }}>
           {text}
         </div>
@@ -68,12 +67,12 @@ export const IndexView: React.FC<IndexViewProps> = ({ text, onPageClick }) => {
       {cols.map((c, i) => {
         const entries = parseEntries(c);
         return (
-          <div key={i} className={`${cols.length === 2 && i === 0 ? 'border-r border-black/10 pr-6' : ''}`}>
+          <div key={i} className={`${cols.length === 2 && i === 0 ? 'border-r border-reader-light-border pr-6' : ''}`}>
             <div className="space-y-1.5">
               {entries.map((e, idx) => {
                 if (e.isHeading) {
                   return (
-                    <div key={idx} className="mt-3 mb-2 font-semibold tracking-wide text-stone-900">
+                    <div key={idx} className="mt-4 mb-2 font-semibold tracking-wide text-reader-light-text uppercase text-[0.85em]">
                       {e.label}
                     </div>
                   );
@@ -81,14 +80,18 @@ export const IndexView: React.FC<IndexViewProps> = ({ text, onPageClick }) => {
                 if (e.page) {
                   const pNum = parseInt(e.page, 10);
                   return (
-                    <div key={idx} className="grid grid-cols-[auto_1fr_auto] items-baseline gap-2 group cursor-pointer" onClick={() => !isNaN(pNum) && onPageClick?.(pNum)}>
-                      <span className="truncate group-hover:text-accent transition-colors duration-200">{e.label}</span>
-                      <div className="border-t border-dotted border-stone-400 translate-y-[0.25em]" />
-                      <span className="tabular-nums font-medium group-hover:text-accent transition-colors duration-200 underline decoration-dotted underline-offset-4">{e.page}</span>
+                    <div
+                      key={idx}
+                      className="grid grid-cols-[auto_1fr_auto] items-baseline gap-2 group cursor-pointer rounded-md px-1.5 -mx-1.5 py-0.5 hover:bg-marker-yellow/40 transition-colors duration-150"
+                      onClick={() => !isNaN(pNum) && onPageClick?.(pNum)}
+                    >
+                      <span className="truncate text-reader-light-text group-hover:text-reader-light-text transition-colors duration-150">{e.label}</span>
+                      <div className="border-t border-dotted border-reader-light-text-soft/40 translate-y-[0.25em]" />
+                      <span className="tabular-nums font-semibold text-reader-light-text-soft group-hover:text-accent transition-colors duration-150">{e.page}</span>
                     </div>
                   );
                 }
-                return <div key={idx} className="text-stone-800">{e.label}</div>;
+                return <div key={idx} className="text-reader-light-text-soft">{e.label}</div>;
               })}
             </div>
           </div>

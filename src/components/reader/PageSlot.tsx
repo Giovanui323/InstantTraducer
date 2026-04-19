@@ -7,6 +7,8 @@ import { safeCopy } from '../../utils/clipboard';
 import { toDisplayableImageSrc } from '../../utils/imageUtils';
 import { PAGE_SPLIT, splitColumns } from '../../utils/textUtils';
 import { getThemeClasses, READER_THEMES } from '../../styles/readerStyles';
+import { PdfRect } from '../../utils/pdfCoordinates';
+import { HighlightColor } from '../../utils/highlightStyles';
 
 interface PageSlotProps {
   page: number;
@@ -24,6 +26,7 @@ interface PageSlotProps {
   showHighlights: boolean;
   showUserNotes: boolean;
   isHighlightToolActive: boolean;
+  highlightColor?: HighlightColor;
   isNoteToolActive: boolean;
   isEraserToolActive: boolean;
   copiedPage: number | null;
@@ -43,7 +46,7 @@ interface PageSlotProps {
   onCopy: (p: number) => void;
   onRetry: (p: number) => void;
   onStop?: (p: number) => void;
-  onAddHighlight: (page: number, start: number, end: number, text: string, color?: string) => void;
+  onAddHighlight: (page: number, start: number, end: number, text: string, color?: string, quote?: { exact: string; prefix: string; suffix: string }, pdfRect?: PdfRect) => void;
   onRemoveHighlight: (page: number, id: string) => void;
   onAddNote: (page: number, start: number, end: number, text: string, content: string) => void;
   onUpdateNote: (page: number, id: string, content: string) => void;
@@ -69,6 +72,7 @@ export const PageSlot: React.FC<PageSlotProps> = ({
   showHighlights,
   showUserNotes,
   isHighlightToolActive,
+  highlightColor,
   isNoteToolActive,
   isEraserToolActive,
   copiedPage,
@@ -119,10 +123,21 @@ export const PageSlot: React.FC<PageSlotProps> = ({
   const highlights = showHighlights ? (userHighlights[p] || []) : [];
   const notes = showUserNotes ? (userNotes[p] || []) : [];
 
+  // In split pages each column is its own MarkdownText with its own local
+  // text (the resolver runs per-instance). Passing the full highlights array
+  // to both columns makes the "wrong" column try to re-anchor highlights
+  // that belong to the other side — producing ghost highlights elsewhere.
+  // Partition by the column's offset range before handing them off.
+  const leftLen = leftText?.length ?? 0;
+  const leftHighlights = isSplit ? highlights.filter(h => h.end <= leftLen) : highlights;
+  const rightHighlights = isSplit ? highlights.filter(h => h.start >= rightBaseOffset) : highlights;
+  const leftNotes = isSplit ? notes.filter(n => n.end <= leftLen) : notes;
+  const rightNotes = isSplit ? notes.filter(n => n.start >= rightBaseOffset) : notes;
+
   return (
-    <div className="flex gap-4 items-start w-fit mx-auto">
+    <div className="flex gap-4 items-start justify-center">
       <div
-        className={`relative group shrink-0 ${isTranslatedMode ? 'bg-white shadow-[0_2px_12px_rgba(0,0,0,0.15)] border border-black/[0.06] rounded-sm' : 'bg-transparent shadow-none border-0 rounded-none overflow-visible'}`}
+        className={`relative group shrink-0 min-w-0 ${isTranslatedMode ? 'bg-reader-light-bg shadow-elev-3 border border-reader-light-border rounded-lg' : 'bg-transparent shadow-none border-0 rounded-none overflow-visible'}`}
         style={{
           width: (dims.width * totalScale),
           minHeight: (dims.height * totalScale),
@@ -160,18 +175,25 @@ export const PageSlot: React.FC<PageSlotProps> = ({
           <>
             <div
               className={`${getThemeClasses(translationTheme)} ${navigationMode === 'flip' ? 'h-full overflow-auto' : 'min-h-full'} relative select-text custom-scrollbar-light shadow-inner ${isSplit ? 'px-[5%] py-[5.5%]' : 'px-[10%] py-[8%]'}`}
-              style={{
-                fontSize: `${13.5 * totalScale}px`,
-                fontFamily: "Georgia, 'Times New Roman', serif",
-                lineHeight: '1.65',
-                backgroundImage: READER_THEMES[translationTheme ?? 'light']?.gradient || READER_THEMES.light.gradient
-              }}
+          style={{
+            fontSize: `${13.5 * totalScale}px`,
+            fontFamily: "Literata, 'Iowan Old Style', Palatino, Georgia, serif",
+            lineHeight: '1.55',
+            textRendering: 'optimizeLegibility',
+            fontKerning: 'normal',
+            fontVariantLigatures: 'common-ligatures contextual',
+            fontFeatureSettings: '"kern" 1, "liga" 1, "clig" 1, "calt" 1, "onum" 1',
+            letterSpacing: '0.005em',
+            backgroundImage: READER_THEMES[translationTheme ?? 'light']?.gradient || READER_THEMES.light.gradient,
+            overflowWrap: 'break-word',
+            wordBreak: 'break-word'
+          }}
             >
               {isIndexPage ? (
                 <IndexView text={translatedText!} onPageClick={onPageClick} />
               ) : isSplit ? (
                 <div className="flex h-full gap-8">
-                  <div className="flex-1 border-r border-black/10 pr-6">
+                  <div className="flex-1 border-r border-reader-light-border pr-6">
                     <MarkdownText
                       align="justify"
                       text={leftText ?? ''}
@@ -180,14 +202,15 @@ export const PageSlot: React.FC<PageSlotProps> = ({
                       activeResultId={activeResultId}
                       pageNumber={p}
                       baseOffset={0}
-                      highlights={highlights}
-                      userNotes={notes}
-                      onAddHighlight={(start, end, text, color) => onAddHighlight(p, start, end, text, color)}
+                      highlights={leftHighlights}
+                      userNotes={leftNotes}
+                      onAddHighlight={(start, end, text, color, quote, pdfRect) => onAddHighlight(p, start, end, text, color, quote, pdfRect)}
                       onRemoveHighlight={(id) => onRemoveHighlight(p, id)}
                       onAddNote={(start, end, text) => onOpenNoteModal(p, start, end, text)}
                       onUpdateNote={(id, content) => onUpdateNote(p, id, content)}
                       onRemoveNote={(id) => onRemoveNote(p, id)}
                       isHighlightToolActive={isHighlightToolActive}
+                      highlightColor={highlightColor}
                       isNoteToolActive={isNoteToolActive}
                       isEraserToolActive={isEraserToolActive}
                       onNoteClick={(id) => onViewNote(p, id)}
@@ -202,14 +225,15 @@ export const PageSlot: React.FC<PageSlotProps> = ({
                       activeResultId={activeResultId}
                       pageNumber={p}
                       baseOffset={rightBaseOffset}
-                      highlights={highlights}
-                      userNotes={notes}
-                      onAddHighlight={(start, end, text, color) => onAddHighlight(p, start, end, text, color)}
+                      highlights={rightHighlights}
+                      userNotes={rightNotes}
+                      onAddHighlight={(start, end, text, color, quote, pdfRect) => onAddHighlight(p, start, end, text, color, quote, pdfRect)}
                       onRemoveHighlight={(id) => onRemoveHighlight(p, id)}
                       onAddNote={(start, end, text) => onOpenNoteModal(p, start, end, text)}
                       onUpdateNote={(id, content) => onUpdateNote(p, id, content)}
                       onRemoveNote={(id) => onRemoveNote(p, id)}
                       isHighlightToolActive={isHighlightToolActive}
+                      highlightColor={highlightColor}
                       isNoteToolActive={isNoteToolActive}
                       isEraserToolActive={isEraserToolActive}
                       onNoteClick={(id) => onViewNote(p, id)}
@@ -227,12 +251,13 @@ export const PageSlot: React.FC<PageSlotProps> = ({
                     pageNumber={p}
                     highlights={highlights}
                     userNotes={notes}
-                    onAddHighlight={(start, end, text, color) => onAddHighlight(p, start, end, text, color)}
+                    onAddHighlight={(start, end, text, color, quote, pdfRect) => onAddHighlight(p, start, end, text, color, quote, pdfRect)}
                     onRemoveHighlight={(id) => onRemoveHighlight(p, id)}
                     onAddNote={(start, end, text) => onOpenNoteModal(p, start, end, text)}
                     onUpdateNote={(id, content) => onUpdateNote(p, id, content)}
                     onRemoveNote={(id) => onRemoveNote(p, id)}
                     isHighlightToolActive={isHighlightToolActive}
+                    highlightColor={highlightColor}
                     isNoteToolActive={isNoteToolActive}
                     isEraserToolActive={isEraserToolActive}
                     onNoteClick={(id) => onViewNote(p, id)}
@@ -244,10 +269,10 @@ export const PageSlot: React.FC<PageSlotProps> = ({
             {/* Copy button */}
             <button
               onClick={() => onCopy(p)}
-              className="absolute top-4 right-4 p-2.5 bg-white/80 hover:bg-white backdrop-blur-sm rounded-xl opacity-0 group-hover:opacity-100 transition-all z-10 shadow-sm border border-black/5 text-gray-500 hover:text-blue-600"
+              className="absolute top-4 right-4 p-2.5 bg-white/80 hover:bg-white backdrop-blur-sm rounded-lg opacity-0 group-hover:opacity-100 transition-all duration-200 ease-out-expo z-10 shadow-elev-1 hover:shadow-elev-2 border border-reader-light-border text-reader-light-text-soft hover:text-accent"
               title="Copia traduzione"
             >
-              {copiedPage === p ? <Check size={16} className="text-green-600" /> : <Copy size={16} />}
+              {copiedPage === p ? <Check size={16} className="text-success" /> : <Copy size={16} />}
             </button>
 
             {/* Disclaimer buttons */}

@@ -51,9 +51,8 @@ export const __resetGeminiStateForTests = () => {
   __resetGeminiRetryStateForTests();
 };
 
-import { getGeminiTranslateSystemPrompt, getGeminiTranslateUserInstruction } from './prompts/gemini';
+import { getGeminiTranslateSystemPrompt, getGeminiTranslateUserInstruction, getGeminiVerifyQualitySystemPrompt } from './prompts/gemini';
 import { getMetadataExtractionPrompt, buildRetryInstruction } from './prompts/shared';
-import { getVerifyQualitySystemPrompt } from "./verifierPrompts";
 
 const isQuotaError = (e: any): boolean => {
   const msg = String(e?.error?.message || e?.message || "").toLowerCase();
@@ -684,7 +683,7 @@ export const verifyTranslationQualityWithGemini = async (params: {
 
   const systemInstruction = customPrompt && customPrompt.trim().length > 0 
     ? customPrompt 
-    : getVerifyQualitySystemPrompt(legalContext, sourceLanguage, verifierModel);
+    : getGeminiVerifyQualitySystemPrompt(legalContext, sourceLanguage, verifierModel);
 
   const userParts: any[] = [
     {
@@ -847,6 +846,11 @@ export const testGeminiConnection = async (apiKey: string, model: GeminiModel, s
     });
 
     const text = result.text;
+
+    // Track usage for connection test
+    if (result?.usageMetadata) {
+      trackUsage(model, result.usageMetadata.promptTokenCount || 0, result.usageMetadata.candidatesTokenCount || 0);
+    }
 
     if (text && text.trim().length > 0) {
       log.success(`Test riuscito: "${text.trim()}"`);

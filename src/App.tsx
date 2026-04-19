@@ -52,7 +52,8 @@ import {
   HomeView,
   MainToolbar,
   PagePreviewStrip,
-  GlobalLoadingOverlay
+  GlobalLoadingOverlay,
+  SplashScreen
 } from './components';
 
 import { PAGE_RENDER_TIMEOUT_MS } from './constants';
@@ -81,7 +82,8 @@ const App: React.FC = () => {
   const sessionId = useMemo(() => Math.random().toString(36).slice(2, 10), []);
 
   // --- App Version State ---
-  const [appVersion, setAppVersion] = useState<string>('4.1.31');
+  const [appVersion, setAppVersion] = useState<string>('4.3.1');
+  const [showSplash, setShowSplash] = useState<boolean>(true);
 
   useEffect(() => {
     if (window.electronAPI?.getAppVersion) {
@@ -101,7 +103,7 @@ const App: React.FC = () => {
   const croppedImagesRef = useRef<Record<number, string>>({});
   const pageRotationsRef = useRef<Record<number, number>>({});
   const pageReplacementsRef = useRef<Record<number, PageReplacement>>({});
-  const lastRenderedRef = useRef<Record<string, { page: number, scale: number, timestamp: number }>>({});
+  const lastRenderedRef = useRef<Record<string, { page: number, scale: number, rotation: number, timestamp: number }>>({});
   const pageImagesIndexRef = useRef<{ sources: Record<number, string>; crops: Record<number, string> }>({ sources: {}, crops: {} });
   const annotationMapRef = useRef<Record<number, PageAnnotation[]>>({});
   const verificationMapRef = useRef<Record<number, PageVerification>>({}); // Shared ref for verification map to break circular dependency
@@ -618,8 +620,11 @@ const App: React.FC = () => {
     if (!isTranslatedMode && !isReaderMode) return;
     if (!currentPage || (!library.currentProjectFileId && !pdfDoc)) return;
 
+    const abortCtrl = new AbortController();
+    const signal = abortCtrl.signal;
+
     const renderPageWithRetry = async (p: number, attempt: number = 1, opts?: { quality?: number, scale?: number }): Promise<string> => {
-      if (!isMounted) throw new Error('cancelled');
+      if (!isMounted || signal.aborted) throw new Error('cancelled');
       if (!pdfDoc) throw new Error('PDF document not available');
 
       const startTime = Date.now();
@@ -674,7 +679,7 @@ const App: React.FC = () => {
           pageReplacementsRef,
           pageRotationsRef,
           loadReplacementPdfDoc: getCachedReplacementPdfDoc
-        }, { scale, jpegQuality: quality, timeoutMs });
+        }, { scale, jpegQuality: quality, timeoutMs, signal });
 
         const renderTime = Date.now() - startTime;
         pdfRenderAnalytics.recordRenderSuccess(p, renderTime, attempt);
@@ -709,7 +714,7 @@ const App: React.FC = () => {
 
     const ensureImageLoaded = async (p: number) => {
       if (!isMounted) return;
-      if (originalImages[p] || corruptedPages.has(p)) return;
+      if (originalImagesRef.current[p] || corruptedPages.has(p)) return;
       if (loadingImagesRef.current.has(p)) return;
 
       loadingImagesRef.current.add(p);
@@ -789,8 +794,11 @@ const App: React.FC = () => {
     };
 
     void ensureImageLoaded(currentPage);
-    return () => { isMounted = false; };
-  }, [currentPage, isTranslatedMode, isReaderMode, pageImagesIndex.sources, library.currentProjectFileId, originalImages, pdfDoc, getCachedReplacementPdfDoc, setOriginalImages]);
+    return () => {
+      isMounted = false;
+      abortCtrl.abort();
+    };
+  }, [currentPage, isTranslatedMode, isReaderMode, pageImagesIndex.sources, library.currentProjectFileId, pdfDoc, getCachedReplacementPdfDoc, setOriginalImages]);
 
   const annotations = useAppAnnotations(metadata, library.currentProjectFileId, library.updateLibrary);
 
@@ -1873,9 +1881,9 @@ const App: React.FC = () => {
     const refIdx = allRefs.indexOf(cRef as any);
     const canvasKey = refIdx !== -1 ? `canvas_${refIdx}` : 'default';
 
+    const rotation = pageRotationsRef.current?.[pageNum] || 0;
     const last = lastRenderedRef.current[canvasKey];
-    const now = Date.now();
-    if (last && last.page === pageNum && Math.abs(last.scale - renderScale) < 0.001 && (now - last.timestamp) < 500) {
+    if (last && last.page === pageNum && Math.abs(last.scale - renderScale) < 0.001 && last.rotation === rotation) {
       return;
     }
 
@@ -1899,7 +1907,7 @@ const App: React.FC = () => {
         { scale: renderScale }
       );
       if (dims) {
-        lastRenderedRef.current[canvasKey] = { page: pageNum, scale: renderScale, timestamp: Date.now() };
+        lastRenderedRef.current[canvasKey] = { page: pageNum, scale: renderScale, rotation, timestamp: Date.now() };
         setPageDims(prev => ({ ...prev, [pageNum]: { width: dims.width, height: dims.height } }));
       }
     } catch (e: any) {
@@ -2505,12 +2513,8 @@ const App: React.FC = () => {
       if (cancelled) return;
 
       if (!ref.current) {
-        if (attempt < 15) {
+        if (attempt < 2) {
           schedule(() => tryRender(page, ref, attempt + 1), 100);
-        } else {
-          // Canvas may legitimately not mount (e.g. off-screen in single-page view).
-          // Only log at debug level to reduce noise.
-          log.info(`[App] Canvas per pagina ${page} non montato dopo ${attempt} tentativi (skip, probabilmente fuori viewport).`);
         }
         return;
       }
@@ -2615,6 +2619,9 @@ const App: React.FC = () => {
 
   return (
     <LibraryContext.Provider value={library}>
+      {showSplash && (
+        <SplashScreen version={appVersion} onDismiss={() => setShowSplash(false)} />
+      )}
       <div className="w-screen flex flex-col bg-[#1e1e1e] text-gray-200 overflow-hidden font-sans select-none" style={{ height: '100dvh' }}>
         {showSevereErrorIndicator && (
           <div

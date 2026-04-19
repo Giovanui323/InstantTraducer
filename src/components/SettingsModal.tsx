@@ -4,7 +4,7 @@ import {
     Trash2, Trash, Folder, FileDown, LogOut, Settings, Save, AlertCircle,
     ChevronRight, ChevronLeft, Search, Eye, Download, FileText, Layout,
     Languages, MessageSquare, Shield, Smartphone, Monitor, Database,
-    Cpu, Clock, CreditCard, ExternalLink, Brain
+    Cpu, Clock, CreditCard, ExternalLink, Brain, Users
 } from 'lucide-react';
 import { AISettings, AIProvider, GeminiModel, ClaudeModel, GroqModel, SettingsSection } from '../types';
 import {
@@ -25,7 +25,8 @@ import {
     availableGeminiModels,
     availableClaudeModels,
     isGroqVisionModel,
-    DEFAULT_TRANSLATION_PROMPT_TEMPLATE
+    DEFAULT_TRANSLATION_PROMPT_TEMPLATE,
+    OPENROUTER_MODELS_LIST
 } from '../constants';
 import { CustomModelManager } from './CustomModelManager';
 import { LogViewer } from './LogViewer';
@@ -49,6 +50,21 @@ import { TranslationLogicSection, translationLogicSearchItems } from './settings
 import { AiRolesSection, aiRolesSearchItems } from './settings/sections/AiRolesSection';
 import { AiDiagnosticSection } from './settings/sections/AiDiagnosticSection';
 import { PromptsSection, promptsSearchItems } from './settings/sections/PromptsSection';
+import { AdminSection } from './settings/sections/AdminSection';
+import { ReadOnlyModelsSection } from './settings/sections/ReadOnlyModelsSection';
+import { UserPermissionsSection } from './settings/sections/UserPermissionsSection';
+import { UserApiKeysSection } from './settings/sections/UserApiKeysSection';
+import { useAdminAuth } from '../hooks/useAdminAuth';
+
+// Sezioni visibili solo agli admin (gate UX con password in AdminSection).
+const ADMIN_ONLY_SECTIONS: readonly SettingsSection[] = [
+    'aiRoles', 'apiKeys', 'testAi', 'prompts', 'translationLogic', 'costs', 'logsDiagnostic', 'userPermissions'
+];
+const isAdminOnlySection = (s: SettingsSection) => ADMIN_ONLY_SECTIONS.includes(s);
+
+// Sezioni riservate esclusivamente ai super-admin (password SUPERLUCA).
+const SUPER_ADMIN_ONLY_SECTIONS: readonly SettingsSection[] = ['prompts'];
+const isSuperAdminOnlySection = (s: SettingsSection) => SUPER_ADMIN_ONLY_SECTIONS.includes(s);
 
 interface SettingsModalProps {
     settings: AISettings;
@@ -102,11 +118,24 @@ export const SettingsModal = React.memo(({
     currentBookTitle,
     showConfirm
 }: SettingsModalProps) => {
+    // --- Admin gate ---
+    const adminAuth = useAdminAuth();
+    const { isAdmin, isSuperAdmin } = adminAuth;
+
     // --- Draft State ---
     const [draftSettings, setDraftSettings] = useState<AISettings>(settings);
-    const [activeSection, setActiveSection] = useState<SettingsSection>('aiRoles');
+    const [activeSection, setActiveSection] = useState<SettingsSection>(() => (isAdmin ? 'aiRoles' : 'modelsInUse'));
     const [isSaving, setIsSaving] = useState(false);
     const [settingsSearch, setSettingsSearch] = useState('');
+
+    // Se l'utente perde l'accesso admin (o super-admin) mentre è dentro una sezione protetta, rimanda a una vista consentita.
+    useEffect(() => {
+        if (!isAdmin && isAdminOnlySection(activeSection)) {
+            setActiveSection('modelsInUse');
+        } else if (!isSuperAdmin && isSuperAdminOnlySection(activeSection)) {
+            setActiveSection('aiRoles');
+        }
+    }, [isAdmin, isSuperAdmin, activeSection]);
     const [testStatus, setTestStatus] = useState<'idle' | 'testing' | 'success' | 'error'>('idle');
     const [testMessage, setTestMessage] = useState('');
     const [showLogViewer, setShowLogViewer] = useState(false);
@@ -460,26 +489,42 @@ export const SettingsModal = React.memo(({
         }
     };
 
-    const sectionsList = useMemo(() => ([
-        { id: 'aiRoles', label: 'Modelli & Ruoli', icon: <BrainCircuit size={14} /> },
-        { id: 'apiKeys', label: 'API Keys', icon: <Key size={14} /> },
-        { id: 'testAi', label: 'Test AI & Connessione', icon: <Activity size={14} /> },
-        { id: 'prompts', label: 'Gestione Prompt', icon: <MessageSquare size={14} /> },
-        { id: 'translationLogic', label: 'Traduzione & Logica', icon: <Zap size={14} /> },
-        { id: 'costs', label: 'Info & Costi Modelli', icon: <Info size={14} /> },
-        { id: 'libraryTrash', label: 'Libreria & Cestino', icon: <Folder size={14} /> },
-        { id: 'exportApp', label: 'Export & App', icon: <FileDown size={14} /> },
-        { id: 'logsDiagnostic', label: 'Log & Diagnostica', icon: <Settings size={14} /> }
-    ] as Array<{ id: SettingsSection; label: string; icon: React.ReactNode }>), []);
+    const sectionsList = useMemo(() => {
+        const full: Array<{ id: SettingsSection; label: string; icon: React.ReactNode }> = [
+            { id: 'aiRoles', label: 'Modelli & Ruoli', icon: <BrainCircuit size={14} /> },
+            { id: 'apiKeys', label: 'API Keys', icon: <Key size={14} /> },
+            { id: 'testAi', label: 'Test AI & Connessione', icon: <Activity size={14} /> },
+            { id: 'prompts', label: 'Gestione Prompt', icon: <MessageSquare size={14} /> },
+            { id: 'translationLogic', label: 'Traduzione & Logica', icon: <Zap size={14} /> },
+            { id: 'costs', label: 'Info & Costi Modelli', icon: <Info size={14} /> },
+            { id: 'userPermissions', label: 'Permessi Utente', icon: <Users size={14} /> },
+            { id: 'libraryTrash', label: 'Libreria & Cestino', icon: <Folder size={14} /> },
+            { id: 'exportApp', label: 'Export & App', icon: <FileDown size={14} /> },
+            { id: 'logsDiagnostic', label: 'Log & Diagnostica', icon: <Settings size={14} /> },
+            { id: 'admin', label: 'Admin', icon: <Shield size={14} /> },
+        ];
+        if (isAdmin) {
+            // Admin: tutte le sezioni operative + la sezione Admin per poter bloccare.
+            // "Gestione Prompt" è riservata ai super-admin.
+            return full.filter(s => s.id !== 'prompts' || isSuperAdmin);
+        }
+        // Non-admin: vista read-only dei modelli, le proprie API keys (se autorizzate), libreria/cestino, export e area admin per lo sblocco.
+        const visible: SettingsSection[] = ['modelsInUse', 'userApiKeys', 'libraryTrash', 'exportApp', 'admin'];
+        const extras: Array<{ id: SettingsSection; label: string; icon: React.ReactNode }> = [
+            { id: 'modelsInUse', label: 'Modelli in uso', icon: <BrainCircuit size={14} /> },
+            { id: 'userApiKeys', label: 'Le tue API Keys', icon: <Key size={14} /> },
+        ];
+        return [...extras, ...full].filter(s => visible.includes(s.id));
+    }, [isAdmin, isSuperAdmin]);
 
     const filteredSectionsList = sectionsList;
 
     const settingsSearchItems = useMemo(() => ([
         ...aiRolesSearchItems,
         ...apiKeysSearchItems,
-        ...promptsSearchItems,
+        ...(isSuperAdmin ? promptsSearchItems : []),
         ...translationLogicSearchItems
-    ]), []);
+    ]), [isSuperAdmin]);
 
     const settingsSearchResults = useMemo(() => {
         return filterSettingsSearchItems(settingsSearchItems, settingsSearch);
@@ -568,25 +613,27 @@ export const SettingsModal = React.memo(({
                             <p className="text-[11px] text-txt-muted">Configura AI, traduzione, libreria, export e diagnostica</p>
                         </div>
                     </div>
-                    <div className="hidden md:block w-[380px] px-3">
-                        <div className="relative">
-                            <Search size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-txt-faint" />
-                            <input
-                                value={settingsSearch}
-                                onChange={(e) => setSettingsSearch(e.target.value)}
-                                placeholder="Cerca nelle impostazioni…"
-                                className="w-full rounded-xl border border-border-muted bg-surface-4/50 pl-9 pr-3 py-2 text-[12px] text-txt-primary placeholder:text-txt-faint outline-none focus:border-accent/40 focus:ring-1 focus:ring-accent/20"
-                            />
-                            <div className="absolute top-full left-0 right-0 z-[400]">
-                                <SettingsSearchResults
-                                    query={settingsSearch}
-                                    results={settingsSearchResults}
-                                    onSelect={navigateToSearchItem}
-                                    onClear={() => setSettingsSearch('')}
+                    {isAdmin && (
+                        <div className="hidden md:block w-[380px] px-3">
+                            <div className="relative">
+                                <Search size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-txt-faint" />
+                                <input
+                                    value={settingsSearch}
+                                    onChange={(e) => setSettingsSearch(e.target.value)}
+                                    placeholder="Cerca nelle impostazioni…"
+                                    className="w-full rounded-xl border border-border-muted bg-surface-4/50 pl-9 pr-3 py-2 text-[12px] text-txt-primary placeholder:text-txt-faint outline-none focus:border-accent/40 focus:ring-1 focus:ring-accent/20"
                                 />
+                                <div className="absolute top-full left-0 right-0 z-[400]">
+                                    <SettingsSearchResults
+                                        query={settingsSearch}
+                                        results={settingsSearchResults}
+                                        onSelect={navigateToSearchItem}
+                                        onClear={() => setSettingsSearch('')}
+                                    />
+                                </div>
                             </div>
                         </div>
-                    </div>
+                    )}
                     <div className="flex items-center gap-2">
                         {isDirty && (
                             <button
@@ -626,25 +673,27 @@ export const SettingsModal = React.memo(({
 
                     <div className="flex-1 min-h-0 overflow-y-auto p-6 pr-4 custom-scrollbar">
                         <div className="md:hidden mb-4">
-                            <div className="mb-3">
-                                <div className="relative">
-                                    <Search size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-txt-faint" />
-                                    <input
-                                        value={settingsSearch}
-                                        onChange={(e) => setSettingsSearch(e.target.value)}
-                                        placeholder="Cerca nelle impostazioni…"
-                                        className="w-full rounded-xl border border-border-muted bg-surface-4/50 pl-9 pr-3 py-2.5 text-[12px] text-txt-primary placeholder:text-txt-faint outline-none focus:border-accent/40 focus:ring-1 focus:ring-accent/20"
-                                    />
-                                    <div className="absolute top-full left-0 right-0 z-[400]">
-                                        <SettingsSearchResults
-                                            query={settingsSearch}
-                                            results={settingsSearchResults}
-                                            onSelect={navigateToSearchItem}
-                                            onClear={() => setSettingsSearch('')}
+                            {isAdmin && (
+                                <div className="mb-3">
+                                    <div className="relative">
+                                        <Search size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-txt-faint" />
+                                        <input
+                                            value={settingsSearch}
+                                            onChange={(e) => setSettingsSearch(e.target.value)}
+                                            placeholder="Cerca nelle impostazioni…"
+                                            className="w-full rounded-xl border border-border-muted bg-surface-4/50 pl-9 pr-3 py-2.5 text-[12px] text-txt-primary placeholder:text-txt-faint outline-none focus:border-accent/40 focus:ring-1 focus:ring-accent/20"
                                         />
+                                        <div className="absolute top-full left-0 right-0 z-[400]">
+                                            <SettingsSearchResults
+                                                query={settingsSearch}
+                                                results={settingsSearchResults}
+                                                onSelect={navigateToSearchItem}
+                                                onClear={() => setSettingsSearch('')}
+                                            />
+                                        </div>
                                     </div>
                                 </div>
-                            </div>
+                            )}
                             <label className="text-[10px] font-bold text-txt-muted uppercase tracking-wider">Sezione</label>
                             <select
                                 value={activeSection}
@@ -658,23 +707,39 @@ export const SettingsModal = React.memo(({
                         </div>
 
                         <div className="space-y-6">
-                            {activeSection === 'apiKeys' && (
+                            {activeSection === 'admin' && (
+                                <AdminSection auth={adminAuth} />
+                            )}
+
+                            {activeSection === 'modelsInUse' && !isAdmin && (
+                                <ReadOnlyModelsSection settings={draftSettings} />
+                            )}
+
+                            {activeSection === 'userApiKeys' && !isAdmin && (
+                                <UserApiKeysSection draftSettings={draftSettings} updateDraft={updateDraft} />
+                            )}
+
+                            {activeSection === 'userPermissions' && isAdmin && (
+                                <UserPermissionsSection draftSettings={draftSettings} updateDraft={updateDraft} />
+                            )}
+
+                            {activeSection === 'apiKeys' && isAdmin && (
                                 <ApiKeysSection draftSettings={draftSettings} updateDraft={updateDraft} />
                             )}
 
-                            {activeSection === 'testAi' && (
+                            {activeSection === 'testAi' && isAdmin && (
                                 <AiDiagnosticSection draftSettings={draftSettings} updateDraft={updateDraft} />
                             )}
 
-                            {activeSection === 'prompts' && (
+                            {activeSection === 'prompts' && isSuperAdmin && (
                                 <PromptsSection draftSettings={draftSettings} updateDraft={updateDraft} />
                             )}
 
-                            {activeSection === 'aiRoles' && (
+                            {activeSection === 'aiRoles' && isAdmin && (
                                 <AiRolesSection draftSettings={draftSettings} updateDraft={updateDraft} />
                             )}
 
-                            {activeSection === 'costs' && (
+                            {activeSection === 'costs' && isAdmin && (
                                 <div className="space-y-8 animate-fade-in">
 
                                     {/* --- 1. CONFIGURAZIONE ATTIVA --- */}
@@ -760,20 +825,20 @@ export const SettingsModal = React.memo(({
                                                     <div key={modelId} className="bg-surface-4/50 border border-border-muted rounded-xl p-4 flex flex-col justify-between">
                                                         <div className="flex justify-between items-start mb-2">
                                                             <div className="text-xs font-bold text-txt-primary truncate max-w-[200px]">{modelId}</div>
-                                                            <div className="text-lg font-mono font-bold text-warning">${mData.cost.toFixed(5)}</div>
+                                                            <div className="text-lg font-mono font-bold text-warning">${(mData.cost || 0).toFixed(5)}</div>
                                                         </div>
                                                         <div className="grid grid-cols-3 gap-2 mt-2">
                                                             <div className="text-[10px] text-txt-muted">
                                                                 <span className="block font-bold uppercase text-txt-muted">Chiamate</span>
-                                                                <span className="text-txt-secondary font-mono">{mData.calls} page{mData.calls !== 1 && 's'}</span>
+                                                                <span className="text-txt-secondary font-mono">{mData.calls || 0} page{(mData.calls || 0) !== 1 && 's'}</span>
                                                             </div>
                                                             <div className="text-[10px] text-txt-muted">
                                                                 <span className="block font-bold uppercase text-txt-muted">Costo Medio</span>
-                                                                <span className="text-txt-secondary font-mono">${avg.toFixed(5)}</span>
+                                                                <span className="text-txt-secondary font-mono">${(avg || 0).toFixed(5)}</span>
                                                             </div>
                                                             <div className="text-[10px] text-txt-muted">
                                                                 <span className="block font-bold uppercase text-txt-muted">Stima/Pagina</span>
-                                                                <span className="text-txt-secondary font-mono">${est.toFixed(5)}</span>
+                                                                <span className="text-txt-secondary font-mono">${(est || 0).toFixed(5)}</span>
                                                             </div>
                                                         </div>
                                                     </div>
@@ -818,7 +883,7 @@ export const SettingsModal = React.memo(({
                                                                 </td>
                                                                 <td className="px-4 py-3 text-right font-mono text-txt-muted">{pData.calls}</td>
                                                                 <td className="px-4 py-3 text-right font-mono text-txt-muted">${(pData.calls > 0 ? (pData.cost / pData.calls) : 0).toFixed(5)}</td>
-                                                                <td className="px-4 py-3 text-right font-mono font-bold text-success">${pData.cost.toFixed(5)}</td>
+                                                                <td className="px-4 py-3 text-right font-mono font-bold text-success">${(pData.cost || 0).toFixed(5)}</td>
                                                             </tr>
                                                         ))}
                                                     </tbody>
@@ -829,11 +894,30 @@ export const SettingsModal = React.memo(({
 
                                     {/* --- 4. LISTINO PREZZI MODELLI --- */}
                                     <div className="space-y-4 pt-6 border-t border-border-muted">
-                                        <h3 className="text-sm font-bold text-txt-secondary flex items-center gap-2">
-                                            <CreditCard size={16} /> Listino Prezzi Modelli (Riferimento)
-                                        </h3>
-                                        <div className="grid grid-cols-1 gap-4">
+                                        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+                                            <h3 className="text-sm font-bold text-txt-secondary flex items-center gap-2">
+                                                <CreditCard size={16} /> Listino Prezzi Modelli (Riferimento)
+                                            </h3>
+                                            {/* Legenda Colori */}
+                                            <div className="flex flex-wrap items-center gap-x-4 gap-y-2 bg-surface-4/40 border border-border-muted rounded-xl px-3 py-2">
+                                                <div className="flex items-center gap-1.5 text-[10px] text-txt-muted">
+                                                    <span className="text-green-500">🟢</span> <span>Gratis</span>
+                                                </div>
+                                                <div className="flex items-center gap-1.5 text-[10px] text-txt-muted">
+                                                    <span className="text-blue-500">🔹</span> <span>Economico</span>
+                                                </div>
+                                                <div className="flex items-center gap-1.5 text-[10px] text-txt-muted">
+                                                    <span className="text-orange-500">🔸</span> <span>Standard/Pro</span>
+                                                </div>
+                                                <div className="flex items-center gap-1.5 text-[10px] text-txt-muted">
+                                                    <span className="text-red-500">🔴</span> <span>Premium/Caro</span>
+                                                </div>
+                                            </div>
+                                        </div>
+
+                                        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                                             {[
+                                                { name: 'OpenRouter (Omni)', list: OPENROUTER_MODELS_LIST, color: 'text-indigo-400' },
                                                 { name: 'Google Gemini', list: GEMINI_MODELS_LIST, color: 'text-accent' },
                                                 { name: 'OpenAI (ChatGPT)', list: OPENAI_MODELS_LIST, color: 'text-purple-400' },
                                                 { name: 'Anthropic Claude', list: CLAUDE_MODELS_LIST, color: 'text-orange-400' },
@@ -856,7 +940,7 @@ export const SettingsModal = React.memo(({
                                                                 </div>
                                                                 <div className="text-right">
                                                                     <div className="text-txt-secondary font-mono">In: {m.pricing?.input} • Out: {m.pricing?.output}</div>
-                                                                    <div className="text-[9px] text-txt-muted font-mono">Stima/pagina: ${est.toFixed(5)}</div>
+                                                                    <div className="text-[9px] text-txt-muted font-mono">Stima/pagina: ${(est || 0).toFixed(5)}</div>
                                                                     <div className="text-[8px] text-txt-muted italic">per 1M tokens</div>
                                                                 </div>
                                                             </div>
@@ -878,7 +962,7 @@ export const SettingsModal = React.memo(({
                             )}
 
 
-                            {activeSection === 'translationLogic' && (
+                            {activeSection === 'translationLogic' && isAdmin && (
                                 <TranslationLogicSection draftSettings={draftSettings} updateDraft={updateDraft} onNavigateToSection={(id) => setActiveSection(id as SettingsSection)} />
                             )}
 
@@ -1029,7 +1113,7 @@ export const SettingsModal = React.memo(({
                                 </div>
                             )}
 
-                            {activeSection === 'logsDiagnostic' && (
+                            {activeSection === 'logsDiagnostic' && isAdmin && (
                                 <div className="space-y-6 animate-fade-in">
                                     <div className="space-y-2">
                                         <label className="text-xs font-bold text-txt-muted uppercase tracking-wider">Log di Sistema</label>
@@ -1218,7 +1302,7 @@ export const SettingsModal = React.memo(({
                             )}
 
                             {/* Sezione: Azioni Pericolose */}
-                            {activeSection === 'logsDiagnostic' && ((!isLibraryView && onRedoAll) || onConsolidate) && (
+                            {activeSection === 'logsDiagnostic' && isAdmin && ((!isLibraryView && onRedoAll) || onConsolidate) && (
                                 <div className="space-y-3">
                                     <label className="text-xs font-bold text-danger/70 uppercase tracking-wider">Zona Pericolosa</label>
                                     <div className="space-y-2 border border-danger/10 rounded-xl p-3 bg-danger/5">

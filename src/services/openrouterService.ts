@@ -13,7 +13,7 @@ import { log } from "./logger";
 import { cleanTranslationText } from "./textClean";
 import { retry, withTimeout } from "../utils/async";
 import { safeParseJsonObject } from "../utils/json";
-import { getOpenRouterTranslateSystemPrompt, getOpenRouterTranslateUserInstruction } from './prompts/openrouter';
+import { getOpenRouterTranslateSystemPrompt, getOpenRouterTranslateUserInstruction, getOpenRouterClaudeUserInstruction, isOpenRouterClaudeModel, openRouterClaudeSupportsReasoning } from './prompts/openrouter';
 import { getMetadataExtractionPrompt } from './prompts/shared';
 import { getVerifyQualitySystemPrompt } from "./verifierPrompts";
 import { AI_VERIFICATION_TIMEOUT_MS } from "../constants";
@@ -71,7 +71,7 @@ export const translateWithOpenRouter = async (
 
   const startedAt = performance.now();
   const isRetry = Boolean(extraInstruction && extraInstruction.trim().length > 0);
-  const systemPrompt = getOpenRouterTranslateSystemPrompt(sourceLanguage, previousContext, legalContext ?? true, isRetry, customPrompt);
+  const systemPrompt = getOpenRouterTranslateSystemPrompt(sourceLanguage, previousContext, legalContext ?? true, isRetry, customPrompt, model);
 
   if (onProgress) onProgress(`Preparazione richiesta OpenRouter (${model})...`);
   log.wait(`[OPENROUTER-TRANSLATION] Richiesta (${model})...`, {
@@ -81,22 +81,36 @@ export const translateWithOpenRouter = async (
     aborted: Boolean(signal?.aborted)
   });
 
+  // Determina se usare le etichette Claude o quelle universali per i content blocks
+  const isClaude = isOpenRouterClaudeModel(model);
+
   const runAttempt = async (instruction: string): Promise<{ text: string; requestId?: string }> => {
     let response: Response;
     try {
+      // Le etichette devono corrispondere esattamente a quelle descritte nel system prompt
+      const prevLabel = isClaude
+        ? `[CONTESTO PRECEDENTE] Pagina ${prevPageNumber} — NON tradurre, solo riferimento visivo.`
+        : `CONTESTO (NON tradurre): pagina precedente ${prevPageNumber}`;
+      const targetLabel = isClaude
+        ? `[PAGINA TARGET] Pagina ${pageNumber} — TRADUCI QUESTA.`
+        : `PAGINA DA TRADURRE: Pagina ${pageNumber}`;
+      const nextLabel = isClaude
+        ? `[CONTESTO SUCCESSIVO] Pagina ${nextPageNumber} — NON tradurre, solo riferimento visivo.`
+        : `CONTESTO (NON tradurre): pagina successiva ${nextPageNumber}`;
+
       const userContent: any[] = [
         { type: 'text', text: instruction },
         ...(prevPageImageBase64 && prevPageNumber
           ? [
-              { type: 'text', text: `CONTESTO (NON tradurre): pagina precedente ${prevPageNumber}` },
+              { type: 'text', text: prevLabel },
               { type: 'image_url', image_url: { url: `data:image/jpeg;base64,${prevPageImageBase64}` } }
             ]
           : []),
-        { type: 'text', text: `PAGINA DA TRADURRE: Pagina ${pageNumber}` },
+        { type: 'text', text: targetLabel },
         { type: 'image_url', image_url: { url: `data:image/jpeg;base64,${imageBase64}` } },
         ...(nextPageImageBase64 && nextPageNumber
           ? [
-              { type: 'text', text: `CONTESTO (NON tradurre): pagina successiva ${nextPageNumber}` },
+              { type: 'text', text: nextLabel },
               { type: 'image_url', image_url: { url: `data:image/jpeg;base64,${nextPageImageBase64}` } }
             ]
           : [])
@@ -120,11 +134,26 @@ export const translateWithOpenRouter = async (
       // Costruiamo la fallback chain
       const fallbackModels = model === 'openrouter/auto' ? ['openrouter/auto'] : [model, 'openrouter/auto'];
 
-      response = await openrouterFetch(apiKey, '/chat/completions', {
+      // Payload base
+      const requestBody: any = {
         models: fallbackModels,
         messages,
         max_tokens: OPENROUTER_DEFAULT_MAX_OUTPUT
-      }, signal);
+      };
+
+      // Abilita il reasoning per i modelli Claude 4.5+ / 4.6+ via OpenRouter.
+      // - Claude 4.6: reasoning.enabled = true → Adaptive Thinking (Claude decide autonomamente)
+      // - Claude 4.5: reasoning.enabled = true + max_tokens → Budget-based Thinking
+      // - Haiku e modelli precedenti: nessun parametro reasoning (causerebbe errore API)
+      if (isOpenRouterClaudeModel(model) && openRouterClaudeSupportsReasoning(model)) {
+        const is46 = model.toLowerCase().includes('4.6');
+        requestBody.reasoning = is46
+          ? { enabled: true }                          // Adaptive Thinking (4.6+)
+          : { enabled: true, max_tokens: 8000 };       // Budget-based Thinking (4.5)
+        log.info(`[OPENROUTER] Reasoning abilitato per ${model} (${is46 ? 'adaptive' : 'budget 8000 tok'})`);
+      }
+
+      response = await openrouterFetch(apiKey, '/chat/completions', requestBody, signal);
     } catch (e: any) {
       if (e?.name === 'AbortError') {
         log.warning("Richiesta OpenRouter annullata (AbortError).");
@@ -152,11 +181,21 @@ export const translateWithOpenRouter = async (
       trackUsage(model, prompt_tokens || 0, completion_tokens || 0);
     }
 
-    const text = data.choices?.[0]?.message?.content || "";
-    return { text, requestId };
+    const content = data.choices?.[0]?.message?.content || "";
+    
+    // Se la risposta è vuota nonostante lo status 200, è un errore del modello/provider
+    if (content.trim().length === 0) {
+      log.warning(`[OPENROUTER] Ricevuta risposta vuota (status 200) da ${model}. Richiesta ID: ${requestId}`);
+      throw new Error(`Ricevuta risposta vuota dal modello ${model} (OpenRouter)`);
+    }
+
+    return { text: content, requestId };
   };
 
-  const baseInstruction = getOpenRouterTranslateUserInstruction(pageNumber, sourceLanguage);
+  // Usa la user instruction specifica per Claude (con etichette [PAGINA TARGET]) o quella universale
+  const baseInstruction = isClaude
+    ? getOpenRouterClaudeUserInstruction(pageNumber, sourceLanguage)
+    : getOpenRouterTranslateUserInstruction(pageNumber, sourceLanguage);
   const effectiveInstruction = extraInstruction?.trim()
     ? `${baseInstruction}\n\n${extraInstruction.trim()}`
     : baseInstruction;

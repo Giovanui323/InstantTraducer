@@ -201,6 +201,7 @@ export const getSafeDefaults = (): AISettings => {
         openrouter: { apiKey: '', model: 'anthropic/claude-sonnet-4.5' },
         customProviders: [],
         disabledProviders: [],
+        enableClaudeOpusFast: false,
         legalContext: true,
         verboseLogs: true,
         customProjectsPath: '',

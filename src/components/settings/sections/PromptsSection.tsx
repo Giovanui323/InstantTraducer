@@ -7,14 +7,16 @@ import type { AISettings } from '../../../types';
 import { SettingsSearchItem } from '../search';
 import {
   DEFAULT_TRANSLATION_PROMPT_TEMPLATE,
+  LITE_TRANSLATION_PROMPT_TEMPLATE,
   GEMINI_TRANSLATION_MODEL,
   GEMINI_VERIFIER_MODEL,
 } from '../../../constants';
-import { getGeminiTranslateSystemPrompt, getGeminiTranslateUserInstruction, GEMINI_TRANSLATION_PROMPT_TEMPLATE } from '../../../services/prompts/gemini';
-import { getOpenAITranslateSystemPrompt, getOpenAITranslateUserInstruction, OPENAI_TRANSLATION_PROMPT_TEMPLATE } from '../../../services/prompts/openai';
-import { getClaudeTranslateSystemPrompt, getClaudeTranslateUserInstruction, CLAUDE_TRANSLATION_PROMPT_TEMPLATE } from '../../../services/prompts/claude';
-import { getGroqTranslateSystemPrompt, getGroqTranslateUserInstruction, GROQ_TRANSLATION_PROMPT_TEMPLATE } from '../../../services/prompts/groq';
-import { getOpenRouterTranslateSystemPrompt, getOpenRouterTranslateUserInstruction, OPENROUTER_TRANSLATION_PROMPT_TEMPLATE } from '../../../services/prompts/openrouter';
+import { isLiteModel } from '../../../services/aiUtils';
+import { getGeminiTranslateSystemPrompt, getGeminiTranslateUserInstruction } from '../../../services/prompts/gemini';
+import { getOpenAITranslateSystemPrompt, getOpenAITranslateUserInstruction } from '../../../services/prompts/openai';
+import { getClaudeTranslateSystemPrompt, getClaudeTranslateUserInstruction } from '../../../services/prompts/claude';
+import { getGroqTranslateSystemPrompt, getGroqTranslateUserInstruction } from '../../../services/prompts/groq';
+import { getOpenRouterTranslateSystemPrompt, getOpenRouterTranslateUserInstruction } from '../../../services/prompts/openrouter';
 import { getVerifyQualitySystemPrompt } from '../../../services/verifierPrompts';
 import { getMetadataExtractionPrompt } from '../../../services/prompts/shared';
 
@@ -113,12 +115,17 @@ export const PromptsSection: React.FC<{
 
   // Default templates per provider
   const defaultTranslationTemplate = useMemo(() => {
-    if (provider === 'gemini') return GEMINI_TRANSLATION_PROMPT_TEMPLATE;
-    if (provider === 'openai') return OPENAI_TRANSLATION_PROMPT_TEMPLATE;
-    if (provider === 'claude') return CLAUDE_TRANSLATION_PROMPT_TEMPLATE;
-    if (provider === 'openrouter') return OPENROUTER_TRANSLATION_PROMPT_TEMPLATE;
-    return GROQ_TRANSLATION_PROMPT_TEMPLATE;
-  }, [provider]);
+    // Determine the specific model ID based on provider
+    let activeModelId = '';
+    if (provider === 'gemini') activeModelId = draftSettings.gemini?.model || '';
+    else if (provider === 'openai') activeModelId = draftSettings.openai?.model || '';
+    else if (provider === 'claude') activeModelId = draftSettings.claude?.model || '';
+    else if (provider === 'groq') activeModelId = draftSettings.groq?.model || '';
+    else if (provider === 'openrouter') activeModelId = draftSettings.openrouter?.model || '';
+
+    const isLite = activeModelId ? isLiteModel(activeModelId) : false;
+    return isLite ? LITE_TRANSLATION_PROMPT_TEMPLATE : DEFAULT_TRANSLATION_PROMPT_TEMPLATE;
+  }, [provider, draftSettings]);
 
   // Resolved preview prompts (with variables substituted)
   const translationPreview = useMemo(() => {

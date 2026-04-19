@@ -84,9 +84,15 @@ export const renderDocPageToObjectURL = async (doc: pdfjsLib.PDFDocumentProxy, p
     }
 
     renderTask = page.render({ canvasContext: ctx as any, viewport, canvas });
-    await withTimeout(renderTask.promise, timeoutMs, () => {
-      try { renderTask?.cancel?.(); } catch { }
-    });
+    const onAbort = () => { try { renderTask?.cancel?.(); } catch { } };
+    signal?.addEventListener('abort', onAbort);
+    try {
+      await withTimeout(renderTask.promise, timeoutMs, () => {
+        try { renderTask?.cancel?.(); } catch { }
+      });
+    } finally {
+      signal?.removeEventListener('abort', onAbort);
+    }
     if (signal?.aborted) throw new Error('Operazione annullata');
 
     const blob = await canvasToBlob(canvas, jpegQuality);
@@ -141,9 +147,15 @@ export const renderPageToObjectURL = async (
     }
 
     renderTask = page.render({ canvasContext: ctx as any, viewport, canvas });
-    await withTimeout(renderTask.promise, timeoutMs, () => {
-      try { renderTask?.cancel?.(); } catch { }
-    });
+    const onAbort = () => { try { renderTask?.cancel?.(); } catch { } };
+    signal?.addEventListener('abort', onAbort);
+    try {
+      await withTimeout(renderTask.promise, timeoutMs, () => {
+        try { renderTask?.cancel?.(); } catch { }
+      });
+    } finally {
+      signal?.removeEventListener('abort', onAbort);
+    }
     if (signal?.aborted) throw new Error('Operazione annullata');
 
     const blob = await canvasToBlob(canvas, jpegQuality);

@@ -22,6 +22,7 @@ export * from './SafeMarkdownText';
 export * from './SearchResults';
 export * from './SettingsModal';
 export * from './SimpleConfirmModal';
+export * from './SplashScreen';
 export * from './ToastNotification';
 export * from './Tooltip';
 export * from './UploadLanguagePrompt';

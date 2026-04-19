@@ -22,6 +22,15 @@ const __dirname = path.dirname(__filename);
 if (process.platform === 'darwin' && app.isPackaged) {
     app.commandLine.appendSwitch('no-sandbox');
     app.commandLine.appendSwitch('disable-gpu-sandbox');
+    
+    // REDIRECTION PER COMPATIBILITÀ DATI STORICI
+    // Poiché abbiamo rinominato il prodotto in iTraducer, Electron cercherebbe i dati in ~/Library/Application Support/iTraducer.
+    // Forza il percorso alla cartella storica ~/Library/Application Support/InstantTraducer per mantenere i progetti esistenti.
+    const appData = app.getPath('appData');
+    const legacyPath = path.join(appData, 'InstantTraducer');
+    if (fs.existsSync(legacyPath)) {
+        app.setPath('userData', legacyPath);
+    }
 }
 
 const logger = createLogger({ module: 'MAIN', toFile: true });

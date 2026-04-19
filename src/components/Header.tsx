@@ -223,7 +223,7 @@ export const Header: React.FC<HeaderProps> = ({
           <div className="min-w-0 flex flex-col leading-tight">
             <div className="min-w-0 flex items-center gap-2">
               <span className="text-[12px] font-semibold text-txt-primary/90 truncate max-w-[360px] tracking-tight">
-                {metadata?.name ? metadata.name : 'InstantTraducer'}
+                {metadata?.name ? metadata.name : 'iTraducer'}
               </span>
               {isSaving && (
                 <span className="shrink-0 inline-flex items-center gap-1.5 px-2 py-0.5 rounded-md bg-success/8 border border-success/15 text-success text-[9px] font-bold uppercase tracking-tight animate-pulse">
@@ -250,8 +250,9 @@ export const Header: React.FC<HeaderProps> = ({
         </div>
       </div>
 
-      {/* ── CENTER: Status pill ── */}
-      <div className="flex items-center justify-center">
+      {/* ── CENTER: Status pill (with dividers) ── */}
+      <div className="flex items-center justify-center gap-3">
+        <div className="h-5 w-px bg-border-muted/50" aria-hidden="true" />
         {hasSession ? (
           <div
             role="status"
@@ -265,6 +266,7 @@ export const Header: React.FC<HeaderProps> = ({
         ) : (
           <div className="text-[10px] text-txt-muted tracking-wide">Pronto</div>
         )}
+        <div className="h-5 w-px bg-border-muted/50" aria-hidden="true" />
       </div>
 
       {/* ── RIGHT: Actions + search + settings ── */}
@@ -385,14 +387,17 @@ export const Header: React.FC<HeaderProps> = ({
         ) : null}
 
         {showActions ? (
-          <button
-            onClick={onToggleControls}
-            title="Mostra/nascondi controlli di lettura"
-            aria-label="Mostra o nascondi controlli di lettura"
-            className="p-2 h-8 w-8 text-txt-muted hover:text-txt-secondary hover:bg-white/[0.06] rounded-lg transition-all duration-150 app-region-no-drag controls-trigger focus:outline-none"
-          >
-            <Sun size={16} />
-          </button>
+          <>
+            <div className="h-5 w-px bg-border-muted/50 mx-1" aria-hidden="true" />
+            <button
+              onClick={onToggleControls}
+              title="Mostra/nascondi controlli di lettura"
+              aria-label="Mostra o nascondi controlli di lettura"
+              className="p-2 h-8 w-8 text-txt-muted hover:text-txt-secondary hover:bg-white/[0.06] rounded-lg transition-all duration-150 app-region-no-drag controls-trigger focus:outline-none"
+            >
+              <Sun size={16} />
+            </button>
+          </>
         ) : null}
 
         <button
@@ -404,21 +409,29 @@ export const Header: React.FC<HeaderProps> = ({
           <Settings size={16} />
         </button>
 
+        {showActions ? <div className="h-5 w-px bg-border-muted/50 mx-1" aria-hidden="true" /> : null}
+
         {showActions ? (
           <div className="relative flex items-center app-region-no-drag search-container">
             <button
               onClick={onSearchToggle}
-              className="p-2 h-8 w-8 text-txt-muted hover:text-txt-secondary hover:bg-white/[0.06] rounded-lg transition-all duration-150 search-trigger focus:outline-none"
+              className={`p-2 h-8 w-8 rounded-lg transition-all duration-150 search-trigger focus:outline-none ${searchOpen ? 'bg-accent/10 text-accent' : 'text-txt-muted hover:text-txt-secondary hover:bg-white/[0.06]'}`}
               title="Cerca nel testo"
               aria-label="Cerca nel testo"
+              aria-expanded={searchOpen}
             >
               <Search size={16} />
             </button>
-            {searchOpen ? (
-              <div className="ml-2 flex items-center gap-1.5 relative animate-fade-in">
+            <div
+              className={`flex items-center gap-1.5 relative overflow-visible transition-all duration-200 ease-out-expo ${searchOpen ? 'ml-2 max-w-[420px] opacity-100' : 'max-w-0 opacity-0 ml-0 pointer-events-none'}`}
+            >
+              {searchOpen ? (
+                <>
                 <input
                   value={searchTerm || ''}
                   onChange={(e) => onSearchChange?.(e.target.value)}
+                  onKeyDown={(e) => { if (e.key === 'Escape') onSearchToggle?.(); }}
+                  autoFocus
                   placeholder="Cerca nel testo"
                   className="w-[220px] bg-surface-3 border border-border rounded-lg px-2.5 py-1 text-[12px] text-txt-primary placeholder:text-txt-muted focus:outline-none focus:border-accent/30 focus:ring-1 focus:ring-accent/15 transition-all duration-150"
                   aria-label="Testo da cercare"
@@ -469,8 +482,9 @@ export const Header: React.FC<HeaderProps> = ({
                     </button>
                   </div>
                 ) : null}
-              </div>
-            ) : null}
+                </>
+              ) : null}
+            </div>
           </div>
         ) : null}
       </div>

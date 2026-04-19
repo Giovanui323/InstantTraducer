@@ -17,6 +17,8 @@ import {
   isGroqVisionModel,
   CLAUDE_MODELS_LIST
 } from '../../../constants';
+import { getModelPriceInfo } from '../../../services/aiUtils';
+import { getAvailableModels } from '../../../services/modelManager';
 import { SettingsSearchItem } from '../search';
 import { CustomModelManager } from '../../CustomModelManager';
 import { CustomProvidersSection } from './CustomProvidersSection';
@@ -71,10 +73,19 @@ export const aiRolesSearchItems: SettingsSearchItem[] = [
     id: 'aiRoles.metadata.model',
     sectionId: 'aiRoles',
     sectionLabel: 'Modelli & Ruoli',
-    title: 'Modello metadati',
-    description: 'Scegli provider e modello per estrazione metadati.',
-    keywords: ['metadati', 'titolo', 'autore'],
+    title: 'Modello Metadati',
+    description: 'Modello usato per estrarre info dal PDF.',
+    keywords: ['metadati', 'metadata', 'estrazione'],
     anchorId: 'aiRoles.metadata.model'
+  },
+  {
+    id: 'aiRoles.enableClaudeOpusFast',
+    sectionId: 'aiRoles',
+    sectionLabel: 'Modelli & Ruoli',
+    title: 'Abilita Claude Opus Fast (OpenRouter)',
+    description: 'Rende visibile il modello Opus 4.6 Fast (molto costoso) nelle liste.',
+    keywords: ['opus', 'fast', 'caro', 'costoso', 'expensive'],
+    anchorId: 'aiRoles.enableClaudeOpusFast'
   }
 ];
 
@@ -87,6 +98,15 @@ const SectionTitle = ({ title, description }: { title: string; description?: str
 
 const selectClasses = "bg-surface-4/50 border border-border-muted rounded-xl py-2 px-3 text-[12px] text-txt-primary outline-none focus:border-accent/40 focus:ring-1 focus:ring-accent/20 transition-all duration-200";
 const inputClasses = "w-[240px] bg-surface-4/50 border border-border-muted rounded-xl py-2 px-3 text-[12px] text-txt-primary placeholder:text-txt-faint outline-none focus:border-accent/40 focus:ring-1 focus:ring-accent/20 font-mono transition-all duration-200";
+
+const ModelOption = ({ model }: { model: { id: string, name: string, pricing?: { input: string | number, output: string | number } } }) => {
+  const info = getModelPriceInfo(model.pricing);
+  return (
+    <option key={model.id} value={model.id} style={{ color: info.color }}>
+      {info.indicator} {model.name} {info.label && `(${info.label})`}
+    </option>
+  );
+};
 
 export const AiRolesSection = ({
   draftSettings,
@@ -107,7 +127,13 @@ export const AiRolesSection = ({
   const qualityCheck = draftSettings.qualityCheck || { enabled: true, verifierProvider: 'gemini' as AIProvider, verifierModel: GEMINI_VERIFIER_MODEL, maxAutoRetries: 1 };
   const metadataExtraction = draftSettings.metadataExtraction || { enabled: true, provider: 'gemini' as AIProvider, model: GEMINI_TRANSLATION_FLASH_MODEL };
 
-  const setProvider = (p: AIProvider) => updateDraft({ provider: p });
+  const setProvider = (p: AIProvider) => {
+    const newDisabled = disabledProviders.includes(p) ? disabledProviders.filter(dp => dp !== p) : undefined;
+    updateDraft({ 
+      provider: p,
+      ...(newDisabled !== undefined ? { disabledProviders: newDisabled } : {})
+    });
+  };
 
   const setGeminiModel = (m: GeminiModel) => updateDraft({ gemini: { ...gemini, model: m } as any });
   const setGeminiThinkingLevel = (l: 'minimal' | 'low' | 'medium' | 'high') => updateDraft({ gemini: { ...gemini, thinkingLevel: l, model: gemini.model } as any });
@@ -131,7 +157,11 @@ export const AiRolesSection = ({
     else if (p === 'modal') nextModel = 'zai-org/GLM-5.1-FP8';
     else if (p === 'zai') nextModel = 'glm-4-plus';
     else if (p === 'openrouter') nextModel = 'anthropic/claude-haiku-4.5';
-    updateDraft({ qualityCheck: { ...qualityCheck, verifierProvider: p, verifierModel: nextModel } });
+    const newDisabled = disabledProviders.includes(p) ? disabledProviders.filter(dp => dp !== p) : undefined;
+    updateDraft({ 
+      qualityCheck: { ...qualityCheck, verifierProvider: p, verifierModel: nextModel },
+      ...(newDisabled !== undefined ? { disabledProviders: newDisabled } : {})
+    });
   };
   const setQualityModel = (m: string) => updateDraft({ qualityCheck: { ...qualityCheck, verifierModel: m } });
   const setQualityMaxRetries = (n: number) => updateDraft({ qualityCheck: { ...qualityCheck, maxAutoRetries: Math.max(0, Math.min(5, n || 0)) } });
@@ -146,7 +176,11 @@ export const AiRolesSection = ({
     else if (p === 'modal') nextModel = 'zai-org/GLM-5.1-FP8';
     else if (p === 'zai') nextModel = 'glm-4v-flash';
     else if (p === 'openrouter') nextModel = 'anthropic/claude-haiku-4.5';
-    updateDraft({ metadataExtraction: { ...metadataExtraction, provider: p, model: nextModel } });
+    const newDisabled = disabledProviders.includes(p) ? disabledProviders.filter(dp => dp !== p) : undefined;
+    updateDraft({ 
+      metadataExtraction: { ...metadataExtraction, provider: p, model: nextModel },
+      ...(newDisabled !== undefined ? { disabledProviders: newDisabled } : {})
+    });
   };
   const setMetadataModel = (m: string) => updateDraft({ metadataExtraction: { ...metadataExtraction, model: m } });
 
@@ -164,7 +198,7 @@ export const AiRolesSection = ({
           className={selectClasses}
         >
           {availableGeminiModels.map((m) => (
-            <option key={m.id} value={m.id}>{m.name}</option>
+            <ModelOption key={m.id} model={m} />
           ))}
         </select>
       );
@@ -187,7 +221,7 @@ export const AiRolesSection = ({
           className={selectClasses}
         >
           {availableClaudeModels.map((m) => (
-            <option key={m.id} value={m.id}>{m.name}</option>
+            <ModelOption key={m.id} model={m} />
           ))}
         </select>
       );
@@ -200,7 +234,7 @@ export const AiRolesSection = ({
           className={selectClasses}
         >
           {MODAL_MODELS_LIST.map((m) => (
-            <option key={m.id} value={m.id}>{m.name}</option>
+            <ModelOption key={m.id} model={m} />
           ))}
         </select>
       );
@@ -214,7 +248,7 @@ export const AiRolesSection = ({
           className={selectClasses}
         >
           {ZAI_MODELS_LIST.map((m) => (
-            <option key={m.id} value={m.id}>{m.name}</option>
+            <ModelOption key={m.id} model={m} />
           ))}
         </select>
       );
@@ -228,8 +262,8 @@ export const AiRolesSection = ({
             onChange={(e) => updateDraft({ openrouter: { ...openrouter, model: e.target.value } })}
             className={selectClasses}
           >
-            {OPENROUTER_MODELS_LIST.map((m) => (
-              <option key={m.id} value={m.id}>{m.name}</option>
+            {getAvailableModels('openrouter', draftSettings).map((m) => (
+              <ModelOption key={m.id} model={m} />
             ))}
           </select>
           <input
@@ -258,7 +292,7 @@ export const AiRolesSection = ({
         className={selectClasses}
       >
         {GROQ_MODELS_LIST.filter((m) => isGroqVisionModel(m.id)).map((m) => (
-          <option key={m.id} value={m.id}>{m.name}</option>
+          <ModelOption key={m.id} model={m} />
         ))}
       </select>
     );
@@ -275,7 +309,7 @@ export const AiRolesSection = ({
         >
           <option value="">Usa modello primario</option>
           {availableGeminiModels.map((m) => (
-            <option key={m.id} value={m.id}>{m.name}</option>
+            <ModelOption key={m.id} model={m} />
           ))}
         </select>
       );
@@ -299,7 +333,7 @@ export const AiRolesSection = ({
         >
           <option value="">Usa modello primario</option>
           {availableClaudeModels.map((m) => (
-            <option key={m.id} value={m.id}>{m.name}</option>
+            <ModelOption key={m.id} model={m} />
           ))}
         </select>
       );
@@ -324,7 +358,7 @@ export const AiRolesSection = ({
         >
           <option value="">Usa modello primario</option>
           {ZAI_MODELS_LIST.map((m) => (
-            <option key={m.id} value={m.id}>{m.name}</option>
+            <ModelOption key={m.id} model={m} />
           ))}
         </select>
       );
@@ -339,7 +373,7 @@ export const AiRolesSection = ({
           >
             <option value="">Usa modello primario</option>
             {OPENROUTER_MODELS_LIST.map((m) => (
-              <option key={m.id} value={m.id}>{m.name}</option>
+              <ModelOption key={m.id} model={m} />
             ))}
           </select>
           {v && !OPENROUTER_MODELS_LIST.find(m => m.id === v) && (
@@ -366,7 +400,7 @@ export const AiRolesSection = ({
       >
         <option value="">Usa modello primario</option>
         {GROQ_MODELS_LIST.filter((m) => isGroqVisionModel(m.id)).map((m) => (
-          <option key={m.id} value={m.id}>{m.name}</option>
+          <ModelOption key={m.id} model={m} />
         ))}
       </select>
     );
@@ -377,7 +411,7 @@ export const AiRolesSection = ({
       return (
         <select value={qualityCheck.verifierModel} onChange={(e) => setQualityModel(e.target.value)} className={selectClasses}>
           {availableGeminiModels.map((m) => (
-            <option key={m.id} value={m.id}>{m.name}</option>
+            <ModelOption key={m.id} model={m} />
           ))}
         </select>
       );
@@ -386,7 +420,7 @@ export const AiRolesSection = ({
       return (
         <select value={qualityCheck.verifierModel} onChange={(e) => setQualityModel(e.target.value)} className={selectClasses}>
           {OPENAI_MODELS_LIST.map((m) => (
-            <option key={m.id} value={m.id}>{m.name}</option>
+            <ModelOption key={m.id} model={m} />
           ))}
         </select>
       );
@@ -395,7 +429,7 @@ export const AiRolesSection = ({
       return (
         <select value={qualityCheck.verifierModel} onChange={(e) => setQualityModel(e.target.value)} className={selectClasses}>
           {CLAUDE_MODELS_LIST.map((m) => (
-            <option key={m.id} value={m.id}>{m.name}</option>
+            <ModelOption key={m.id} model={m} />
           ))}
         </select>
       );
@@ -404,7 +438,7 @@ export const AiRolesSection = ({
       return (
         <select value={qualityCheck.verifierModel} onChange={(e) => setQualityModel(e.target.value)} className={selectClasses}>
           {MODAL_MODELS_LIST.map((m) => (
-            <option key={m.id} value={m.id}>{m.name}</option>
+            <ModelOption key={m.id} model={m} />
           ))}
         </select>
       );
@@ -413,7 +447,7 @@ export const AiRolesSection = ({
       return (
         <select value={qualityCheck.verifierModel} onChange={(e) => setQualityModel(e.target.value)} className={selectClasses}>
           {ZAI_MODELS_LIST.map((m) => (
-            <option key={m.id} value={m.id}>{m.name}</option>
+            <ModelOption key={m.id} model={m} />
           ))}
         </select>
       );
@@ -421,8 +455,8 @@ export const AiRolesSection = ({
     if (qualityCheck.verifierProvider === 'openrouter') {
       return (
         <select value={qualityCheck.verifierModel} onChange={(e) => setQualityModel(e.target.value)} className={selectClasses}>
-          {OPENROUTER_MODELS_LIST.map((m) => (
-            <option key={m.id} value={m.id}>{m.name}</option>
+          {getAvailableModels('openrouter', draftSettings).map((m) => (
+            <ModelOption key={m.id} model={m} />
           ))}
         </select>
       );
@@ -430,7 +464,7 @@ export const AiRolesSection = ({
     return (
       <select value={qualityCheck.verifierModel} onChange={(e) => setQualityModel(e.target.value)} className={selectClasses}>
         {GROQ_MODELS_LIST.map((m) => (
-          <option key={m.id} value={m.id}>{m.name}</option>
+          <ModelOption key={m.id} model={m} />
         ))}
       </select>
     );
@@ -441,7 +475,7 @@ export const AiRolesSection = ({
       return (
         <select value={metadataExtraction.model} onChange={(e) => setMetadataModel(e.target.value)} className={selectClasses}>
           {GEMINI_MODELS_LIST.map((m) => (
-            <option key={m.id} value={m.id}>{m.name}</option>
+            <ModelOption key={m.id} model={m} />
           ))}
         </select>
       );
@@ -450,7 +484,7 @@ export const AiRolesSection = ({
       return (
         <select value={metadataExtraction.model} onChange={(e) => setMetadataModel(e.target.value)} className={selectClasses}>
           {OPENAI_MODELS_LIST.map((m) => (
-            <option key={m.id} value={m.id}>{m.name}</option>
+            <ModelOption key={m.id} model={m} />
           ))}
         </select>
       );
@@ -459,7 +493,7 @@ export const AiRolesSection = ({
       return (
         <select value={metadataExtraction.model} onChange={(e) => setMetadataModel(e.target.value)} className={selectClasses}>
           {CLAUDE_MODELS_LIST.map((m) => (
-            <option key={m.id} value={m.id}>{m.name}</option>
+            <ModelOption key={m.id} model={m} />
           ))}
         </select>
       );
@@ -468,7 +502,7 @@ export const AiRolesSection = ({
       return (
         <select value={metadataExtraction.model} onChange={(e) => setMetadataModel(e.target.value)} className={selectClasses}>
           {MODAL_MODELS_LIST.map((m) => (
-            <option key={m.id} value={m.id}>{m.name}</option>
+            <ModelOption key={m.id} model={m} />
           ))}
         </select>
       );
@@ -477,7 +511,7 @@ export const AiRolesSection = ({
       return (
         <select value={metadataExtraction.model} onChange={(e) => setMetadataModel(e.target.value)} className={selectClasses}>
           {ZAI_MODELS_LIST.map((m) => (
-            <option key={m.id} value={m.id}>{m.name}</option>
+            <ModelOption key={m.id} model={m} />
           ))}
         </select>
       );
@@ -485,8 +519,8 @@ export const AiRolesSection = ({
     if (metadataExtraction.provider === 'openrouter') {
       return (
         <select value={metadataExtraction.model} onChange={(e) => setMetadataModel(e.target.value)} className={selectClasses}>
-          {OPENROUTER_MODELS_LIST.map((m) => (
-            <option key={m.id} value={m.id}>{m.name}</option>
+          {getAvailableModels('openrouter', draftSettings).map((m) => (
+            <ModelOption key={m.id} model={m} />
           ))}
         </select>
       );
@@ -494,7 +528,7 @@ export const AiRolesSection = ({
     return (
       <select value={metadataExtraction.model} onChange={(e) => setMetadataModel(e.target.value)} className={selectClasses}>
         {GROQ_MODELS_LIST.map((m) => (
-          <option key={m.id} value={m.id}>{m.name}</option>
+          <ModelOption key={m.id} model={m} />
         ))}
       </select>
     );
@@ -514,13 +548,13 @@ export const AiRolesSection = ({
               onChange={(e) => setProvider(e.target.value as AIProvider)}
               className={selectClasses}
             >
-              {isProviderAvailable('gemini') && <option value="gemini">Google Gemini</option>}
-              {isProviderAvailable('openai') && <option value="openai">OpenAI</option>}
-              {isProviderAvailable('claude') && <option value="claude">Claude</option>}
-              {isProviderAvailable('groq') && <option value="groq">Groq</option>}
-              {isProviderAvailable('modal') && <option value="modal">Modal (GLM-5.1)</option>}
-              {isProviderAvailable('zai') && <option value="zai">Z.ai (Zhipu AI)</option>}
-              {isProviderAvailable('openrouter') && <option value="openrouter">OpenRouter</option>}
+              <option value="gemini">Google Gemini{!isProviderAvailable('gemini') && ' (disattivato)'}</option>
+              <option value="openai">OpenAI{!isProviderAvailable('openai') && ' (disattivato)'}</option>
+              <option value="claude">Claude{!isProviderAvailable('claude') && ' (disattivato)'}</option>
+              <option value="groq">Groq{!isProviderAvailable('groq') && ' (disattivato)'}</option>
+              <option value="modal">Modal (GLM-5.1){!isProviderAvailable('modal') && ' (disattivato)'}</option>
+              <option value="zai">Z.ai (Zhipu AI){!isProviderAvailable('zai') && ' (disattivato)'}</option>
+              <option value="openrouter">OpenRouter{!isProviderAvailable('openrouter') && ' (disattivato)'}</option>
               {draftSettings.customProviders && draftSettings.customProviders.length > 0 && (
                 <option value="custom">Custom Provider</option>
               )}
@@ -618,13 +652,13 @@ export const AiRolesSection = ({
                   onChange={(e) => setVerifierProvider(e.target.value as AIProvider)}
                   className={selectClasses}
                 >
-                  {isProviderAvailable('gemini') && <option value="gemini">Gemini</option>}
-                  {isProviderAvailable('openai') && <option value="openai">OpenAI</option>}
-                  {isProviderAvailable('claude') && <option value="claude">Claude</option>}
-                  {isProviderAvailable('groq') && <option value="groq">Groq</option>}
-                  {isProviderAvailable('modal') && <option value="modal">Modal</option>}
-                  {isProviderAvailable('zai') && <option value="zai">Z.ai</option>}
-                  {isProviderAvailable('openrouter') && <option value="openrouter">OpenRouter</option>}
+                  <option value="gemini">Gemini{!isProviderAvailable('gemini') && ' (disattivato)'}</option>
+                  <option value="openai">OpenAI{!isProviderAvailable('openai') && ' (disattivato)'}</option>
+                  <option value="claude">Claude{!isProviderAvailable('claude') && ' (disattivato)'}</option>
+                  <option value="groq">Groq{!isProviderAvailable('groq') && ' (disattivato)'}</option>
+                  <option value="modal">Modal{!isProviderAvailable('modal') && ' (disattivato)'}</option>
+                  <option value="zai">Z.ai{!isProviderAvailable('zai') && ' (disattivato)'}</option>
+                  <option value="openrouter">OpenRouter{!isProviderAvailable('openrouter') && ' (disattivato)'}</option>
                 </select>
               }
             />
@@ -664,19 +698,35 @@ export const AiRolesSection = ({
                   onChange={(e) => setMetadataProvider(e.target.value as AIProvider)}
                   className={selectClasses}
                 >
-                  {isProviderAvailable('gemini') && <option value="gemini">Gemini</option>}
-                  {isProviderAvailable('openai') && <option value="openai">OpenAI</option>}
-                  {isProviderAvailable('claude') && <option value="claude">Claude</option>}
-                  {isProviderAvailable('groq') && <option value="groq">Groq</option>}
-                  {isProviderAvailable('modal') && <option value="modal">Modal</option>}
-                  {isProviderAvailable('zai') && <option value="zai">Z.ai</option>}
-                  {isProviderAvailable('openrouter') && <option value="openrouter">OpenRouter</option>}
+                  <option value="gemini">Gemini{!isProviderAvailable('gemini') && ' (disattivato)'}</option>
+                  <option value="openai">OpenAI{!isProviderAvailable('openai') && ' (disattivato)'}</option>
+                  <option value="claude">Claude{!isProviderAvailable('claude') && ' (disattivato)'}</option>
+                  <option value="groq">Groq{!isProviderAvailable('groq') && ' (disattivato)'}</option>
+                  <option value="modal">Modal{!isProviderAvailable('modal') && ' (disattivato)'}</option>
+                  <option value="zai">Z.ai{!isProviderAvailable('zai') && ' (disattivato)'}</option>
+                  <option value="openrouter">OpenRouter{!isProviderAvailable('openrouter') && ' (disattivato)'}</option>
                 </select>
               }
             />
             <SettingRow title="Modello" description="Modello metadati." right={metadataModelControl()} />
           </div>
         </div>
+      </div>
+
+      <div className="pt-2 border-t border-border-muted/30 pb-4">
+        <SettingRow
+          id="setting-aiRoles.enableClaudeOpusFast"
+          title="Abilita Claude Opus Fast"
+          description="Permette di selezionare il modello Opus 4.6 Fast su OpenRouter. Attenzione: costi molto elevati ($30/$150)."
+          right={
+            <input
+              type="checkbox"
+              checked={draftSettings.enableClaudeOpusFast ?? false}
+              onChange={(e) => updateDraft({ enableClaudeOpusFast: e.target.checked })}
+              className="h-4 w-4 accent-red-500"
+            />
+          }
+        />
       </div>
 
       <div className="space-y-3">

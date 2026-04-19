@@ -22,6 +22,10 @@ interface ReaderToolbarProps {
   onRestoreCriticalRetry: () => void;
 }
 
+const TOOLTIP_BASE = "absolute bottom-full mb-2 left-1/2 -translate-x-1/2 px-2.5 py-1 bg-surface-0/95 text-white text-[11px] font-medium rounded-md backdrop-blur-md border border-border-muted opacity-0 group-hover:opacity-100 pointer-events-none transition-all duration-150 whitespace-nowrap z-[200] shadow-lg";
+const BUTTON_BASE = "relative flex items-center justify-center w-9 h-9 rounded-full transition-all duration-150 ease-out-expo hover:scale-110 active:scale-95";
+const BUTTON_INACTIVE = "text-txt-muted hover:text-white hover:bg-white/5";
+
 export const ReaderToolbar: React.FC<ReaderToolbarProps> = ({
   isHandToolActive,
   isNoteToolActive,
@@ -41,139 +45,139 @@ export const ReaderToolbar: React.FC<ReaderToolbarProps> = ({
   onExport,
   onRestoreCriticalRetry
 }) => {
+  const activeHighlight = HIGHLIGHT_COLORS.find(c => c.id === highlightColor) || HIGHLIGHT_COLORS[0];
+
   return (
-    <div className="fixed bottom-8 right-8 z-[100] flex flex-col items-end gap-3 pointer-events-auto">
-      {isCriticalRetryDismissed && totalCriticalCount > 0 && (
-        <div className="relative group flex items-center mb-2">
-          <div className="absolute right-full mr-3 top-1/2 -translate-y-1/2 px-3 py-1.5 bg-surface-0/95 text-white text-xs font-medium rounded-lg backdrop-blur-md border border-border-muted opacity-0 group-hover:opacity-100 pointer-events-none transition-all duration-200 whitespace-nowrap z-[200] shadow-xl">
-            {totalCriticalCount} avvis{totalCriticalCount === 1 ? 'o critico' : 'i critici'}
+    <div className="fixed bottom-24 left-1/2 -translate-x-1/2 z-[160] pointer-events-auto animate-fade-in-up">
+      <div className="flex items-center gap-1 px-2 py-1.5 bg-surface-1/85 backdrop-blur-xl border border-border-muted rounded-full shadow-surface-2xl">
+
+        {isCriticalRetryDismissed && totalCriticalCount > 0 && (
+          <>
+            <div className="relative group">
+              <div className={TOOLTIP_BASE}>
+                {totalCriticalCount} avvis{totalCriticalCount === 1 ? 'o critico' : 'i critici'}
+              </div>
+              <button
+                onClick={onRestoreCriticalRetry}
+                className={`${BUTTON_BASE} ${(pageForTools !== null && criticalErrorPagesAll.includes(pageForTools))
+                  ? 'bg-danger text-white shadow-glow-danger'
+                  : 'text-danger hover:text-white hover:bg-danger/20'}`}
+                title="Riapri avvisi critici"
+              >
+                <ShieldCheck size={18} />
+                <span className="absolute -top-0.5 -right-0.5 min-w-[16px] h-[16px] flex items-center justify-center px-1 bg-danger text-white text-[9px] font-black rounded-full border border-surface-1 shadow">
+                  {totalCriticalCount}
+                </span>
+              </button>
+            </div>
+            <div className="w-px h-6 bg-border-muted/60" />
+          </>
+        )}
+
+        <div className="relative group">
+          <div className={TOOLTIP_BASE}>
+            {isHandToolActive ? "Disattiva Mano" : "Strumento Mano"}
           </div>
           <button
-            onClick={onRestoreCriticalRetry}
-            className={`relative flex items-center justify-center w-12 h-12 rounded-full shadow-surface-2xl transition-all border ${(pageForTools !== null && criticalErrorPagesAll.includes(pageForTools))
-              ? 'bg-red-600 text-white border-red-400 shadow-glow-danger'
-              : 'bg-surface-4 text-txt-muted border-border-muted shadow-[0_0_16px_rgba(248,81,73,0.25)]'
-              } hover:scale-105 active:scale-95 hover:text-white hover:border-border`}
-            title="Riapri avvisi critici"
+            onClick={() => onToolChange('hand')}
+            className={`${BUTTON_BASE} ${isHandToolActive
+              ? 'bg-accent text-white shadow-glow-accent'
+              : BUTTON_INACTIVE}`}
           >
-            <ShieldCheck size={20} />
-            <span className="absolute -top-1.5 -right-1.5 min-w-[20px] h-[20px] flex items-center justify-center px-1 bg-red-500 text-white text-[10px] font-black rounded-full border-2 border-surface-0 shadow-lg">
-              {totalCriticalCount}
-            </span>
+            <Hand size={18} />
           </button>
         </div>
-      )}
 
-      <div className="relative group flex items-center">
-        <div className="absolute right-full mr-3 top-1/2 -translate-y-1/2 px-3 py-1.5 bg-surface-0/95 text-white text-xs font-medium rounded-lg backdrop-blur-md border border-border-muted opacity-0 group-hover:opacity-100 pointer-events-none transition-all duration-200 whitespace-nowrap z-[200] shadow-xl">
-          {isHandToolActive ? "Disattiva Mano" : "Strumento Mano (Sposta)"}
+        <div className="w-px h-6 bg-border-muted/60" />
+
+        <div className="relative group">
+          <div className={TOOLTIP_BASE}>
+            {canUseNoteTool ? (isNoteToolActive ? "Disattiva Note" : "Aggiungi Nota") : "Solo sul testo tradotto"}
+          </div>
+          <button
+            disabled={!canUseNoteTool}
+            onClick={() => onToolChange('note')}
+            className={`${BUTTON_BASE} ${isNoteToolActive
+              ? 'bg-accent text-white shadow-glow-accent'
+              : BUTTON_INACTIVE} ${!canUseNoteTool ? 'opacity-30 cursor-not-allowed hover:scale-100' : ''}`}
+          >
+            <MessageSquare size={18} />
+          </button>
         </div>
-        <button
-          onClick={() => onToolChange('hand')}
-          className={`flex items-center justify-center w-12 h-12 rounded-full shadow-surface-2xl transition-all border ${isHandToolActive
-            ? 'bg-accent text-white border-accent/50 shadow-glow-accent'
-            : 'bg-surface-4 text-txt-muted border-border-muted'
-            } hover:scale-105 active:scale-95 hover:text-white hover:border-border`}
-        >
-          <Hand size={20} />
-        </button>
-      </div>
 
-      <div className="relative group flex items-center">
-        <div className="absolute right-full mr-3 top-1/2 -translate-y-1/2 px-3 py-1.5 bg-surface-0/95 text-white text-xs font-medium rounded-lg backdrop-blur-md border border-border-muted opacity-0 group-hover:opacity-100 pointer-events-none transition-all duration-200 whitespace-nowrap z-[200] shadow-xl">
-          {canUseNoteTool ? (isNoteToolActive ? "Disattiva Note" : "Aggiungi Nota") : "Le note si aggiungono sul testo tradotto"}
-        </div>
-        <button
-          disabled={!canUseNoteTool}
-          onClick={() => onToolChange('note')}
-          className={`flex items-center justify-center w-12 h-12 rounded-full shadow-surface-2xl transition-all border ${isNoteToolActive
-            ? 'bg-amber-500 text-black border-amber-400 shadow-glow-warning'
-            : 'bg-surface-4 text-txt-muted border-border-muted'
-            } ${canUseNoteTool ? 'hover:scale-105 active:scale-95 hover:text-white hover:border-border' : 'opacity-40 cursor-not-allowed'}`}
-        >
-          <MessageSquare size={20} />
-        </button>
-      </div>
-
-      <div className="relative group flex items-center">
-        <div className="absolute right-full top-1/2 -translate-y-1/2 pr-3 opacity-0 group-hover:opacity-100 pointer-events-none group-hover:pointer-events-auto transition-all scale-95 group-hover:scale-100 origin-right z-[200]">
-          <div className="flex flex-col gap-2 bg-surface-0/90 p-2 rounded-xl backdrop-blur-sm border border-border-muted">
-            <span className="text-[10px] font-bold text-txt-primary uppercase tracking-wider text-center mb-1">Evidenziatore</span>
-            <div className="grid grid-cols-2 gap-2">
-              {HIGHLIGHT_COLORS.map(color => (
-                <button
-                  key={color.id}
-                  onClick={() => onHighlightColorChange(color.id)}
-                  className={getHighlightButtonStyles(highlightColor === color.id, color)}
-                  style={{ backgroundColor: color.hex }}
-                  title={color.label}
-                />
-              ))}
+        <div className="relative group">
+          <div className="absolute bottom-full mb-3 left-1/2 -translate-x-1/2 opacity-0 group-hover:opacity-100 pointer-events-none group-hover:pointer-events-auto transition-all duration-150 scale-95 group-hover:scale-100 origin-bottom z-[200]">
+            <div className="flex flex-col gap-2 bg-surface-0/95 px-3 py-2.5 rounded-xl backdrop-blur-md border border-border-muted shadow-surface-xl">
+              <span className="text-[9px] font-bold text-txt-secondary uppercase tracking-wider text-center">Marker</span>
+              <div className="flex gap-1.5">
+                {HIGHLIGHT_COLORS.map(color => (
+                  <button
+                    key={color.id}
+                    onClick={() => onHighlightColorChange(color.id)}
+                    className={getHighlightButtonStyles(highlightColor === color.id, color)}
+                    style={{ backgroundColor: color.hex }}
+                    title={color.label}
+                  />
+                ))}
+              </div>
             </div>
           </div>
+          <button
+            onClick={() => onToolChange('highlight')}
+            className={`${BUTTON_BASE} ${isHighlightToolActive ? 'text-reader-light-text' : BUTTON_INACTIVE}`}
+            style={isHighlightToolActive ? {
+              backgroundColor: activeHighlight.hex,
+              boxShadow: `0 0 16px ${activeHighlight.hex}99`
+            } : undefined}
+          >
+            <Highlighter size={18} />
+          </button>
         </div>
 
-        <button
-          onClick={() => onToolChange('highlight')}
-          className={`flex items-center justify-center w-12 h-12 rounded-full shadow-surface-2xl transition-all hover:scale-105 active:scale-95 border ${isHighlightToolActive
-            ? (() => {
-              const c = HIGHLIGHT_COLORS.find(c => c.id === highlightColor) || HIGHLIGHT_COLORS[0];
-              return `${c.twClass} text-black border-border-muted0`;
-            })()
-            : 'bg-surface-4 text-txt-muted hover:text-white border-border-muted hover:border-border'
-            }`}
-          style={isHighlightToolActive ? {
-            boxShadow: `0 0 20px ${HIGHLIGHT_COLORS.find(c => c.id === highlightColor)?.hex}66`
-          } : undefined}
-        >
-          <Highlighter size={20} />
-        </button>
-      </div>
-
-      <div className="relative group flex items-center">
-        <div className="absolute right-full mr-3 top-1/2 -translate-y-1/2 px-3 py-1.5 bg-surface-0/95 text-white text-xs font-medium rounded-lg backdrop-blur-md border border-border-muted opacity-0 group-hover:opacity-100 pointer-events-none transition-all duration-200 whitespace-nowrap z-[200] shadow-xl">
-          {showThumbnail ? "Nascondi miniatura originale" : "Mostra miniatura originale"}
+        <div className="relative group">
+          <div className={TOOLTIP_BASE}>
+            {isEraserToolActive ? "Disattiva Gomma" : "Gomma"}
+          </div>
+          <button
+            onClick={() => onToolChange('eraser')}
+            className={`${BUTTON_BASE} ${isEraserToolActive
+              ? 'bg-danger text-white shadow-glow-danger'
+              : BUTTON_INACTIVE}`}
+          >
+            <Eraser size={18} />
+          </button>
         </div>
-        <button
-          onClick={onToggleThumbnail}
-          className={`flex items-center justify-center w-12 h-12 rounded-full shadow-surface-2xl transition-all hover:scale-105 active:scale-95 border ${showThumbnail
-            ? 'bg-accent text-white border-accent/50 shadow-glow-accent-lg'
-            : 'bg-surface-4 text-txt-muted hover:text-white border-border-muted hover:border-border'
-            }`}
-        >
-          {showThumbnail ? <Eye size={20} /> : <EyeOff size={20} />}
-        </button>
-      </div>
 
-      <div className="relative group flex items-center">
-        <div className="absolute right-full mr-3 top-1/2 -translate-y-1/2 px-3 py-1.5 bg-surface-0/95 text-white text-xs font-medium rounded-lg backdrop-blur-md border border-border-muted opacity-0 group-hover:opacity-100 pointer-events-none transition-all duration-200 whitespace-nowrap z-[200] shadow-xl">
-          {isExporting ? `Esportando...` : 'Esporta PDF'}
-        </div>
-        <button
-          onClick={onExport}
-          disabled={isExporting}
-          className={`flex items-center justify-center w-12 h-12 rounded-full shadow-surface-2xl transition-all hover:scale-105 active:scale-95 border ${isExporting
-            ? 'bg-emerald-600 text-white border-emerald-400 shadow-glow-success'
-            : 'bg-surface-4 text-txt-muted hover:text-white border-border-muted hover:border-border'
-            }`}
-        >
-          {isExporting ? <Loader2 size={20} className="animate-spin" /> : <FileDown size={20} />}
-        </button>
-      </div>
+        <div className="w-px h-6 bg-border-muted/60" />
 
-      <div className="relative group flex items-center">
-        <div className="absolute right-full mr-3 top-1/2 -translate-y-1/2 px-3 py-1.5 bg-surface-0/95 text-white text-xs font-medium rounded-lg backdrop-blur-md border border-border-muted opacity-0 group-hover:opacity-100 pointer-events-none transition-all duration-200 whitespace-nowrap z-[200] shadow-xl">
-          {isEraserToolActive ? "Disattiva Gomma" : "Gomma (Cancella)"}
+        <div className="relative group">
+          <div className={TOOLTIP_BASE}>
+            {showThumbnail ? "Nascondi miniatura" : "Mostra miniatura"}
+          </div>
+          <button
+            onClick={onToggleThumbnail}
+            className={`${BUTTON_BASE} ${showThumbnail
+              ? 'bg-accent text-white shadow-glow-accent'
+              : BUTTON_INACTIVE}`}
+          >
+            {showThumbnail ? <Eye size={18} /> : <EyeOff size={18} />}
+          </button>
         </div>
-        <button
-          onClick={() => onToolChange('eraser')}
-          className={`flex items-center justify-center w-12 h-12 rounded-full shadow-surface-2xl transition-all hover:scale-105 active:scale-95 border ${isEraserToolActive
-            ? 'bg-rose-500 text-white border-rose-400 shadow-[0_0_20px_rgba(244,63,94,0.3)]'
-            : 'bg-surface-4 text-txt-muted hover:text-white border-border-muted hover:border-border'
-            }`}
-        >
-          <Eraser size={20} />
-        </button>
+
+        <div className="relative group">
+          <div className={TOOLTIP_BASE}>
+            {isExporting ? "Esportando..." : "Esporta PDF"}
+          </div>
+          <button
+            onClick={onExport}
+            disabled={isExporting}
+            className={`${BUTTON_BASE} ${isExporting
+              ? 'bg-success text-white shadow-glow-success'
+              : BUTTON_INACTIVE}`}
+          >
+            {isExporting ? <Loader2 size={18} className="animate-spin" /> : <FileDown size={18} />}
+          </button>
+        </div>
       </div>
     </div>
   );

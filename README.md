@@ -1,4 +1,4 @@
-# InstantTraducer
+# iTraducer
 
 Electron-based desktop application for translating PDF documents while preserving the original layout structure. The system combines OCR-based page analysis with large language models to produce page-by-page translations that maintain visual fidelity with the source document.
 
@@ -6,7 +6,7 @@ Electron-based desktop application for translating PDF documents while preservin
 
 ## Project Overview
 
-InstantTraducer is designed as a bilingual book reproduction tool: given a PDF input, it produces a translated counterpart where each page mirrors the structure, dimensions, and annotation placement of the original. Translation is performed on a per-page basis using multimodal AI models that analyze the rendered page image directly, rather than relying on extracted text alone. This approach preserves footnotes, sidebars, and complex multi-column layouts that traditional text-extraction pipelines cannot handle.
+iTraducer is designed as a bilingual book reproduction tool: given a PDF input, it produces a translated counterpart where each page mirrors the structure, dimensions, and annotation placement of the original. Translation is performed on a per-page basis using multimodal AI models that analyze the rendered page image directly, rather than relying on extracted text alone. This approach preserves footnotes, sidebars, and complex multi-column layouts that traditional text-extraction pipelines cannot handle.
 
 The application manages a local library of translation projects, each identified by a UUID-based file ID. Project state (translations, annotations, verification results, user highlights and notes) is persisted to disk via an asynchronous save queue with priority-based debouncing. A built-in verification system evaluates translation quality and can suggest corrections through an automated feedback loop.
 
@@ -97,8 +97,8 @@ The application follows a standard Electron two-process architecture:
 
 ```bash
 # Clone the repository
-git clone https://github.com/Giovanui323/InstantTraducer.git
-cd InstantTraducer
+git clone https://github.com/Giovanui323/iTraducer.git
+cd iTraducer
 
 # Install dependencies
 npm install

@@ -28,7 +28,21 @@ export function resolveHighlightsByQuote(
   _scale?: number,
   _containerElement?: HTMLElement
 ) {
-  return highlights.map((h) => resolveHighlightByQuote(h, selectableText, baseOffset));
+  // Track already-anchored ranges to prevent two highlights from
+  // resolving to the same position (which causes the "double highlight" bug)
+  const anchoredRanges: Array<{ start: number; end: number }> = [];
+
+  return highlights.map((h) => {
+    const resolved = resolveHighlightByQuote(h, selectableText, baseOffset, anchoredRanges);
+    // Only track the range when resolution actually anchored the highlight.
+    // Returning the original `h` unchanged means resolution failed — pushing it
+    // would pollute overlap detection for subsequent highlights.
+    const wasAnchored = resolved !== h && Number.isFinite(resolved.start) && resolved.end > resolved.start;
+    if (wasAnchored) {
+      anchoredRanges.push({ start: resolved.start, end: resolved.end });
+    }
+    return resolved;
+  });
 }
 
 const QUOTE_CONTEXT_LEN = 32;
@@ -82,7 +96,8 @@ function getStringFromPart(part: string): string {
 function resolveHighlightByQuote(
   h: UserHighlight,
   selectableText: string,
-  baseOffset: number
+  baseOffset: number,
+  anchoredRanges: Array<{ start: number; end: number }> = []
 ) {
   const exact = (h.quoteExact ?? h.text) || '';
   if (!exact) return h;
@@ -93,7 +108,27 @@ function resolveHighlightByQuote(
   // Step 1: Try exact quote matching with context scoring
   const bestExact = findBestQuoteMatch(selectableText, exact, h.quotePrefix, h.quoteSuffix, offsetHint);
   if (bestExact !== null) {
-    return buildResolved(h, selectableText, baseOffset, bestExact, exact.length);
+    const resolved = buildResolved(h, selectableText, baseOffset, bestExact, exact.length);
+    // Check if this resolved position overlaps too much with an already-anchored highlight
+    if (!hasSignificantOverlap(resolved.start, resolved.end, anchoredRanges)) {
+      return resolved;
+    }
+    // If overlapping, walk through additional exact matches before giving up.
+    // Falling through to fuzzy/offset fallback would be worse: the text exists,
+    // we just need a different occurrence of it.
+    const excluded: number[] = [bestExact];
+    while (true) {
+      const next = findBestQuoteMatch(selectableText, exact, h.quotePrefix, h.quoteSuffix, offsetHint, excluded);
+      if (next === null) break;
+      const nextResolved = buildResolved(h, selectableText, baseOffset, next, exact.length);
+      if (!hasSignificantOverlap(nextResolved.start, nextResolved.end, anchoredRanges)) {
+        return nextResolved;
+      }
+      excluded.push(next);
+    }
+    // All exact matches overlap with already-anchored ranges — accept the best
+    // one anyway rather than fuzzy-matching elsewhere.
+    return resolved;
   }
 
   // Step 2: Try normalized matching (collapse whitespace)
@@ -116,8 +151,16 @@ function resolveHighlightByQuote(
     }
   }
 
-  // Step 3: Fuzzy matching — find best approximate match
-  if (exact.length >= 8) { // Only for non-trivial strings
+  // Step 3: Fuzzy matching — find best approximate match.
+  // Only fire when we have a credible offset hint that points inside (or very
+  // near) this selectable text. Without that guard, fuzzy easily anchors
+  // highlights that belong to a *different* MarkdownText instance (e.g. the
+  // other column of a split page, or a different page) into unrelated text
+  // that happens to share bigrams — the "ghost highlight" bug.
+  const hintIsInside = typeof offsetHint === 'number' && Number.isFinite(offsetHint)
+    && offsetHint >= -exact.length
+    && offsetHint <= selectableText.length + exact.length;
+  if (exact.length >= 8 && hintIsInside) {
     const bestFuzzy = findFuzzyMatch(selectableText, exact, offsetHint);
     if (bestFuzzy !== null) {
       return buildResolved(h, selectableText, baseOffset, bestFuzzy.start, bestFuzzy.length);
@@ -156,6 +199,27 @@ function buildResolved(
   };
 }
 
+/** Check if a range overlaps significantly (≥80%) with any already-anchored range */
+function hasSignificantOverlap(
+  start: number,
+  end: number,
+  anchoredRanges: Array<{ start: number; end: number }>
+): boolean {
+  const len = end - start;
+  if (len <= 0) return false;
+  for (const r of anchoredRanges) {
+    const existingLen = r.end - r.start;
+    if (existingLen <= 0) continue; // skip degenerate ranges to avoid NaN
+    const overlapStart = Math.max(r.start, start);
+    const overlapEnd = Math.min(r.end, end);
+    const overlapLen = Math.max(0, overlapEnd - overlapStart);
+    if (overlapLen === 0) continue;
+    const overlapRatio = Math.max(overlapLen / len, overlapLen / existingLen);
+    if (overlapRatio >= 0.8) return true;
+  }
+  return false;
+}
+
 /** Collapse multiple whitespace into single spaces and trim */
 function normalizeWS(s: string): string {
   return s.replace(/\s+/g, ' ').trim();
@@ -164,6 +228,12 @@ function normalizeWS(s: string): string {
 /**
  * Map a position in normalized (whitespace-collapsed) text back to the original text.
  * Returns { start, length } in original text coordinates.
+ *
+ * normalizeWS does two things: replace runs of whitespace with a single space,
+ * and trim leading/trailing whitespace. This walk reverses that mapping by
+ * stepping the original cursor past leading whitespace, then advancing both
+ * cursors in lockstep, condensing runs of whitespace in the original to one
+ * normalized space.
  */
 function mapNormalizedPosition(
   original: string,
@@ -171,65 +241,70 @@ function mapNormalizedPosition(
   normStart: number,
   normLength: number
 ): { start: number; length: number } | null {
-  // Walk both strings in sync
-  let oi = 0; // original index
-  let ni = 0; // normalized index
+  const isWs = (ch: string) => /\s/.test(ch);
+  const targetEnd = normStart + normLength;
+
+  let oi = 0;
+  let ni = 0;
   let mappedStart = -1;
 
-  while (oi < original.length && ni < normStart + normLength) {
-    // Skip extra whitespace in original
-    if (/\s/.test(original[oi]) && (oi === 0 || /\s/.test(original[oi - 1]))) {
-      // In normalized, multiple spaces become one. Skip extra spaces in original.
-      if (ni > 0 || /\s/.test(original[oi])) {
-        // Check if this is an extra space that was collapsed
-        const nextNonSpace = original.slice(oi).search(/\S/);
-        if (nextNonSpace > 1) {
-          oi += nextNonSpace - 1; // Skip to last space before non-space
-        }
-      }
+  // Skip leading whitespace removed by trim()
+  while (oi < original.length && isWs(original[oi])) oi++;
+
+  while (oi < original.length && ni <= targetEnd) {
+    if (ni === normStart && mappedStart === -1) mappedStart = oi;
+    if (ni === targetEnd) break;
+
+    if (isWs(original[oi])) {
+      // A run of whitespace maps to a single space in normalized.
+      while (oi < original.length && isWs(original[oi])) oi++;
+      ni++;
+    } else {
+      oi++;
+      ni++;
     }
-
-    if (ni === normStart && mappedStart === -1) {
-      mappedStart = oi;
-    }
-
-    if (ni >= normStart + normLength) break;
-
-    oi++;
-    ni++;
   }
 
-  if (mappedStart === -1) return null;
-  const mappedEnd = oi;
-  return { start: mappedStart, length: mappedEnd - mappedStart };
+  // If the target was at the very end, we may exit without setting mappedStart
+  if (mappedStart === -1) {
+    if (ni === normStart) mappedStart = oi;
+    else return null;
+  }
+
+  return { start: mappedStart, length: oi - mappedStart };
 }
 
 /**
  * Find the best position of `exact` in `haystack` using context scoring.
  * 
  * Scoring:
- * - Prefix/suffix overlap (0-10 points each, proportional to match length)
- * - Offset proximity hint (small penalty for distance, max -5 points)
- * - Exact prefix/suffix match gets bonus points
+ * - Prefix/suffix overlap (0-12 points each, proportional to match length + exact bonus)
+ * - Offset proximity hint (tiebreaker: max +15 bonus for close, max -20 penalty for far)
+ * - Candidates in the `exclude` list are skipped
  */
 function findBestQuoteMatch(
   haystack: string,
   exact: string,
   prefix?: string,
   suffix?: string,
-  near?: number | null
+  near?: number | null,
+  exclude: number[] = []
 ): number | null {
   if (!exact) return null;
 
   let idx = haystack.indexOf(exact);
   if (idx === -1) return null;
 
-  // Collect all candidate positions
+  // Collect all candidate positions, excluding any in the exclude list
+  const excludeSet = new Set(exclude);
   const candidates: number[] = [];
   while (idx !== -1) {
-    candidates.push(idx);
+    if (!excludeSet.has(idx)) candidates.push(idx);
     idx = haystack.indexOf(exact, idx + 1);
   }
+
+  // No candidates after exclusion
+  if (candidates.length === 0) return null;
 
   // Single match — return immediately (no disambiguation needed)
   if (candidates.length === 1) return candidates[0];
@@ -266,10 +341,19 @@ function findBestQuoteMatch(
       }
     }
 
-    // Offset proximity hint (max -5 points penalty)
+    // Offset proximity hint — acts as tiebreaker when context is ambiguous.
+    // Context (prefix/suffix) is primary (max 24 points); proximity must not
+    // overwhelm it, but should still disambiguate when context is equal.
     if (typeof near === 'number' && Number.isFinite(near)) {
       const distance = Math.abs(start - near);
-      score -= Math.min(5, distance / 100); // Gentle penalty
+      if (distance <= 5) {
+        score += 15; // Very close — moderate bonus
+      } else if (distance <= 20) {
+        score += 8; // Close — small bonus
+      } else if (distance <= 50) {
+        score += 3; // Reasonably close — minimal bonus
+      }
+      score -= Math.min(20, distance / 10); // Distance penalty
     }
 
     if (score > bestScore) {
@@ -324,7 +408,10 @@ function findFuzzyMatch(
     Math.ceil(needleLen * 1.1)
   ];
 
-  let bestScore = 0.7; // Minimum threshold
+  // Minimum similarity threshold. 0.7 is far too permissive for Italian
+  // text (words ending in "-zione", "-mente", etc. trivially share bigrams)
+  // and was the root cause of fuzzy matches landing on unrelated phrases.
+  let bestScore = 0.92;
   let bestStart = -1;
   let bestLen = needleLen;
   const step = Math.max(1, Math.floor(needleLen / 4)); // Skip some positions for performance

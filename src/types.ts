@@ -46,7 +46,15 @@ export interface CustomModel {
 export type OpenAIModel = string;
 export type ReasoningEffort = 'none' | 'low' | 'medium' | 'high';
 export type VerbosityLevel = 'low' | 'medium' | 'high';
-export type SettingsSection = 'aiRoles' | 'apiKeys' | 'testAi' | 'prompts' | 'translationLogic' | 'costs' | 'libraryTrash' | 'exportApp' | 'logsDiagnostic';
+export type SettingsSection = 'aiRoles' | 'apiKeys' | 'testAi' | 'prompts' | 'translationLogic' | 'costs' | 'libraryTrash' | 'exportApp' | 'logsDiagnostic' | 'admin' | 'modelsInUse' | 'userPermissions' | 'userApiKeys';
+
+/**
+ * Permessi che l'admin concede agli utenti non-admin.
+ * Se un provider è presente nella mappa, l'utente può usarlo inserendo la propria API key,
+ * ma è limitato al singolo `model` scelto dall'admin per quel provider.
+ * Se la mappa è assente o vuota, l'utente non può usare nessun provider in modalità "user".
+ */
+export type UserPermissions = Partial<Record<AIProvider, { model: string }>>;
 
 export type ClaudeModel =
   | 'claude-3-7-sonnet-20250219'
@@ -113,6 +121,7 @@ export interface AISettings {
   customVerificationPrompt?: string;
   customMetadataPrompt?: string;
   disabledProviders?: AIProvider[];
+  enableClaudeOpusFast?: boolean;
   verboseLogs?: boolean;
   consultationMode?: boolean;
   customProjectsPath?: string;
@@ -133,6 +142,11 @@ export interface AISettings {
       timestamp: number;
     }>;
   };
+  /**
+   * Permessi concessi dall'admin agli utenti non-admin.
+   * Vedi UserPermissions per la semantica (un solo modello per provider).
+   */
+  userPermissions?: UserPermissions;
 }
 
 export type VerificationState = 'idle' | 'verifying' | 'verified' | 'failed';

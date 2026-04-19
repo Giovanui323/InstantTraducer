@@ -13,9 +13,8 @@ import { log } from "./logger";
 import { cleanTranslationText } from "./textClean";
 import { retry, withTimeout } from "../utils/async";
 import { safeParseJsonObject } from "../utils/json";
-import { getGroqTranslateSystemPrompt, getGroqTranslateUserInstruction, GROQ_VISION_MODELS } from './prompts/groq';
+import { getGroqTranslateSystemPrompt, getGroqTranslateUserInstruction, getGroqVerifyQualitySystemPrompt, GROQ_VISION_MODELS } from './prompts/groq';
 import { getMetadataExtractionPrompt } from './prompts/shared';
-import { getVerifyQualitySystemPrompt } from "./verifierPrompts";
 import { AI_VERIFICATION_TIMEOUT_MS } from "../constants";
 import { trackUsage } from "./usageTracker";
 
@@ -136,7 +135,7 @@ export const translateWithGroq = async (
   const startedAt = performance.now();
   const imageBytesApprox = Math.floor((imageBase64.length * 3) / 4);
   const isRetry = Boolean(extraInstruction && extraInstruction.trim().length > 0);
-  const systemPrompt = getGroqTranslateSystemPrompt(sourceLanguage, previousContext, legalContext ?? true, isRetry, customPrompt);
+  const systemPrompt = getGroqTranslateSystemPrompt(sourceLanguage, previousContext, legalContext ?? true, isRetry, customPrompt, model);
 
   if (onProgress) onProgress(`Preparazione richiesta Groq (${model})...`);
   log.wait(`[GROQ-TRANSLATION] Richiesta (${model})...`, {
@@ -268,7 +267,7 @@ export const verifyTranslationQualityWithGroq = async (params: {
 
   const systemPrompt = customPrompt && customPrompt.trim().length > 0
     ? customPrompt
-    : getVerifyQualitySystemPrompt(legalContext, sourceLanguage, verifierModel);
+    : getGroqVerifyQualitySystemPrompt(legalContext, sourceLanguage, verifierModel);
 
   const isVision = isGroqVisionModel(verifierModel);
   if (!isVision) {
@@ -365,6 +364,13 @@ export const testGroqConnection = async (apiKey: string, model: GroqModel, signa
       return { success: false, message: `Errore Groq: ${e?.error?.message || response.statusText}` };
     }
     const data = await response.json();
+
+    // Track usage for connection test
+    if (data.usage) {
+      const { prompt_tokens, completion_tokens } = data.usage;
+      trackUsage(model, prompt_tokens || 0, completion_tokens || 0);
+    }
+
     const text = data.choices?.[0]?.message?.content || "";
     if (text.trim().length > 0) {
       log.success(`Test Groq riuscito: "${text.trim()}"`);

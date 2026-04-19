@@ -122,23 +122,23 @@ export const OriginalThumbnail: React.FC<OriginalThumbnailProps> = ({
               }}
             />
           ) : (
-            <div className="w-full h-full flex flex-col items-center justify-center bg-gray-50 text-txt-muted gap-2">
-              <div className="w-5 h-5 border-2 border-gray-200 border-t-blue-500 rounded-full animate-spin" />
+            <div className="w-full h-full flex flex-col items-center justify-center bg-reader-light-panel text-reader-light-text-soft gap-2">
+              <Loader2 className="w-5 h-5 animate-spin text-accent" />
               <span className="text-[8px] font-bold uppercase tracking-tighter">Caricamento...</span>
             </div>
           )}
-          <div className="absolute top-2 left-2 z-[30] opacity-0 group-hover/thumb:opacity-100 transition-opacity">
+          <div className="absolute top-2 left-2 z-[30] opacity-0 group-hover/thumb:opacity-100 transition-opacity duration-200">
             <button
               type="button"
               aria-label="Modifica originale"
-              className="pointer-events-auto p-2 bg-white text-black rounded-full shadow-lg hover:scale-110 transition-all border border-black/10"
+              className="pointer-events-auto p-2 bg-white/95 backdrop-blur-sm text-reader-light-text-soft hover:text-accent rounded-full shadow-elev-2 hover:shadow-elev-3 hover:scale-110 transition-all duration-150 border border-reader-light-border"
               onClick={(e) => {
                 e.stopPropagation();
                 onEdit();
               }}
               title="Modifica"
             >
-              <Pencil size={16} className="text-gray-900" />
+              <Pencil size={16} />
             </button>
           </div>
           <div className="absolute bottom-2 right-2 flex gap-1.5 opacity-0 group-hover/thumb:opacity-100 transition-opacity pointer-events-auto z-[30]">

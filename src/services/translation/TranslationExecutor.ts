@@ -186,6 +186,12 @@ export const executePageTranslation = async (
         const result = await services.renderDocPageToJpeg(doc, replacement.sourcePage, { scale: renderScale, jpegQuality, extraRotation: userRotation, signal });
         imageData = result.base64;
 
+        setters.setPageDims(prev => ({
+          ...prev,
+          [targetPage]: { width: (result.width || 0) / renderScale, height: (result.height || 0) / renderScale }
+        }));
+
+        services.appendPageConsole(targetPage, `Sostituzione rilevata: PDF esterno ${replacement.filePath}`);
         services.appendPageConsole(targetPage, `Render sostituzione completato - ${Math.round(result.width)}x${Math.round(result.height)}`, { scale: renderScale });
 
         let sourceDataUrl = result.dataUrl;
@@ -247,7 +253,10 @@ export const executePageTranslation = async (
 
           setters.setPageDims(prev => ({
             ...prev,
-            [targetPage]: { width: result.width || 0, height: result.height || 0 }
+            [targetPage]: { 
+              width: (result.width || 0) / baseRenderScale, 
+              height: (result.height || 0) / baseRenderScale 
+            }
           }));
 
           services.appendPageConsole(
@@ -444,15 +453,31 @@ export const executePageTranslation = async (
 
     if (currentProjectFileId) {
       const fileId = currentProjectFileId;
-      const saveResultId = await services.updateLibrary(fileId, {
-        fileId,
-        translations: { [targetPage]: normalizedText },
-        translationsMeta: { [targetPage]: metaUpdate },
-        annotations: { [targetPage]: result.annotations || [] }
-      }, 'CRITICAL');
+      // CRITICAL FIX: Add retry logic for updateLibrary to handle transient blocks
+      let saveResultId = "";
+      let saveAttempts = 0;
+      const MAX_SAVE_ATTEMPTS = 3;
+
+      while (saveAttempts < MAX_SAVE_ATTEMPTS) {
+        saveResultId = await services.updateLibrary(fileId, {
+          fileId,
+          fileName: metadata?.name,
+          translations: { [targetPage]: normalizedText },
+          translationsMeta: { [targetPage]: metaUpdate },
+          annotations: { [targetPage]: result.annotations || [] }
+        }, 'CRITICAL');
+
+        if (saveResultId) break;
+
+        saveAttempts++;
+        if (saveAttempts < MAX_SAVE_ATTEMPTS) {
+          log.warning(`[EXECUTOR] Salvataggio respinto dal sistema (Tentativo ${saveAttempts}/${MAX_SAVE_ATTEMPTS}). Riprovo tra 1s...`);
+          await sleep(1000);
+        }
+      }
 
       if (!saveResultId) {
-        throw new Error("Salvataggio su disco fallito (File bloccato o errore I/O).");
+        throw new Error("Salvataggio su disco fallito dopo vari tentativi (Dati incompleti o operazione bloccata). Verifica lo stato del progetto.");
       }
     }
 

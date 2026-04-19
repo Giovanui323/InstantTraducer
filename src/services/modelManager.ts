@@ -41,7 +41,14 @@ export const getAvailableModels = (provider: AIProvider, settings?: AISettings):
   } else if (provider === 'zai') {
     merged.push(...ZAI_MODELS_LIST.map(m => ({ ...m, provider: 'zai' as AIProvider, isCustom: false })));
   } else if (provider === 'openrouter') {
-    merged.push(...OPENROUTER_MODELS_LIST.map(m => ({ ...m, provider: 'openrouter' as AIProvider, isCustom: false })));
+    const list = OPENROUTER_MODELS_LIST.map(m => ({ ...m, provider: 'openrouter' as AIProvider, isCustom: false }));
+    const filtered = list.filter(m => {
+      if (m.id === 'anthropic/claude-opus-4.6-fast') {
+        return !!settings?.enableClaudeOpusFast;
+      }
+      return true;
+    });
+    merged.push(...filtered);
   }
 
   // Deduplica eventuali conflitti (il custom sovrascrive lo standard)
@@ -79,8 +86,7 @@ export const getSafeModel = (requestedId: string, provider: AIProvider, settings
     return 'gemini-2.5-flash'; // Fallback universale assoluto
   } else if (provider === 'claude') {
     if (requestedId.includes('haiku')) return 'claude-haiku-4-5-20251001';
-    if (requestedId.includes('opus')) return 'claude-opus-4-6';
-    return 'claude-sonnet-4-6'; // Fallback per sonnet o vecchi modelli
+    return 'claude-haiku-4-5-20251001'; // Default safe fallback to Haiku
   } else if (provider === 'openai') {
     if (requestedId.includes('o3') || requestedId.includes('o1-mini')) return 'o3-mini';
     if (requestedId.includes('o1')) return 'o1-preview';
@@ -98,11 +104,6 @@ export const getSafeModel = (requestedId: string, provider: AIProvider, settings
     if (requestedId.includes('air')) return 'glm-4-air';
     return 'glm-4-plus';
   } else if (provider === 'openrouter') {
-    if (requestedId.includes('opus')) {
-      return requestedId.includes('fast') ? 'anthropic/claude-opus-4.6-fast' : 'anthropic/claude-opus-4.6';
-    }
-    if (requestedId.includes('sonnet')) return 'anthropic/claude-sonnet-4.5';
-    if (requestedId.includes('haiku')) return 'anthropic/claude-haiku-4.5';
     if (requestedId.includes('flash-lite') || requestedId.includes('flash_lite')) return 'google/gemini-3.1-flash-lite-preview';
     if (requestedId.includes('qwen')) return 'qwen/qwen3.6-plus';
     if (requestedId.includes('grok')) return 'x-ai/grok-4.20-multi-agent';
@@ -110,7 +111,7 @@ export const getSafeModel = (requestedId: string, provider: AIProvider, settings
     if (requestedId.includes('glm')) return 'z-ai/glm-5.1';
     if (requestedId.includes('mimo')) return 'xiaomi/mimo-v2-flash';
     if (requestedId.includes('elephant')) return 'openrouter/elephant-alpha';
-    return 'anthropic/claude-sonnet-4.5';
+    return 'google/gemini-3.1-flash-lite-preview'; // Absolute safe default for OpenRouter
   }
 
   return requestedId; // Fallback estremo se nulla matcha (rischia l'errore api, ma noi preverremo prima)

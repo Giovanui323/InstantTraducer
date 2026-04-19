@@ -111,7 +111,7 @@ export const translateWithZai = async (
 
   const startedAt = performance.now();
   const isRetry = Boolean(extraInstruction && extraInstruction.trim().length > 0);
-  const systemPrompt = getOpenAITranslateSystemPrompt(sourceLanguage, previousContext, legalContext ?? true, isRetry, customPrompt);
+  const systemPrompt = getOpenAITranslateSystemPrompt(sourceLanguage, previousContext, legalContext ?? true, isRetry, customPrompt, model);
 
   if (onProgress) onProgress(`Preparazione richiesta Z.ai (${model})`);
   log.wait(`[ZAI-TRANSLATION] Richiesta (${model})...`, {
@@ -301,6 +301,13 @@ export const testZaiConnection = async (apiKey: string, model: string, signal?: 
       return { success: false, message: `Errore Z.ai: ${e?.error?.message || response.statusText}` };
     }
     const data = await response.json();
+
+    // Track usage for connection test
+    if (data.usage) {
+      const { prompt_tokens, completion_tokens } = data.usage;
+      trackUsage(model, prompt_tokens || 0, completion_tokens || 0);
+    }
+
     const text = data.choices?.[0]?.message?.content || '';
     if (text.trim().length > 0) {
       log.success(`Test Z.ai riuscito: "${text.trim()}"`);

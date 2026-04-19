@@ -13,7 +13,7 @@ describe('withFileLock', () => {
   it('fallisce se il lock non è acquisibile e non esegue il task', async () => {
     const { withFileLock } = await import('../electron/fileUtils.js');
 
-    const dir = await fs.promises.mkdtemp(path.join(os.tmpdir(), 'instanttraducer-lock-'));
+    const dir = await fs.promises.mkdtemp(path.join(os.tmpdir(), 'itraducer-lock-'));
     const filePath = path.join(dir, 'file.json');
     const lockPath = `${filePath}.lock`;
 

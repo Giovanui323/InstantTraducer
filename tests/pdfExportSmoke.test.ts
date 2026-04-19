@@ -39,7 +39,7 @@ vi.mock('electron', () => {
     }
   }
 
-  const baseDir = fs.mkdtempSync(path.join(os.tmpdir(), 'instanttraducer-export-'));
+  const baseDir = fs.mkdtempSync(path.join(os.tmpdir(), 'itraducer-export-'));
   const app = {
     getPath: (name: string) => {
       if (name === 'userData') return baseDir;

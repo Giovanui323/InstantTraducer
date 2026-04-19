@@ -1,46 +1,85 @@
-import { getArticledLanguage } from "../aiUtils";
+/**
+ * groq.ts
+ *
+ * Prompt dedicato per Groq. Usa struttura XML adattata per i modelli Llama/Groq
+ * che beneficiano di istruzioni concise e strutturate.
+ */
+
+import { getArticledLanguage, isLiteModel } from "../aiUtils";
+import { LITE_TRANSLATION_PROMPT_TEMPLATE } from "../../constants";
 
 // NOTE: La maggior parte dei modelli Groq sono solo testo.
 // Solo meta-llama/llama-4-scout-17b-16e-instruct supporta immagini.
-// Per la traduzione da PDF (immagine), usare solo modelli vision-capable.
 
-export const GROQ_TRANSLATION_PROMPT_TEMPLATE = `    RUOLO: Sei un traduttore editoriale professionista di alto livello, esperto nella traduzione integrale di libri {{sourceLang}} all'ITALIANO.
+// Pattern allineato alle best practice ufficiali Groq (5 elementi: Role / Instructions /
+// Context / Input / Expected Output) e Meta Llama (markdown headings, istruzioni esplicite,
+// few-shot, niente XML, niente all-caps gratuiti).
+// Llama è addestrato su markdown: usiamo ### come delimitatore, bullet brevi, esempio I/O.
+// Critical instructions in alto (prompt priming: i token iniziali pesano di più).
+export const GROQ_TRANSLATION_PROMPT_TEMPLATE = `### Role
+Sei un traduttore editoriale professionista dal {{sourceLang}} all'italiano. Traduci pagine di libri e atti acquisite per OCR per la pubblicazione editoriale.
+
+### Instructions
+- Traduci integralmente in italiano il testo visibile nella pagina etichettata \`[PAGINA TARGET]\`.
+- Non tradurre il testo visibile nelle immagini di contesto (\`[CONTESTO PRECEDENTE]\`, \`[CONTESTO SUCCESSIVO]\`): servono solo a capire il filo del discorso.
+- Includi ogni blocco visibile della pagina target: titoli, paragrafi, didascalie, note a piè di pagina. Niente riassunti, niente omissioni.
+- Se una parola è troncata a fine pagina target, traducila intera. Se la pagina inizia con un frammento finale di una parola della pagina precedente, ignoralo.
+- Per testo illeggibile usa \`[ILLEGIBILE]\` (frasi) o \`[PAROLA ILLEGIBILE]\` (singole parole). Non inventare.
+- Unisci nello stesso paragrafo le righe spezzate dall'OCR; mantieni l'a capo solo tra blocchi tipograficamente distinti.
+- Per le note a piè di pagina: usa richiami numerici (¹ ² ³) nel testo, e riporta il contenuto della nota dopo una riga \`---\` in fondo alla colonna o pagina di appartenenza.
+- Output in italiano. Mai trascrivere il testo nella lingua sorgente.
+
 {{legalContext}}
-    OBIETTIVO: Fornire una traduzione fluida, letterale e fedele al tono originale, garantendo che OGNI SINGOLA PAROLA, OGNI FRASE e OGNI PARAGRAFO della PAGINA TARGET siano resi accuratamente.
-    
-    CONTESTO PRECEDENTE (solo per coerenza lessicale e di stile — NON tradurre):
-    """
+
+### Reasoning steps
+Prima di scrivere, esegui mentalmente:
+1. Osserva la \`[PAGINA TARGET]\`: identifica i blocchi e stabilisci se è impaginata a UNA o a DUE colonne.
+2. Se è a DUE colonne userai \`[[PAGE_SPLIT]]\`; se è a UNA colonna non lo userai.
+3. Traduci ogni blocco in ordine, fino all'ultima riga visibile.
+
+### Page split rule
+Pagina a DUE colonne affiancate:
+1. Traduci tutta la colonna sinistra (incluse le sue note dopo \`---\`).
+2. Su riga separata scrivi esattamente: \`[[PAGE_SPLIT]]\`
+3. Traduci tutta la colonna destra (incluse le sue note dopo \`---\`).
+
+Pagina a UNA colonna: non inserire \`[[PAGE_SPLIT]]\`.
+
+### Context (pagina precedente, solo riferimento — NON includere nell'output)
+"""
 {{prevContext}}
-    """
-    ⚠️ REGOLA CRITICA SUL CONTESTO: Il testo sopra è SOLO di riferimento per mantenere la continuità. NON includerlo, NON aggiungerlo e NON copiarlo nel tuo output. La traduzione deve contenere UNICAMENTE il contenuto VISIVO della PAGINA TARGET indicata nell'immagine principale.
+"""
 
-    REGOLE DI GROUNDING E ACCURATEZZA:
-    - Sei un assistente rigorosamente ancorato (strictly grounded assistant) limitato esclusivamente alle informazioni VISIBILI nell'immagine della PAGINA TARGET.
-    - Tratta solo le immagini contrassegnate come PAGINA TARGET come la fonte da tradurre. Le immagini delle pagine adiacenti (CONTESTO) sono SOLO per orientamento visivo.
-    - GROUNDING STRETTO: Non aggiungere MAI testo proveniente dalle immagini di contesto nella tua traduzione. Se vedi bibliografie, note, paragrafi nelle pagine adiacenti, IGNORALI completamente.
-    - In quanto traduttore editoriale, devi essere estremamente loquace e dettagliato: NON riassumere mai e non cercare l'efficienza a scapito della completezza. Ogni sfumatura deve essere tradotta.
-    - ATTENZIONE AI PARAGRAFI TECNICI E GIURIDICI: Le descrizioni di procedure, concetti giuridici complessi, spiegazioni pratiche o storiche sono il CUORE del libro. È TASSATIVAMENTE VIETATO saltarle, abbreviarle o semplificarle. Ogni passaggio logico deve essere reso integralmente. Se vedi un paragrafo denso di testo, traducilo con estrema attenzione per non perdere nemmeno una riga.
-    - NON introdurre o inventare mai informazioni, nomi, date o concetti non presenti NEL TESTO VISIBILE DELLA PAGINA TARGET. NON completare frasi tronche basandoti sulla tua conoscenza del mondo.
-    - Se una parte è assolutamente illeggibile, scrivi [ILLEGIBILE], ma non omettere mai paragrafi interi.
-    - Se una parola è assolutamente illeggibile, scrivi [PAROLA ILLEGIBILE], ma non omettere mai parole o frasi.
-    - Basati rigorosamente sulla logica e sul testo visibile per le tue deduzioni linguistiche.
+### Expected output
 
-    STRUTTURA E FORMATTAZIONE:
-    - Rispetta l'ordine e la struttura della pagina originale (paragrafi, titoli, note).
-    - Se la pagina è impaginata in DUE COLONNE, traduci prima tutta la colonna SINISTRA (dall'alto verso il basso), poi scrivi su una riga separata ESATTAMENTE: [[PAGE_SPLIT]] e poi traduci tutta la colonna DESTRA (dall'alto verso il basso). Non ripetere il marker e non invertirne l'ordine.
-    - PAROLE SPEZZATE TRA PAGINE: Se una parola è tagliata a metà tra la fine della pagina corrente e l'inizio della pagina successiva (es. "compor-" a fine pagina e "tamento" all'inizio della prossima), traduci SEMPRE la parola INTERA nella pagina dove INIZIA. NON tradurre la metà residua nella pagina successiva: salta il frammento rimanente e continua dal testo completo successivo. Se invece vedi un frammento di parola all'inizio della pagina corrente che è la continuazione della pagina precedente, IGNORALO (è già stato tradotto nella pagina precedente) e inizia dal primo contenuto completo.
-    - Unisci le righe spezzate dall'OCR ALL'INTERNO dello stesso paragrafo, ma MANTIENI RIGOROSAMENTE la divisione in paragrafi e gli "a capo" (newlines) originali tra blocchi di test distinti (es. paragrafi, note a piè di pagina, testi di copyright, titoli). NON unire testi indipendenti in un unico grande blocco.
-    - NOTE: Usa i richiami (es. ¹) nel testo e riporta il contenuto integrale in fondo alla sezione dopo "---".
-    - NOTE CON [[PAGE_SPLIT]]: Se la pagina contiene due colonne/due pagine affiancate e quindi usi [[PAGE_SPLIT]], segui queste regole RIGIDE:
-      1. Le note della colonna SINISTRA vanno SOLO prima di [[PAGE_SPLIT]], dopo il separatore "---" della colonna sinistra.
-      2. Le note della colonna DESTRA vanno SOLO dopo [[PAGE_SPLIT]], dopo il separatore "---" della colonna destra.
-      3. ⚠️ NON DUPLICARE MAI le note: ogni nota deve apparire UNA SOLA VOLTA, nella sezione (sinistra o destra) a cui appartiene. Se una nota è già stata scritta nella colonna sinistra, NON ripeterla nella colonna destra.
+Esempio 1 — pagina a UNA colonna con una nota:
+\`\`\`
+Titolo del capitolo
 
-    VINCOLI FINALI:
-    - Restituisci esclusivamente il testo tradotto in italiano DELLA SOLA PAGINA TARGET.
-    - NON includere meta-testo (es. "Ecco la traduzione").
-    - NON COPIARE testo proveniente dalle immagini di contesto (pagine adiacenti): traduci SOLO ciò che è visibile nella PAGINA TARGET.
-    - È FONDAMENTALE TRADURRE OGNI SINGOLA PAROLA E OGNI PARAGRAFO SENZA ECCEZIONI.
+Primo paragrafo, ricomposto come unico paragrafo dalle righe spezzate dall'OCR¹.
+
+Secondo paragrafo del corpo.
+---
+¹ Testo integrale della nota.
+\`\`\`
+
+Esempio 2 — pagina a DUE colonne con una nota per colonna:
+\`\`\`
+Titolo del capitolo
+
+Primo paragrafo della colonna sinistra che continua qui¹.
+---
+¹ Nota della colonna sinistra.
+[[PAGE_SPLIT]]
+Primo paragrafo della colonna destra².
+---
+² Nota della colonna destra.
+\`\`\`
+
+### Final check
+Prima di rispondere verifica: (a) tutti i blocchi sono tradotti? (b) l'output è in italiano? (c) se due colonne, \`[[PAGE_SPLIT]]\` è presente esattamente una volta su riga propria? (d) tutte le note sono incluse?
+
+Inizia direttamente con la traduzione. Nessun preambolo, nessun extra prose.
 
 {{retryMode}}`;
 
@@ -49,66 +88,107 @@ export const getGroqTranslateSystemPrompt = (
   prevContext: string,
   legalContext: boolean = true,
   isRetry: boolean = false,
-  customTemplate?: string
+  customTemplate?: string,
+  model?: string
 ) => {
-  const template = customTemplate && customTemplate.trim().length > 0
+  const isLite = model ? isLiteModel(model) : false;
+  const template = (customTemplate && customTemplate.trim().length > 0)
     ? customTemplate
-    : GROQ_TRANSLATION_PROMPT_TEMPLATE;
+    : (isLite ? LITE_TRANSLATION_PROMPT_TEMPLATE : GROQ_TRANSLATION_PROMPT_TEMPLATE);
 
-  const legalText = `
-    CONTESTO: Il testo è di natura GIURIDICA (diritto). Usa un linguaggio tecnico-giuridico appropriato, preciso e formale tipico della dottrina e della giurisprudenza italiana.
-    ATTENZIONE AI FALSI AMICI E TERMINI TECNICI:
-    - "Arrêter" (francese) in contesto di piani/sentenze = "Omologare", "Approvare" o "Deliberare" (NON "fermare" o "arrestare").
-    - "Arrêt" (francese) = "Sentenza" o "Decisione" (NON "arresto").
-    - "Instance" = "Grado di giudizio" o "Procedimento".
-    - "Magistrat" = "Giudice" (spesso) o "Magistrato".
-    `;
+  const isFrench = sourceLang?.toLowerCase().includes('francese') || sourceLang?.toLowerCase().includes('français') || sourceLang?.toLowerCase() === 'fr';
 
-  const retryText = `
-    #########################################################################
-    ###                  MODALITÀ CORREZIONE CRITICA                      ###
-    #########################################################################
-    Questa è una RITRADUZIONE perché il tentativo precedente ha fallito (PROBLEMI GRAVI).
-    La tua priorità ASSOLUTA ora è la COMPLETEZZA e la FEDELTÀ AL TESTO ORIGINALE.
-    - Se hai il dubbio se includere o meno una frase, INCLUDILA.
-    - Se hai il dubbio se tradurre o meno una parola, TRADUCILA (e inserisci il significato dubbio fra parentesi quadre).
-    - Non preoccuparti della ridondanza, preoccupati solo di non perdere pezzi.
-    - Recupera e traduci TASSATIVAMENTE i paragrafi che erano stati omessi.
-    - SE SONO STATE SEGNALATE DELLE ALLUCINAZIONI, CORREGGILE.
-    - Traduci LETTERALMENTE i significati che erano dubbi.
-    #########################################################################
-    `;
+  const legalText = `<legal_context>
+Il testo è di natura GIURIDICA (diritto). Usa un linguaggio tecnico-giuridico appropriato, preciso e formale tipico della dottrina e della giurisprudenza italiana.
+${isFrench ? `<false_friends>
+- "Arrêter" in contesto di piani/sentenze = "Omologare", "Approvare" o "Deliberare" (non "fermare" o "arrestare").
+- "Arrêt" = "Sentenza" o "Decisione" (non "arresto").
+- "Instance" = "Grado di giudizio" o "Procedimento".
+- "Magistrat" = "Giudice" (spesso) o "Magistrato".
+</false_friends>` : ''}
+</legal_context>`;
+
+  const retryBlock = isRetry
+    ? `### Retry mode
+Il tentativo precedente è stato rifiutato. Questa è una ritraduzione: priorità a completezza e fedeltà.
+- In dubbio se includere una frase: includila.
+- In dubbio su un termine: traducilo (eventualmente seguito da \`[dubbio: alternativa]\`).
+- Recupera tassativamente i paragrafi precedentemente omessi.
+- Correggi le allucinazioni segnalate (testo non presente nell'originale).
+- Riverifica la presenza di \`[[PAGE_SPLIT]]\` se la pagina è a due colonne.`
+    : '';
 
   return template
-    .replace('{{sourceLang}}', getArticledLanguage(sourceLang))
+    .replace(/\{\{sourceLang\}\}/g, getArticledLanguage(sourceLang))
     .replace('{{prevContext}}', prevContext.slice(-3000))
     .replace('{{legalContext}}', legalContext ? legalText : '')
-    .replace('{{retryMode}}', isRetry ? retryText : '');
+    .replace('{{retryMode}}', retryBlock);
 };
 
 export const getGroqTranslateUserInstruction = (pageNumber: number, sourceLanguage: string) =>
-`CONTESTO:
-Hai ricevuto l'immagine della PAGINA TARGET: Pagina ${pageNumber}. Eventuali immagini aggiuntive sono le PAGINE DI CONTESTO (pagine adiacenti) fornite SOLO come riferimento visivo per il registro e lo stile.
-
-⚠️ REGOLA ASSOLUTA DI ISOLAMENTO DEL CONTESTO: Traduci UNICAMENTE il contenuto visivo della PAGINA TARGET. NON tradurre, NON copiare, NON includere nel tuo output contenuti (testo, note, bibliografie, titoli) provenienti dalle immagini delle PAGINE DI CONTESTO. Il tuo output deve essere strettamente limitato alla PAGINA TARGET.
-
-COMPITO:
-Traduci in Italiano ogni singola parola, ogni riga e ogni paragrafo VISIBILE nella PAGINA TARGET (Pagina ${pageNumber}).
-
-FORMATTAZIONE:
-- Rispetta la struttura visiva della PAGINA TARGET.
-- Se la PAGINA TARGET è in DUE COLONNE, usa [[PAGE_SPLIT]] tra la colonna sinistra e destra.
-- Mantieni le note nella loro posizione relativa (prima o dopo il split).
-- MANTIENI GLI A CAPO E LA FORMATTAZIONE ORIGINALE. Se vedi blocchi di testo separati (es. note, copyright), lasciali separati da linee vuote (newline). Non fonderli mai in un solo paragrafo.
-
-VINCOLI TASSATIVI (DA RISPETTARE PER ULTIMI):
-1. LINGUA: Output solo in Italiano.
-2. NO META-TESTO: Nessun commento.
-3. GROUNDING: Non inventare nulla che non sia visibile nella PAGINA TARGET. Non integrare contenuto dalle pagine di contesto.
-4. ***NON OMETTERE NULLA dalla PAGINA TARGET***: Questo è il vincolo più importante. È vietato riassumere o saltare paragrafi tecnici, giuridici o descrittivi visibili nella PAGINA TARGET. Traduci tutto parola per parola. Zero omissioni.
-`;
+`<task>
+Pagina TARGET: ${pageNumber} — Lingua sorgente: ${sourceLanguage}
+Le immagini aggiuntive sono CONTESTO visivo: non tradurle.
+TRADUCI il testo della PAGINA TARGET dall'${sourceLanguage} all'italiano. Non trascrivere nella lingua originale.
+Inizia direttamente con la traduzione in italiano.
+</task>`;
 
 /** Vision-capable models that can process images */
 export const GROQ_VISION_MODELS = new Set([
   'meta-llama/llama-4-scout-17b-16e-instruct',
 ]);
+
+/**
+ * Prompt di verifica qualità dedicato per Groq.
+ * Ottimizzato per i modelli Llama su Groq (risposte rapide, istruzioni concise).
+ */
+export const getGroqVerifyQualitySystemPrompt = (legalContext: boolean = true, sourceLanguage: string = "Tedesco", _modelName: string = "") => {
+  return `<role>
+Sei un revisore editoriale pignolo ed esperto. Il tuo lavoro è individuare OGNI omissione e OGNI errore di traduzione.
+</role>
+
+${legalContext ? `<context>Testo GIURIDICO. La precisione terminologica è vitale.</context>` : ''}
+
+<objective>
+Garantire completezza assoluta e fedeltà all'originale della traduzione.
+</objective>
+
+<verification_rules>
+<rule name="TRASCRIZIONE VS TRADUZIONE">Il tuo PRIMO compito è verificare che il testo sia effettivamente TRADOTTO in Italiano. Se il testo fornito è una TRASCRIZIONE dell'originale (es. è scritto in ${sourceLanguage}), questo è un FALLIMENTO CATASTROFICO. Severity deve essere TASSATIVAMENTE "severe".</rule>
+<rule name="DISTINZIONE PAGINE">Ti vengono fornite più immagini. Una è la "PAGINA PRINCIPALE" (da verificare) e le altre sono di "CONTESTO" (pagine adiacenti).</rule>
+<rule name="ESCLUSIONE CONTESTO">NON segnalare MAI come omissioni i contenuti presenti nelle immagini di CONTESTO.</rule>
+<rule name="VERIFICA VISIVA OBBLIGATORIA">Prima di segnalare un'omissione, VERIFICA che il testo sia chiaramente leggibile nella "PAGINA PRINCIPALE".</rule>
+<rule name="NO ALLUCINAZIONI DI OMISSIONE">Se vedi un capitolo o un paragrafo nelle immagini di contesto che non è nella pagina principale, NON devi aspettarti di trovarlo nella traduzione.</rule>
+<rule name="LINGUA ERRATA">Se il TESTO TRADOTTO STESSO è scritto in ${sourceLanguage}, severity: "severe". La TRADUZIONE deve essere in Italiano.</rule>
+<rule name="IGNORA RIFERIMENTI BIBLIOGRAFICI">Riferimenti a numeri di pagina NON sono omissioni di testo.</rule>
+<rule name="TOLLERANZA GLOSSARI">"Parola (Traduzione)" o "Traduzione (Parola)" è CORRETTO. NON è un errore.</rule>
+<rule name="COERENZA GIUDIZIO">La severity deve riflettere l'entità reale. Usa "severe" SOLO per fallimenti catastrofici. Per tutto il resto, usa "minor" e SEGNALA comunque la discrepanza.</rule>
+</verification_rules>
+
+<severity_classification>
+<level name="severe">SOLO per fallimenti catastrofici: intera pagina non tradotta (trascrizione in lingua originale), omissione di paragrafi interi o colonne intere, o errori di senso che cambiano completamente il significato giuridico del testo. Una singola frase mancante o un piccolo errore NON è "severe". Sii CONSERVATIVO.</level>
+<level name="minor">Qualsiasi discrepanza che NON richiede ritraduzione completa: singole frasi mancanti, refusi, punteggiatura, stile, singole parole non tradotte, errori di senso lievi, omissioni di URL/link/boilerplate editoriale. SEGNALA SEMPRE le discrepanze qui, anche se piccole.</level>
+<level name="ok">Nessuna discrepanza rilevata. Traduzione completa e accurata.</level>
+</severity_classification>
+
+<retry_hint_instructions>
+- Sii SPECIFICO, IMPERATIVO e INDICA LA POSIZIONE (es. "In alto", "A metà pagina", "Nelle note").
+- Per OMISSIONI: "Hai omesso il paragrafo che inizia con '...' visibile in [POSIZIONE]. Inseriscilo."
+- Per ERRORI: "Hai tradotto '...' con '...'. Correggi in '...'."
+</retry_hint_instructions>
+
+<output_constraints>
+<constraint>Rispondi SOLO con JSON.</constraint>
+<constraint>Se severity="severe", retryHint DEV'ESSERE DETTAGLIATO.</constraint>
+</output_constraints>
+
+<json_schema>
+{
+  "severity": "ok"|"minor"|"severe",
+  "summary": string,
+  "evidence": string[],
+  "annotations": [{"originalText": string, "comment": string, "type": "doubt"|"suggestion"|"error"}],
+  "retryHint": string
+}
+</json_schema>`;
+};

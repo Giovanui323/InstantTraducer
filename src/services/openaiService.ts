@@ -5,9 +5,8 @@ import { cleanTranslationText } from "./textClean";
 import { looksLikeItalian } from "./aiUtils";
 import { retry, withTimeout } from "../utils/async";
 import { safeParseJsonObject } from "../utils/json";
-import { getOpenAITranslateSystemPrompt, getOpenAITranslateUserInstruction } from './prompts/openai';
-import { getMetadataExtractionPrompt, buildRetryInstruction } from './prompts/shared';
-import { getVerifyQualitySystemPrompt } from "./verifierPrompts";
+import { getOpenAITranslateSystemPrompt, getOpenAITranslateUserInstruction, getOpenAIVerifyQualitySystemPrompt } from './prompts/openai';
+import { getMetadataExtractionPrompt } from './prompts/shared';
 import { AI_VERIFICATION_TIMEOUT_MS } from "../constants";
 import { trackUsage } from "./usageTracker";
 
@@ -45,7 +44,7 @@ export const translateWithOpenAI = async (
   const startedAt = performance.now();
   const imageBytesApprox = Math.floor((imageBase64.length * 3) / 4);
   const isRetry = Boolean(extraInstruction && extraInstruction.trim().length > 0);
-  const systemPrompt = getOpenAITranslateSystemPrompt(sourceLanguage, previousContext, legalContext ?? true, isRetry, customPrompt);
+  const systemPrompt = getOpenAITranslateSystemPrompt(sourceLanguage, previousContext, legalContext ?? true, isRetry, customPrompt, model);
 
   if (onProgress) onProgress(`Preparazione richiesta OpenAI (${model})`);
   log.wait(`[OPENAI-TRANSLATION] Richiesta (${model})...`, {
@@ -195,7 +194,7 @@ export const verifyTranslationQualityWithOpenAI = async (params: {
 
   const prompt = customPrompt && customPrompt.trim().length > 0 
     ? customPrompt 
-    : getVerifyQualitySystemPrompt(legalContext, sourceLanguage);
+    : getOpenAIVerifyQualitySystemPrompt(legalContext, sourceLanguage);
 
   const isO1 = verifierModel.startsWith('o1-') || verifierModel.startsWith('o3-');
   const messages = [
@@ -321,6 +320,13 @@ export const testOpenAIConnection = async (apiKey: string, model: OpenAIModel, s
     }
 
     const data = await response.json();
+
+    // Track usage for connection test
+    if (data.usage) {
+      const { prompt_tokens, completion_tokens } = data.usage;
+      trackUsage(model, prompt_tokens || 0, completion_tokens || 0);
+    }
+
     const text = data.choices?.[0]?.message?.content || "";
 
     if (text && text.trim().length > 0) {

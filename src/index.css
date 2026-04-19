@@ -172,6 +172,346 @@ select {
   animation: page-enter 200ms cubic-bezier(0.16, 1, 0.3, 1) both;
 }
 
+/* ─── Splash screen — app opening sequence ─── */
+.splash-icon {
+  animation: splash-icon-in 700ms cubic-bezier(0.16, 1, 0.3, 1) both;
+  filter: drop-shadow(0 8px 18px rgba(0, 0, 0, 0.5));
+}
+.splash-title {
+  animation: splash-fade-up 600ms 220ms cubic-bezier(0.16, 1, 0.3, 1) both;
+}
+.splash-tagline {
+  animation: splash-fade-up 600ms 420ms cubic-bezier(0.16, 1, 0.3, 1) both;
+}
+.splash-loading-bar {
+  animation: splash-loading 1400ms 200ms cubic-bezier(0.4, 0, 0.2, 1) both;
+}
+.splash-version {
+  animation: splash-fade-up 600ms 700ms cubic-bezier(0.16, 1, 0.3, 1) both;
+}
+@keyframes splash-icon-in {
+  0%   { opacity: 0; transform: scale(0.88) translateY(10px); }
+  100% { opacity: 1; transform: scale(1) translateY(0); }
+}
+@keyframes splash-fade-up {
+  0%   { opacity: 0; transform: translateY(8px); }
+  100% { opacity: 1; transform: translateY(0); }
+}
+@keyframes splash-loading {
+  0%   { transform: scaleX(0); }
+  100% { transform: scaleX(1); }
+}
+
+/* ─── Active-session card as bookmark ribbon ─── */
+.bookmark-card {
+  position: relative;
+}
+.bookmark-ribbon {
+  position: absolute;
+  left: 22px;
+  top: 0;
+  width: 12px;
+  height: 48px;
+  background: linear-gradient(180deg,
+    #fbbf24 0%,
+    #f59e0b 42%,
+    #d97706 100%);
+  clip-path: polygon(0 0, 100% 0, 100% 100%, 50% 72%, 0 100%);
+  box-shadow:
+    inset 1.5px 0 0 rgba(255, 220, 150, 0.45),    /* light catching left edge */
+    inset -1.5px 0 0 rgba(120, 60, 5, 0.55),       /* darker right edge */
+    2px 3px 6px rgba(0, 0, 0, 0.40);                /* cast shadow on the card */
+  transition:
+    height 280ms cubic-bezier(0.16, 1, 0.3, 1),
+    filter 200ms ease;
+  pointer-events: none;
+  z-index: 2;
+}
+.bookmark-ribbon::before {
+  /* Subtle center fold highlight — fabric crease */
+  content: '';
+  position: absolute;
+  left: 50%;
+  top: 0;
+  bottom: 16%;
+  width: 1px;
+  transform: translateX(-50%);
+  background: linear-gradient(180deg,
+    rgba(255, 255, 255, 0.22) 0%,
+    rgba(255, 255, 255, 0) 100%);
+}
+.bookmark-card:hover .bookmark-ribbon,
+.bookmark-card:focus-within .bookmark-ribbon {
+  height: 60px;
+  filter: brightness(1.12) saturate(1.08);
+}
+
+/* ─── Drop zone styled as an open book ─── */
+.drop-zone-book {
+  position: relative;
+  overflow: hidden;
+}
+.drop-zone-book::before {
+  /* Book spine — amber gilded strip on the left edge */
+  content: '';
+  position: absolute;
+  left: 0;
+  top: 0;
+  bottom: 0;
+  width: 7px;
+  background: linear-gradient(180deg,
+    rgba(245, 158, 11, 0.55) 0%,
+    rgba(217, 119, 6, 0.85) 20%,
+    rgba(217, 119, 6, 0.95) 50%,
+    rgba(217, 119, 6, 0.85) 80%,
+    rgba(245, 158, 11, 0.55) 100%);
+  box-shadow:
+    inset -1px 0 0 rgba(255, 210, 130, 0.45),   /* inner gilt edge */
+    inset 1px 0 0 rgba(120, 60, 5, 0.55),        /* outer darker edge */
+    2px 0 8px rgba(245, 158, 11, 0.18);          /* subtle glow into page */
+  pointer-events: none;
+}
+.drop-zone-book::after {
+  /* Page curl — top-right corner fold */
+  content: '';
+  position: absolute;
+  top: 0;
+  right: 0;
+  width: 26px;
+  height: 26px;
+  background: linear-gradient(225deg,
+    rgba(255, 240, 210, 0.10) 0%,
+    rgba(255, 240, 210, 0.03) 35%,
+    rgba(0, 0, 0, 0.22) 65%,
+    rgba(0, 0, 0, 0.50) 100%);
+  clip-path: polygon(100% 0, 0 0, 100% 100%);
+  pointer-events: none;
+}
+/* Subtle "page margin" stitching line running parallel to the spine */
+.drop-zone-book .spine-stitch {
+  position: absolute;
+  left: 13px;
+  top: 14px;
+  bottom: 14px;
+  width: 1px;
+  background: repeating-linear-gradient(180deg,
+    rgba(245, 158, 11, 0.22) 0px,
+    rgba(245, 158, 11, 0.22) 3px,
+    transparent 3px,
+    transparent 7px);
+  pointer-events: none;
+}
+
+/* ─── Library room — warm backdrop behind the shelf ─── */
+.library-room {
+  position: relative;
+  border-radius: 14px;
+  padding: 1rem 1.25rem 1.75rem;
+  background-color: #0c1428;
+  background-image:
+    /* warm glow from the top (ceiling lamp) */
+    radial-gradient(ellipse 90% 55% at 50% -8%,
+      rgba(245, 158, 11, 0.09) 0%,
+      rgba(245, 158, 11, 0) 65%),
+    /* edge vignette — focuses attention on center */
+    radial-gradient(ellipse 120% 130% at 50% 50%,
+      transparent 52%,
+      rgba(0, 0, 0, 0.42) 100%),
+    /* vertical panel seams — very faint wooden wall paneling */
+    repeating-linear-gradient(90deg,
+      transparent 0px,
+      transparent 179px,
+      rgba(245, 220, 175, 0.022) 180px,
+      transparent 181px),
+    /* warm tint base (over existing navy surface) */
+    linear-gradient(180deg,
+      rgba(38, 24, 12, 0.28) 0%,
+      rgba(8, 5, 3, 0.18) 100%);
+  border: 1px solid rgba(245, 158, 11, 0.10);
+  box-shadow:
+    inset 0 1px 0 rgba(245, 210, 155, 0.10),  /* top cornice highlight */
+    inset 0 -1px 0 rgba(0, 0, 0, 0.35),        /* bottom baseboard line */
+    0 10px 30px rgba(0, 0, 0, 0.35);           /* outer depth */
+}
+
+/* ─── Book anatomy details (page edge, dog-ear) ─── */
+.book-page-edge {
+  position: absolute;
+  top: 3%;
+  bottom: 3%;
+  right: 0;
+  width: 4px;
+  background:
+    repeating-linear-gradient(0deg,
+      rgba(240, 225, 190, 0.22) 0px,
+      rgba(240, 225, 190, 0) 1.3px,
+      rgba(240, 225, 190, 0.18) 2.2px,
+      rgba(240, 225, 190, 0) 3px),
+    linear-gradient(90deg,
+      rgba(0, 0, 0, 0.40) 0%,
+      rgba(250, 240, 215, 0.75) 55%,
+      rgba(255, 245, 220, 0.95) 100%);
+  box-shadow: inset 1px 0 2px rgba(0, 0, 0, 0.35);
+  pointer-events: none;
+}
+
+.book-dogear {
+  position: absolute;
+  bottom: 0;
+  right: 0;
+  width: 22px;
+  height: 22px;
+  background: linear-gradient(135deg,
+    rgba(250, 240, 215, 0.92) 0%,
+    rgba(230, 210, 170, 0.80) 45%,
+    rgba(180, 155, 115, 0.75) 100%);
+  clip-path: polygon(0% 100%, 100% 100%, 100% 0%);
+  filter: drop-shadow(-2px -2px 3px rgba(0, 0, 0, 0.45));
+  pointer-events: none;
+}
+.book-dogear::after {
+  /* Diagonal fold highlight */
+  content: '';
+  position: absolute;
+  inset: 0;
+  background: linear-gradient(135deg,
+    rgba(0, 0, 0, 0.38) 0%,
+    rgba(0, 0, 0, 0) 18%,
+    rgba(0, 0, 0, 0) 82%,
+    rgba(255, 240, 210, 0.25) 100%);
+  clip-path: polygon(0% 100%, 100% 100%, 100% 0%);
+}
+
+/* ─── Brass nameplate for language shelves ─── */
+.brass-plate {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.5rem;
+  padding: 5px 20px;
+  border-radius: 3px;
+  background: linear-gradient(180deg,
+    #f3c261 0%,
+    #d99a2b 45%,
+    #a86f13 100%);
+  border: 1px solid rgba(90, 45, 0, 0.55);
+  box-shadow:
+    inset 0 1px 0 rgba(255, 236, 190, 0.70),
+    inset 0 -1px 0 rgba(60, 30, 0, 0.45),
+    0 2px 5px rgba(0, 0, 0, 0.45);
+  position: relative;
+  font-family: 'Literata', Georgia, serif;
+  font-weight: 600;
+  font-size: 11px;
+  letter-spacing: 0.18em;
+  text-transform: uppercase;
+  color: #3a1f0e;
+  text-shadow: 0 1px 0 rgba(255, 230, 180, 0.35);
+}
+.brass-plate::before,
+.brass-plate::after {
+  content: '';
+  position: absolute;
+  top: 50%;
+  transform: translateY(-50%);
+  width: 4px;
+  height: 4px;
+  border-radius: 50%;
+  background: radial-gradient(circle at 30% 30%, #4a2d17 0%, #1a0d04 70%, #3a1a06 100%);
+  box-shadow: inset 0 0 1px rgba(0, 0, 0, 0.6), 0 0 1px rgba(255, 220, 180, 0.3);
+}
+.brass-plate::before { left: 6px; }
+.brass-plate::after { right: 6px; }
+.brass-plate .count {
+  font-size: 9.5px;
+  font-weight: 500;
+  letter-spacing: 0.1em;
+  color: rgba(58, 31, 14, 0.75);
+}
+
+/* ─── Library search input (amber underline) ─── */
+.library-search {
+  position: relative;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 12px 6px 32px;
+  min-width: 180px;
+  max-width: 260px;
+  background: rgba(12, 20, 40, 0.55);
+  border: 1px solid rgba(245, 158, 11, 0.18);
+  border-radius: 8px;
+  transition: all 180ms ease;
+}
+.library-search:focus-within {
+  border-color: rgba(245, 158, 11, 0.45);
+  background: rgba(20, 30, 55, 0.65);
+  box-shadow: 0 0 0 2px rgba(245, 158, 11, 0.12);
+}
+.library-search input {
+  flex: 1;
+  min-width: 0;
+  background: transparent;
+  border: none;
+  outline: none;
+  font-size: 12px;
+  color: #f0f4ff;
+  font-family: inherit;
+}
+.library-search input::placeholder {
+  color: #64748b;
+  font-style: italic;
+}
+
+/* ─── Bookshelf — wooden plank (walnut) ─── */
+.book-shelf {
+  position: relative;
+  height: 14px;
+  margin: 0 -0.625rem 0.75rem; /* extend into gap-x-5 so planks meet edge-to-edge */
+  background-color: #5d3a1f;
+  background-image:
+    /* top→bottom lighting: front edge highlighted, back edge darker */
+    linear-gradient(180deg,
+      rgba(255, 210, 155, 0.32) 0%,
+      rgba(255, 210, 155, 0) 28%,
+      rgba(0, 0, 0, 0.14) 65%,
+      rgba(0, 0, 0, 0.42) 100%),
+    /* fine vertical grain ticks */
+    repeating-linear-gradient(90deg,
+      rgba(0, 0, 0, 0) 0px,
+      rgba(0, 0, 0, 0.10) 1px,
+      rgba(0, 0, 0, 0) 3px,
+      rgba(0, 0, 0, 0) 46px,
+      rgba(255, 240, 210, 0.05) 47px,
+      rgba(0, 0, 0, 0) 49px),
+    /* long horizontal grain streaks (walnut) */
+    repeating-linear-gradient(91.5deg,
+      rgba(58, 28, 10, 0.35) 0px,
+      rgba(58, 28, 10, 0) 2px,
+      rgba(58, 28, 10, 0) 22px,
+      rgba(93, 58, 31, 0.25) 24px,
+      rgba(58, 28, 10, 0) 38px),
+    /* base wood gradient */
+    linear-gradient(180deg, #6b4228 0%, #4a2d17 100%);
+  box-shadow:
+    inset 0 1px 0 rgba(255, 220, 180, 0.30),     /* top edge sheen */
+    inset 0 -1px 1px rgba(0, 0, 0, 0.55),         /* bottom bevel */
+    0 3px 6px -1px rgba(0, 0, 0, 0.55),           /* ground shadow */
+    0 1px 0 rgba(0, 0, 0, 0.35);                  /* crisp bottom line */
+  pointer-events: none;
+}
+
+/* Cast shadow of the book sitting on the plank (centered under the cover) */
+.book-shelf::before {
+  content: '';
+  position: absolute;
+  left: 0.625rem;  /* align with card edge (cancels the negative margin) */
+  right: 0.625rem;
+  top: 0;
+  height: 5px;
+  background: linear-gradient(180deg, rgba(0, 0, 0, 0.45) 0%, rgba(0, 0, 0, 0) 100%);
+  pointer-events: none;
+}
+
 /* ─── Shimmer skeleton ─── */
 .skeleton {
   background: linear-gradient(

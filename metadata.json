@@ -1,5 +1,5 @@
 {
-  "name": "InstantTraducer",
+  "name": "iTraducer",
   "description": "Fast and reliable PDF book translator. Powered by Gemini and OpenAI to provide instant, high-quality translations while maintaining context.",
   "requestFramePermissions": []
 }

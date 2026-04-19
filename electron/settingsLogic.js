@@ -143,24 +143,44 @@ export function setupSettingsHandlers(providedLogger) {
                 }
                 let decryptionUsed = false;
 
-                try {
-                    const canDecrypt = safeStorage && safeStorage.isEncryptionAvailable();
-                    if (canDecrypt) {
-                        if (settings?.gemini?.apiKeyEnc) {
-                            const buf = Buffer.from(settings.gemini.apiKeyEnc, 'base64');
-                            settings.gemini.apiKey = safeStorage.decryptString(buf);
-                            delete settings.gemini.apiKeyEnc;
+                const canDecrypt = safeStorage && safeStorage.isEncryptionAvailable();
+                let staleCiphertextRemoved = false;
+                if (canDecrypt) {
+                    const tryDecrypt = (provider) => {
+                        const section = settings?.[provider];
+                        if (!section?.apiKeyEnc) return;
+                        try {
+                            const buf = Buffer.from(section.apiKeyEnc, 'base64');
+                            section.apiKey = safeStorage.decryptString(buf);
+                            delete section.apiKeyEnc;
                             decryptionUsed = true;
+                        } catch (decError) {
+                            logError(`[${cid}] Decryption failed for ${provider} — clearing stale ciphertext, user must re-enter the API key`, {
+                                name: decError?.name,
+                                message: decError?.message,
+                                code: decError?.code,
+                            });
+                            delete section.apiKeyEnc;
+                            staleCiphertextRemoved = true;
                         }
-                        if (settings?.openai?.apiKeyEnc) {
-                            const buf = Buffer.from(settings.openai.apiKeyEnc, 'base64');
-                            settings.openai.apiKey = safeStorage.decryptString(buf);
-                            delete settings.openai.apiKeyEnc;
-                            decryptionUsed = true;
-                        }
+                    };
+                    tryDecrypt('gemini');
+                    tryDecrypt('openai');
+                }
+
+                if (staleCiphertextRemoved) {
+                    try {
+                        const sanitized = JSON.parse(JSON.stringify(settings));
+                        if (sanitized?.gemini?.apiKey) delete sanitized.gemini.apiKey;
+                        if (sanitized?.openai?.apiKey) delete sanitized.openai.apiKey;
+                        await safeWriteFile(settingsPath, JSON.stringify(sanitized, null, 2), 'utf-8');
+                        logMain(`[${cid}] Stale ciphertext removed from settings.json on disk`);
+                    } catch (writeErr) {
+                        logError(`[${cid}] Failed to persist cleaned settings`, {
+                            name: writeErr?.name,
+                            message: writeErr?.message,
+                        });
                     }
-                } catch (decError) {
-                    logError(`[${cid}] Decryption failed`, decError);
                 }
 
                 cachedSettings = JSON.parse(JSON.stringify(settings));

@@ -261,11 +261,17 @@ export const testModalConnection = async (apiKey: string, signal?: AbortSignal):
         const e = await response.json().catch(() => ({}));
         return { success: false, message: `Errore Modal: ${e?.error?.message || response.statusText}` };
       }
-      const data = await response.json();
-      
-      const messageObj = data.choices?.[0]?.message;
-      const contentText = messageObj?.content || '';
-      const reasoningText = messageObj?.reasoning_content || '';
+    const data = await response.json();
+
+    // Track usage for connection test
+    if (data.usage) {
+      const { prompt_tokens, completion_tokens } = data.usage;
+      trackUsage(MODAL_MODEL, prompt_tokens || 0, completion_tokens || 0);
+    }
+    
+    const messageObj = data.choices?.[0]?.message;
+    const contentText = messageObj?.content || '';
+    const reasoningText = messageObj?.reasoning_content || '';
       
       if (!contentText && !reasoningText) {
         log.error('Risposta vuota da Modal', { fullData: JSON.stringify(data) });

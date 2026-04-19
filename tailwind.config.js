@@ -52,11 +52,40 @@ export default {
           muted: '#152044',
           strong: '#2d4270',
         },
+        // Reader theme palette (semantic tokens shared by reader UI)
+        reader: {
+          // Light (paper)
+          'light-bg': '#fbfaf7',
+          'light-panel': '#f3f1ec',
+          'light-text': '#1f1d1a',
+          'light-text-soft': '#4a4742',
+          'light-border': 'rgba(31,29,26,0.08)',
+          // Sepia (Kindle-like)
+          'sepia-bg': '#f4ecd8',
+          'sepia-panel': '#ebe3cd',
+          'sepia-text': '#5b4636',
+          'sepia-text-soft': '#7a624a',
+          'sepia-border': 'rgba(91,70,54,0.12)',
+          // Dark (true dark, e-ink dark)
+          'dark-bg': '#1a1a1a',
+          'dark-panel': '#222222',
+          'dark-text': '#d4d4d4',
+          'dark-text-soft': '#9a9a9a',
+          'dark-border': 'rgba(255,255,255,0.08)',
+        },
+        // Marker-style highlight tints (designed to be combined with mix-blend-multiply on light bg)
+        marker: {
+          yellow: '#fde68a',
+          green: '#bbf7d0',
+          blue: '#bfdbfe',
+          red: '#fecaca',
+        },
       },
       fontFamily: {
         sans: ['Inter', '-apple-system', 'BlinkMacSystemFont', 'system-ui', 'sans-serif'],
         mono: ['SF Mono', 'Fira Code', 'Consolas', 'monospace'],
-        reader: ['Georgia', 'Iowan Old Style', 'Apple Garamond', 'serif'],
+        reader: ['Literata', 'Iowan Old Style', 'Palatino', 'Georgia', 'serif'],
+        'reader-fallback': ['Georgia', 'Iowan Old Style', 'serif'],
       },
       fontSize: {
         '2xs': ['0.625rem', { lineHeight: '0.875rem' }],
@@ -67,6 +96,10 @@ export default {
         'surface-lg': '0 4px 14px rgba(0,0,0,0.45), 0 2px 6px rgba(0,0,0,0.25)',
         'surface-xl': '0 10px 40px rgba(0,0,0,0.5), 0 2px 8px rgba(0,0,0,0.25)',
         'surface-2xl': '0 20px 60px rgba(0,0,0,0.6), 0 4px 16px rgba(0,0,0,0.3)',
+        // Soft elevation set (for reader & light surfaces — easier on the eye)
+        'elev-1': '0 1px 2px rgba(15, 15, 15, 0.04), 0 1px 1px rgba(15, 15, 15, 0.03)',
+        'elev-2': '0 2px 6px rgba(15, 15, 15, 0.06), 0 2px 4px rgba(15, 15, 15, 0.04)',
+        'elev-3': '0 6px 18px rgba(15, 15, 15, 0.08), 0 4px 10px rgba(15, 15, 15, 0.04)',
         'glow-accent': '0 0 20px rgba(245,158,11,0.18)',
         'glow-accent-lg': '0 0 40px rgba(245,158,11,0.25)',
         'glow-success': '0 0 20px rgba(52,211,153,0.18)',

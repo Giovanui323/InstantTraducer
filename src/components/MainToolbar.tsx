@@ -77,7 +77,7 @@ export const MainToolbar: React.FC<MainToolbarProps> = ({
   const pageActionPages = isManualMode ? currentPages : translatedCurrentPages;
 
   return (
-    <div className="fixed bottom-24 left-0 w-full flex justify-center z-[200] pointer-events-none">
+    <div className="fixed bottom-6 left-0 w-full flex justify-center z-[200] pointer-events-none">
       <Draggable nodeRef={draggableRef}>
         <div
           ref={draggableRef}

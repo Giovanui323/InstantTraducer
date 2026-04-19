@@ -28,9 +28,9 @@ export const READER_STYLES = {
   },
 
   thumbnail: {
-    wrapper: "group/thumb relative shadow-surface-lg border border-border-muted rounded-xl overflow-hidden bg-white transition-all duration-200 ease-out-expo cursor-pointer hover:shadow-surface-2xl hover:border-accent/30 hover:scale-[1.02] active:scale-[0.99] active:border-accent/50",
-    button: "w-8 h-8 flex items-center justify-center rounded-full bg-white/90 text-txt-muted border border-border transition-all duration-150 backdrop-blur-sm hover:bg-white hover:text-accent hover:border-accent/20",
-    maximizeBtn: "text-accent drop-shadow-sm bg-white/90 p-1.5 rounded-lg shadow-surface transition-all duration-150 hover:bg-white",
+    wrapper: "group/thumb relative shadow-elev-3 border border-reader-light-border rounded-lg overflow-hidden bg-reader-light-bg transition-all duration-200 ease-out-expo cursor-pointer hover:shadow-surface-xl hover:border-accent/40 hover:scale-[1.02] active:scale-[0.99] active:border-accent/50",
+    button: "w-8 h-8 flex items-center justify-center rounded-full bg-white/95 text-reader-light-text-soft border border-reader-light-border transition-all duration-150 backdrop-blur-sm hover:bg-white hover:text-accent hover:border-accent/30 hover:shadow-elev-1",
+    maximizeBtn: "text-accent drop-shadow-sm bg-white/95 p-1.5 rounded-lg shadow-elev-1 transition-all duration-150 hover:bg-white hover:shadow-elev-2",
   },
 
   buttons: {
@@ -43,29 +43,32 @@ export const READER_STYLES = {
 };
 
 export const READER_THEMES = {
+  // Light: warm paper white instead of bluish-grey, matches print feel.
   light: {
-    bg: "bg-[#faf9f6]",
-    containerBg: "bg-stone-100",
-    text: "text-stone-900",
-    selection: "selection:bg-accent/20 selection:text-accent",
-    ring: "ring-1 ring-stone-200/60",
-    gradient: "radial-gradient(1200px 600px at 15% 20%, rgba(0,0,0,0.015), transparent 55%), radial-gradient(1200px 600px at 85% 80%, rgba(0,0,0,0.015), transparent 55%)"
+    bg: "bg-reader-light-bg",
+    containerBg: "bg-reader-light-panel",
+    text: "text-reader-light-text",
+    selection: "selection:bg-amber-300/30 selection:text-reader-light-text",
+    ring: "ring-1 ring-reader-light-border",
+    gradient: "radial-gradient(1400px 700px at 15% 20%, rgba(0,0,0,0.012), transparent 55%), radial-gradient(1400px 700px at 85% 80%, rgba(0,0,0,0.012), transparent 55%)"
   },
+  // Sepia: Kindle Paperwhite reference (#f4ecd8 / #5b4636), much less yellow than before.
   sepia: {
-    bg: "bg-[#f5eedd]",
-    containerBg: "bg-[#e8e2d2]",
-    text: "text-stone-900",
-    selection: "selection:bg-amber-200/40 selection:text-amber-950",
-    ring: "ring-1 ring-stone-300/50",
-    gradient: "radial-gradient(1200px 600px at 15% 20%, rgba(139,90,43,0.03), transparent 55%), radial-gradient(1200px 600px at 85% 80%, rgba(139,90,43,0.03), transparent 55%)"
+    bg: "bg-reader-sepia-bg",
+    containerBg: "bg-reader-sepia-panel",
+    text: "text-reader-sepia-text",
+    selection: "selection:bg-amber-300/35 selection:text-reader-sepia-text",
+    ring: "ring-1 ring-reader-sepia-border",
+    gradient: "radial-gradient(1400px 700px at 15% 20%, rgba(91,70,54,0.025), transparent 55%), radial-gradient(1400px 700px at 85% 80%, rgba(91,70,54,0.025), transparent 55%)"
   },
+  // Dark: true neutral dark (no blue cast), text color tuned for long reading.
   dark: {
-    bg: "bg-[#0c1631]",
-    containerBg: "bg-[#060b18]",
-    text: "text-[#c8d6f0]",
-    selection: "selection:bg-accent/25 selection:text-white",
-    ring: "ring-1 ring-accent/[0.08]",
-    gradient: "radial-gradient(1000px 500px at 20% 25%, rgba(245,158,11,0.015), transparent 55%), radial-gradient(1000px 500px at 80% 75%, rgba(245,158,11,0.015), transparent 55%)"
+    bg: "bg-reader-dark-bg",
+    containerBg: "bg-reader-dark-panel",
+    text: "text-reader-dark-text",
+    selection: "selection:bg-amber-200/20 selection:text-reader-dark-text",
+    ring: "ring-1 ring-reader-dark-border",
+    gradient: "radial-gradient(1200px 600px at 20% 25%, rgba(255,255,255,0.012), transparent 55%), radial-gradient(1200px 600px at 80% 75%, rgba(255,255,255,0.012), transparent 55%)"
   }
 };
 

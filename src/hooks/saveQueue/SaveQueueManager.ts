@@ -227,12 +227,12 @@ export const useSaveQueueManager = ({
     }
 
     if (!safeId) {
-      log.warning(`Skipping save: No stable FileID available.`);
+      log.warning(`[SaveQueue] Skipping save: No stable FileID available. Current session ID: ${currentProjectFileIdRef.current}`);
       return "";
     }
 
     if (!isUuidV4FileId(safeId)) {
-      log.warning(`Skipping save for non-UUID project ID: ${safeId}`);
+      log.warning(`[SaveQueue] Skipping save for non-UUID project ID: ${safeId} (priority=${priority})`);
       if (!silent) {
         showToast?.("Salvataggio non possibile: ID progetto non valido (UUID). Rinomina/migra il progetto.", 'error');
       }
@@ -247,7 +247,7 @@ export const useSaveQueueManager = ({
     }
 
     if (!effectiveFileName) {
-      log.warning(`Skipping save for ${safeId}: Missing fileName.`);
+      log.warning(`[SaveQueue] Skipping save for ${safeId}: Missing fileName (priority=${priority}).`);
       return "";
     }
 
@@ -281,20 +281,20 @@ export const useSaveQueueManager = ({
         }
         effectiveFileName = existingBook.fileName;
       } else {
-        log.error(`[CRITICAL] Collisione identificativo: ${safeId} appartiene a '${existingBook.fileName}'. Salvataggio annullato.`);
+        log.error(`[SaveQueue-CRITICAL] Collisione identificativo: ${safeId} appartiene a '${existingBook.fileName}'. Salvataggio annullato.`);
         showToast?.("Collisione ID rilevata: salvataggio annullato per sicurezza.", 'error');
         return "";
       }
     }
 
     if (safeId && blacklistedIdsRef.current.has(safeId)) {
-      log.warning(`Blocked save attempt for blacklisted ID: ${safeId}`);
+      log.warning(`[SaveQueue] Blocked save attempt for blacklisted ID (critical operation in progress): ${safeId}`);
       showToast?.("Salvataggio bloccato: Operazione critica in corso. Riprova tra pochi secondi.", 'error');
       return "";
     }
 
     if (safeId && transitioningIdsRef.current.has(safeId)) {
-      log.info(`Tentativo di salvataggio bloccato temporaneamente: ${safeId}`);
+      log.info(`[SaveQueue] Tentativo di salvataggio bloccato temporaneamente causa transizione ID: ${safeId}`);
       return "";
     }
 
