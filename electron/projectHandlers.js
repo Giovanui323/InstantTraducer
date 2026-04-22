@@ -907,12 +907,22 @@ export function setupProjectHandlers(providedLogger, providedMainWindow) {
                 const hasSafePdf = Boolean(await findOriginalPdfInAssetsDir(assetsDir));
 
                     let thumbnail = undefined;
+                    const coverPath = path.join(assetsDir, 'cover.jpg');
                     const thumbPath = path.join(assetsDir, 'source-p1.jpg');
+                    let hasCustomCover = false;
                     try {
-                        await fs.promises.access(thumbPath);
-                        const thumbData = await fs.promises.readFile(thumbPath);
+                        await fs.promises.access(coverPath);
+                        const thumbData = await fs.promises.readFile(coverPath);
                         thumbnail = `data:image/jpeg;base64,${thumbData.toString('base64')}`;
+                        hasCustomCover = true;
                     } catch { }
+                    if (!thumbnail) {
+                        try {
+                            await fs.promises.access(thumbPath);
+                            const thumbData = await fs.promises.readFile(thumbPath);
+                            thumbnail = `data:image/jpeg;base64,${thumbData.toString('base64')}`;
+                        } catch { }
+                    }
 
                     filteredResult.push({
                         fileName: content.fileName || fileId,
@@ -922,6 +932,9 @@ export function setupProjectHandlers(providedLogger, providedMainWindow) {
                         fileId,
                         hasSafePdf,
                         thumbnail,
+                        hasCustomCover,
+                        coverSource: content.coverSource,
+                        isbn: content.isbn,
                         originalFilePath: content.originalFilePath,
                         inputLanguage: content.inputLanguage,
                         groups: content.groups || [],

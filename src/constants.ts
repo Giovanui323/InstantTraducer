@@ -13,6 +13,8 @@ export const ORIGINAL_THUMB_SCALE = 1.35;
 export const ORIGINAL_THUMB_JPEG_QUALITY = 0.72;
 export const PAGE_CACHE_JPEG_QUALITY = 0.88; // Was 0.74 - Increased to prevent "Punitive Compression" on retry
 export const PAGE_CACHE_MAX_EDGE = 2500; // Was 1600 - Increased to support A4 @ 300dpi better
+export const AI_IMAGE_MAX_LONG_SIDE = 1568; // Max long side for images sent to AI APIs (pre-4.7 Claude limit, best token efficiency)
+export const AI_IMAGE_JPEG_QUALITY = 0.85; // JPEG quality for AI-bound images (balances file size vs OCR readability)
 
 export const GEMINI_TRANSLATION_MODEL = 'gemini-3.1-pro-preview';
 export const GEMINI_TRANSLATION_FAST_MODEL = 'gemini-3-flash-preview';

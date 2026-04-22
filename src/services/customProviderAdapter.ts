@@ -245,6 +245,11 @@ async function translateWithCustomProviderInner(
   const isRetry = Boolean(extraInstruction && extraInstruction.trim().length > 0);
   const startedAt = performance.now();
 
+  // Build diagnostic prompt for logging
+  const diagnosticSystemPrompt = config.apiFormat === 'anthropic'
+    ? getClaudeTranslateSystemPrompt(sourceLanguage || 'Tedesco', previousContext || '', legalContext ?? true, undefined, customPrompt)
+    : getOpenAITranslateSystemPrompt(sourceLanguage || 'Tedesco', previousContext || '', legalContext ?? true, isRetry, customPrompt);
+
   const runAttempt = async (instruction: string): Promise<{ text: string }> => {
     if (config.apiFormat === 'anthropic') {
       return runAnthropicTranslation(config, instruction, imageBase64, pageNumber, prevPageImageBase64, prevPageNumber, nextPageImageBase64, nextPageNumber, sourceLanguage, previousContext, legalContext, customPrompt, isRetry, signal);
@@ -257,8 +262,9 @@ async function translateWithCustomProviderInner(
   };
 
   const baseInstruction = getOpenAITranslateUserInstruction(pageNumber, sourceLanguage);
+  // CLEAN RETRY: istruzione minimale per evitare duplicazione contesto
   const effectiveInstruction = extraInstruction?.trim()
-    ? `${baseInstruction}\n\n${extraInstruction.trim()}`
+    ? `Ritraduci la pagina ${pageNumber} dal ${sourceLanguage} all'italiano.\n\n${extraInstruction.trim()}`
     : baseInstruction;
 
   const result = await retry(
@@ -279,10 +285,10 @@ async function translateWithCustomProviderInner(
   log.success(`Completata traduzione pagina ${pageNumber} con ${config.name}`, { elapsedMs, chars: result.text.length });
 
   if (skipPostProcessing) {
-    return { text: result.text || '', annotations: [], modelUsed: config.model };
+    return { text: result.text || '', annotations: [], modelUsed: config.model, diagnosticPrompt: diagnosticSystemPrompt, diagnosticUserInstruction: effectiveInstruction };
   }
   const cleaned = cleanTranslationText(result.text || '');
-  return { text: cleaned, annotations: [], modelUsed: config.model };
+  return { text: cleaned, annotations: [], modelUsed: config.model, diagnosticPrompt: diagnosticSystemPrompt, diagnosticUserInstruction: effectiveInstruction };
 }
 
 async function runOpenAICompatibleTranslation(

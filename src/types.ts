@@ -147,6 +147,10 @@ export interface AISettings {
    * Vedi UserPermissions per la semantica (un solo modello per provider).
    */
   userPermissions?: UserPermissions;
+  /** Log diagnostico traduzioni: salva immagine, prompt e risultato per ogni pagina */
+  translationDiagnosticLog?: boolean;
+  /** Traduzione accurata: invia immagini a risoluzione piena (no downscale), massima qualità OCR ma più token */
+  fullResolutionMode?: boolean;
 }
 
 export type VerificationState = 'idle' | 'verifying' | 'verified' | 'failed';
@@ -192,6 +196,8 @@ export interface TranslationResult {
   text: string;
   annotations: PageAnnotation[];
   modelUsed?: string;
+  diagnosticPrompt?: string;
+  diagnosticUserInstruction?: string;
 }
 
 export interface LogEntry {
@@ -233,6 +239,9 @@ export interface ReadingProgress {
   thumbnail?: string;
   groups?: string[];
   fingerprint?: string;
+  hasCustomCover?: boolean;
+  coverSource?: 'isbn' | 'custom' | 'generated' | 'firstpage';
+  isbn?: string;
 }
 
 export interface PDFMetadata {
@@ -242,6 +251,7 @@ export interface PDFMetadata {
   year?: string;
   author?: string;
   title?: string;
+  isbn?: string;
 }
 
 export interface UserHighlight {

@@ -1,4 +1,5 @@
 export * from './BackgroundTranslationSlotCard';
+export * from './CoverManagerModal';
 export * from './GroupFilterBar';
 export * from './HomeTranslationSummaryButton';
 export * from './RecentBooksGrid';

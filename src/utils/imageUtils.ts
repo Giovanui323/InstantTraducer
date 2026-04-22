@@ -219,3 +219,66 @@ export const cropBase64 = async (base64: string, section: 'top' | 'bottom', frac
   out.height = 0;
   return dataUrlToBase64(dataUrl);
 };
+
+/**
+ * Ridimensiona un'immagine base64 per l'invio all'API AI.
+ * Mantiene il rapporto d'aspetto originale.
+ * Se l'immagine è già più piccola di maxLongSide, viene restituita inalterata.
+ * @param base64 - Immagine in formato base64 (senza prefisso data:)
+ * @param maxLongSide - Lato lungo massimo in pixel (default: 1568)
+ * @param jpegQuality - Qualità JPEG (default: 0.85)
+ * @returns base64 ridimensionata (senza prefisso data:)
+ */
+export const downscaleBase64ForAI = async (
+  base64: string,
+  maxLongSide: number = 1568,
+  jpegQuality: number = 0.85
+): Promise<string> => {
+  const img = new Image();
+  img.src = buildJpegDataUrlFromBase64(base64);
+  try {
+    await img.decode();
+  } catch {
+    await new Promise<void>((resolve, reject) => {
+      img.onload = () => resolve();
+      img.onerror = () => reject(new Error('Impossibile caricare immagine per downscale AI'));
+    });
+  }
+
+  const natW = img.naturalWidth || img.width;
+  const natH = img.naturalHeight || img.height;
+  if (!natW || !natH) return base64; // Safety: immagine non valida
+
+  const longSide = Math.max(natW, natH);
+  if (longSide <= maxLongSide) {
+    // Immagine già sotto il limite, nessun ridimensionamento necessario
+    return base64;
+  }
+
+  const scale = maxLongSide / longSide;
+  const outW = Math.max(1, Math.round(natW * scale));
+  const outH = Math.max(1, Math.round(natH * scale));
+
+  const canvas = document.createElement('canvas');
+  try {
+    canvas.width = outW;
+    canvas.height = outH;
+    const ctx = canvas.getContext('2d', { alpha: false });
+    if (!ctx) return base64; // Fallback: ritorna originale se canvas non disponibile
+    ctx.fillStyle = 'white';
+    ctx.fillRect(0, 0, outW, outH);
+    ctx.drawImage(img, 0, 0, outW, outH);
+    const dataUrl = canvas.toDataURL('image/jpeg', jpegQuality);
+    const result = dataUrlToBase64(dataUrl);
+
+    if (result.length < base64.length) {
+      log.info(`[AI-DOWNSCALE] ${natW}x${natH} → ${outW}x${outH} (${Math.round(base64.length * 3 / 4 / 1024)}KB → ${Math.round(result.length * 3 / 4 / 1024)}KB)`);
+    }
+
+    return result;
+  } finally {
+    canvas.width = 0;
+    canvas.height = 0;
+  }
+};
+

@@ -32,6 +32,7 @@ interface HomeViewProps {
   onOpenSettings: () => void;
   onManageGroups: (fileId: string) => void;
   onExportGpt: (fileId: string) => void;
+  onManageCover: (fileId: string) => void;
   isConsultationMode?: boolean;
   isActiveProjectPaused: boolean;
   activeProjectQueueStats: { active: number; queued: number };
@@ -66,6 +67,7 @@ export const HomeView: React.FC<HomeViewProps> = ({
   onOpenSettings,
   onManageGroups,
   onExportGpt,
+  onManageCover,
   isConsultationMode,
   isActiveProjectPaused,
   activeProjectQueueStats,
@@ -88,7 +90,7 @@ export const HomeView: React.FC<HomeViewProps> = ({
                 <button
                   type="button"
                   onClick={onReturnToSession}
-                  className="text-left pl-12 pr-6 py-5 hover:bg-white/[0.02] focus:outline-none transition-colors duration-200"
+                  className="text-left pl-12 pr-6 py-5 hover:bg-white/[0.02] focus:outline-none transition-colors duration-200 min-w-0 overflow-hidden"
                   aria-label={`Torna alla sessione${metadata?.name ? `: ${metadata.name}` : ''}`}
                 >
                   <div className="text-[10px] font-bold uppercase tracking-[0.22em] text-txt-muted mb-1.5">Segnalibro</div>
@@ -104,7 +106,7 @@ export const HomeView: React.FC<HomeViewProps> = ({
                     <span className="text-[11.5px] text-accent font-semibold tracking-wide">Riprendi lettura</span>
                   </div>
                 </button>
-                <div className="flex items-center justify-end gap-2 px-5 py-5 sm:border-l sm:border-border-muted">
+                <div className="flex items-center justify-end gap-2 px-5 py-5 sm:border-l sm:border-border-muted shrink-0">
                   <button
                     type="button"
                     onClick={onRequestCloseSession}
@@ -253,6 +255,7 @@ export const HomeView: React.FC<HomeViewProps> = ({
                 onEditLanguageProject={onEditLanguageProject}
                 onManageGroups={onManageGroups}
                 onExportGpt={onExportGpt}
+                onManageCover={onManageCover}
                 onSetOpenMenuId={onSetOpenMenuId}
                 openMenuId={openMenuId}
                 isActiveProjectPaused={isActiveProjectPaused}

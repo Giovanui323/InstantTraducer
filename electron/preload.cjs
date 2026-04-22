@@ -56,6 +56,13 @@ contextBridge.exposeInMainWorld('electronAPI', {
   exportProjectPackage: (payload) => invoke('export-project-package', payload),
   importProjectPackage: () => invoke('import-project-package'),
 
+  // Cover management
+  coverSetFromFile: (payload) => invoke('cover-set-from-file', payload),
+  coverSetFromBuffer: (payload) => invoke('cover-set-from-buffer', payload),
+  coverSetFromUrl: (payload) => invoke('cover-set-from-url', payload),
+  coverRemove: (payload) => invoke('cover-remove', payload),
+  coverGetInfo: (payload) => invoke('cover-get-info', payload),
+
   openProjectDialog: () => invoke('open-project-dialog'),
   consolidateLibrary: () => invoke('consolidate-library'),
   openLogsDir: () => invoke('open-logs-dir'),

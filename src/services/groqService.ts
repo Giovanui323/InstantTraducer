@@ -208,8 +208,9 @@ export const translateWithGroq = async (
   };
 
   const baseInstruction = getGroqTranslateUserInstruction(pageNumber, sourceLanguage);
+  // CLEAN RETRY: istruzione minimale per evitare duplicazione contesto
   const effectiveInstruction = extraInstruction?.trim()
-    ? `${baseInstruction}\n\n${extraInstruction.trim()}`
+    ? `Ritraduci la pagina ${pageNumber} dal ${sourceLanguage} all'italiano.\n\n${extraInstruction.trim()}`
     : baseInstruction;
 
   const attempt1 = await retry(
@@ -232,11 +233,11 @@ export const translateWithGroq = async (
   if (onProgress) onProgress(`Output pronto: ${attempt1.text.length} caratteri (tempo: ${elapsedMs}ms)`);
 
   if (skipPostProcessing) {
-    return { text: attempt1.text || "", annotations: [], modelUsed: model };
+    return { text: attempt1.text || "", annotations: [], modelUsed: model, diagnosticPrompt: systemPrompt, diagnosticUserInstruction: effectiveInstruction };
   }
 
   const cleaned1 = cleanTranslationText(attempt1.text || "");
-   return { text: cleaned1, annotations: [], modelUsed: model };
+   return { text: cleaned1, annotations: [], modelUsed: model, diagnosticPrompt: systemPrompt, diagnosticUserInstruction: effectiveInstruction };
 };
 
 /**

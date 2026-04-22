@@ -167,8 +167,9 @@ export const translateWithZai = async (
   };
 
   const baseInstruction = getOpenAITranslateUserInstruction(pageNumber, sourceLanguage);
+  // CLEAN RETRY: istruzione minimale per evitare duplicazione contesto
   const effectiveInstruction = extraInstruction?.trim()
-    ? `${baseInstruction}\n\n${extraInstruction.trim()}`
+    ? `Ritraduci la pagina ${pageNumber} dal ${sourceLanguage} all'italiano.\n\n${extraInstruction.trim()}`
     : baseInstruction;
 
   try {
@@ -191,11 +192,11 @@ export const translateWithZai = async (
     log.success(`Completata traduzione pagina ${pageNumber} con Z.ai`, { elapsedMs, chars: result.text.length, model });
 
     if (skipPostProcessing) {
-      return { text: result.text || '', annotations: [], modelUsed: model };
+      return { text: result.text || '', annotations: [], modelUsed: model, diagnosticPrompt: systemPrompt, diagnosticUserInstruction: effectiveInstruction };
     }
 
     const cleaned = cleanTranslationText(result.text || '');
-    return { text: cleaned, annotations: [], modelUsed: model };
+    return { text: cleaned, annotations: [], modelUsed: model, diagnosticPrompt: systemPrompt, diagnosticUserInstruction: effectiveInstruction };
   } catch (error) {
     throw normalizeZaiError(error);
   }

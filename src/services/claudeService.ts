@@ -46,6 +46,7 @@ export const translateWithClaude = async (
   const { stable: systemStable, variable: systemVariable } = getClaudeTranslateSystemPromptBlocks(
     sourceLanguage, previousContext, legalContext ?? true, retryReason, customPrompt, model
   );
+  const fullSystemPrompt = systemStable + (systemVariable ? '\n' + systemVariable : '');
 
   if (onProgress) onProgress(`Preparazione richiesta Claude (${model})`);
   log.wait(`[CLAUDE-TRANSLATION] Richiesta (${model})...`, {
@@ -150,8 +151,12 @@ export const translateWithClaude = async (
   };
 
   const baseInstruction = getClaudeTranslateUserInstruction(pageNumber, sourceLanguage);
+  // CLEAN RETRY: quando c'è un extraInstruction (retry dal quality check),
+  // usiamo un'istruzione utente minimale per evitare di accumulare contesto
+  // duplicato. Il retryReason è già nel system prompt tramite <retry_mode>,
+  // quindi qui basta una direttiva breve + le istruzioni di correzione specifiche.
   const effectiveInstruction = extraInstruction?.trim() 
-    ? `${baseInstruction}\n\n${extraInstruction.trim()}`
+    ? `Ritraduci la pagina ${pageNumber} dal ${sourceLanguage} all'italiano.\n\n${extraInstruction.trim()}`
     : baseInstruction;
 
   const attempt1 = await retry(
@@ -173,14 +178,14 @@ export const translateWithClaude = async (
   if (onProgress) onProgress(`Output pronto: ${attempt1.text.length} caratteri (tempo: ${elapsedMs}ms)`);
 
   if (skipPostProcessing) {
-    return { text: attempt1.text || "", annotations: [], modelUsed: model };
+    return { text: attempt1.text || "", annotations: [], modelUsed: model, diagnosticPrompt: fullSystemPrompt, diagnosticUserInstruction: effectiveInstruction };
   }
 
   const cleaned1 = cleanTranslationText(attempt1.text || "");
   if (attempt1.text.length !== cleaned1.length) {
     log.info(`Post-processing Claude: Testo pulito di ${attempt1.text.length - cleaned1.length} caratteri.`);
   }
-  return { text: cleaned1, annotations: [], modelUsed: model };
+  return { text: cleaned1, annotations: [], modelUsed: model, diagnosticPrompt: fullSystemPrompt, diagnosticUserInstruction: effectiveInstruction };
 };
 
 export const verifyTranslationQualityWithClaude = async (params: {

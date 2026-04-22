@@ -45,6 +45,7 @@ import {
   PageSelectionModal,
   CreateGroupModal,
   GroupManagementModal,
+  CoverManagerModal,
   SimpleConfirmModal,
   PdfRenderErrorNotification,
   ToastNotification,
@@ -242,6 +243,14 @@ const App: React.FC = () => {
     }
   }, [aiSettings.verboseLogs, settingsLoaded]);
 
+  // Sync translation diagnostic log setting with the service
+  useEffect(() => {
+    if (!settingsLoaded) return;
+    import('./services/translation/TranslationDiagnosticLogger').then(({ setDiagnosticLogEnabled }) => {
+      setDiagnosticLogEnabled(!!aiSettings.translationDiagnosticLog);
+    });
+  }, [aiSettings.translationDiagnosticLog, settingsLoaded]);
+
   // FIX: Auto-start translation when settings become available (race condition fix)
   // If the user opens a project BEFORE settings are loaded, isPaused will be TRUE.
   // Once settings load and we confirm API is configured, we can unpause automatically.
@@ -424,6 +433,7 @@ const App: React.FC = () => {
   const [pendingUpload, setPendingUpload] = useState<null | any>(null);
   const [createGroupModalOpen, setCreateGroupModalOpen] = useState(false);
   const [activeGroupModalBookId, setActiveGroupModalBookId] = useState<string | null>(null);
+  const [coverModalFileId, setCoverModalFileId] = useState<string | null>(null);
   const [renameState, setRenameState] = useState<null | any>(null);
   const [editLanguageTarget, setEditLanguageTarget] = useState<{ fileId: string, currentLang: string } | null>(null);
   const [pageSelectionModal, setPageSelectionModal] = useState<any>({ isOpen: false, total: 0, targetPage: 0 });
@@ -2391,6 +2401,7 @@ const App: React.FC = () => {
         Boolean(renameState) ||
         createGroupModalOpen ||
         Boolean(activeGroupModalBookId) ||
+        Boolean(coverModalFileId) ||
         Boolean(cropModal) ||
         Boolean(pendingReplacement) ||
         Boolean(pageSelectionModal?.isOpen) ||
@@ -2423,6 +2434,7 @@ const App: React.FC = () => {
     renameState,
     createGroupModalOpen,
     activeGroupModalBookId,
+    coverModalFileId,
     cropModal,
     pendingReplacement,
     pageSelectionModal,
@@ -2587,7 +2599,6 @@ const App: React.FC = () => {
     }
   }, [scale]);
 
-  const showSevereErrorIndicator = internalSevereError || corruptedPages.size > 0;
 
   const closeSession = useCallback(async () => {
     if (isClosingSessionRef.current) return;
@@ -2623,12 +2634,6 @@ const App: React.FC = () => {
         <SplashScreen version={appVersion} onDismiss={() => setShowSplash(false)} />
       )}
       <div className="w-screen flex flex-col bg-[#1e1e1e] text-gray-200 overflow-hidden font-sans select-none" style={{ height: '100dvh' }}>
-        {showSevereErrorIndicator && (
-          <div
-            className="absolute top-2 left-2 w-8 h-8 bg-red-600 rounded-full z-[9999] shadow-[0_0_10px_rgba(220,38,38,0.8)] animate-pulse cursor-help"
-            title="Si è verificato un problema critico (es. pagina corrotta o errore di traduzione persistente)"
-          />
-        )}
         {isConsultationMode && (
           <div className="bg-blue-600/90 text-white text-[10px] font-bold py-1 px-4 text-center z-[100] border-b border-blue-400/20 backdrop-blur-sm">
             MODALITÀ CONSULTAZIONE - SOLO LETTURA (FUNZIONI AI DISABILITATE)
@@ -2775,6 +2780,7 @@ const App: React.FC = () => {
               onOpenSettings={() => setIsSettingsOpen(true)}
               onManageGroups={setActiveGroupModalBookId}
               onExportGpt={handleExportById}
+              onManageCover={setCoverModalFileId}
               isConsultationMode={isConsultationMode}
               isActiveProjectPaused={isPaused}
               activeProjectQueueStats={combinedQueueStats}
@@ -3132,6 +3138,16 @@ const App: React.FC = () => {
               }
               setPageSelectionModal((prev: any) => ({ ...prev, isOpen: false }));
             }}
+          />
+        )}
+
+        {coverModalFileId && (
+          <CoverManagerModal
+            fileId={coverModalFileId}
+            fileName={library.recentBooks[coverModalFileId]?.fileName || ''}
+            currentThumbnail={library.recentBooks[coverModalFileId]?.thumbnail}
+            onClose={() => setCoverModalFileId(null)}
+            onRefresh={library.refreshLibrary}
           />
         )}
 

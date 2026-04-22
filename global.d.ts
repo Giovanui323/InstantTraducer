@@ -49,6 +49,11 @@ declare global {
       calculateFileFingerprint: (filePath: string) => Promise<string | null>;
       exportProjectPackage: (args: { fileId: string }) => Promise<{ success: boolean; path?: string; error?: string; cancelled?: boolean }>;
       importProjectPackage: () => Promise<string | null>;
+      coverSetFromFile: (args: { fileId: string }) => Promise<{ success: boolean; thumbnail?: string; error?: string; cancelled?: boolean }>;
+      coverSetFromBuffer: (args: { fileId: string; dataUrl: string; source?: string }) => Promise<{ success: boolean; thumbnail?: string; error?: string }>;
+      coverSetFromUrl: (args: { fileId: string; url: string; source?: string; isbn?: string }) => Promise<{ success: boolean; thumbnail?: string; error?: string }>;
+      coverRemove: (args: { fileId: string }) => Promise<{ success: boolean; error?: string }>;
+      coverGetInfo: (args: { fileId: string }) => Promise<{ hasCustomCover: boolean; hasFirstPage: boolean; coverSource?: string; isbn?: string; error?: string }>;
       openProjectDialog: () => Promise<string | null>;
       consolidateLibrary: () => Promise<{ success: boolean; fixedCount: number; missingCount: number; error?: string }>;
       getLibraryHealth: () => Promise<any>;

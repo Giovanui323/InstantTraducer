@@ -231,6 +231,26 @@ export const SettingsModal = React.memo(({
     const setSequentialContext = (s: boolean) => updateDraft({ sequentialContext: s });
     const setLegalContext = (l: boolean) => updateDraft({ legalContext: l });
     const setVerboseEnabled = (v: boolean) => updateDraft({ verboseLogs: v });
+    const [diagnosticLogCount, setDiagnosticLogCount] = useState(0);
+    const diagnosticLogEnabled = draftSettings.translationDiagnosticLog ?? false;
+    const setDiagnosticLogEnabled = (v: boolean) => {
+        updateDraft({ translationDiagnosticLog: v });
+        import('../services/translation/TranslationDiagnosticLogger').then(({ setDiagnosticLogEnabled: setServiceEnabled }) => {
+            setServiceEnabled(v);
+        });
+        if (!v) setDiagnosticLogCount(0);
+    };
+    useEffect(() => {
+        if (!diagnosticLogEnabled || activeSection !== 'logsDiagnostic') return;
+        let cancelled = false;
+        import('../services/translation/TranslationDiagnosticLogger').then(({ getDiagnosticEntriesCount }) => {
+            if (cancelled) return;
+            setDiagnosticLogCount(getDiagnosticEntriesCount());
+            const interval = setInterval(() => setDiagnosticLogCount(getDiagnosticEntriesCount()), 2000);
+            return () => clearInterval(interval);
+        });
+        return () => { cancelled = true; };
+    }, [diagnosticLogEnabled, activeSection]);
     const setCustomProjectsPath = (p: string) => updateDraft({ customProjectsPath: p });
     const setCustomPrompt = (p: string) => updateDraft({ customPrompt: p });
     const setCustomVerificationPrompt = (p: string) => updateDraft({ customVerificationPrompt: p });
@@ -1194,6 +1214,73 @@ export const SettingsModal = React.memo(({
                                                 Elimina Tutto
                                             </button>
                                         </div>
+                                    </div>
+                                </div>
+
+                                {/* Sezione: Log Diagnostico Traduzioni */}
+                                <div className="space-y-2">
+                                    <label className="text-xs font-bold text-txt-muted uppercase tracking-wider">Diagnostica Traduzioni</label>
+                                    <div className="bg-surface-4/50 border border-border-muted rounded-xl p-3 space-y-3">
+                                        <label className="flex items-center justify-between gap-3 text-sm text-txt-primary">
+                                            <div>
+                                                <span className="text-xs font-semibold text-txt-primary">Log Traduzioni (Prompt + Risultato)</span>
+                                                <div className="text-[10px] text-txt-muted leading-relaxed mt-0.5">Salva immagine, prompt e risultato di ogni traduzione. Esporta il report per analisi con AI esterna.</div>
+                                            </div>
+                                            <input type="checkbox" checked={diagnosticLogEnabled} onChange={(e) => setDiagnosticLogEnabled(e.target.checked)} className="h-4 w-4 accent-accent" />
+                                        </label>
+
+                                        {diagnosticLogEnabled && (
+                                            <div className="flex flex-wrap items-center gap-2 pt-2 border-t border-border-muted">
+                                                <span className="text-[10px] text-txt-muted">{diagnosticLogCount} pagine registrate</span>
+                                                <button
+                                                    onClick={() => {
+                                                        import('../services/translation/TranslationDiagnosticLogger').then(({ exportDiagnosticLog }) => {
+                                                            const content = exportDiagnosticLog();
+                                                            if (!content) { alert('Nessun dato registrato. Traduci almeno una pagina prima di esportare.'); return; }
+                                                            const blob = new Blob([content], { type: 'text/plain;charset=utf-8' });
+                                                            const url = URL.createObjectURL(blob);
+                                                            const a = document.createElement('a');
+                                                            a.href = url;
+                                                            a.download = 'translation-diagnostic-' + new Date().toISOString().replace(/[:.]/g, '-') + '.txt';
+                                                            a.click();
+                                                            URL.revokeObjectURL(url);
+                                                        });
+                                                    }}
+                                                    className="text-[10px] uppercase font-bold px-2 py-1 rounded bg-accent/15 text-accent hover:bg-accent/25 transition-colors duration-200"
+                                                >
+                                                    Esporta TXT
+                                                </button>
+                                                <button
+                                                    onClick={() => {
+                                                        import('../services/translation/TranslationDiagnosticLogger').then(({ exportDiagnosticMarkdown }) => {
+                                                            const md = exportDiagnosticMarkdown();
+                                                            if (!md) { alert('Nessun dato registrato. Traduci almeno una pagina prima di esportare.'); return; }
+                                                            const blob = new Blob([md], { type: 'text/markdown;charset=utf-8' });
+                                                            const url = URL.createObjectURL(blob);
+                                                            const a = document.createElement('a');
+                                                            a.href = url;
+                                                            a.download = 'translation-diagnostic-' + new Date().toISOString().replace(/[:.]/g, '-') + '.md';
+                                                            a.click();
+                                                            URL.revokeObjectURL(url);
+                                                        });
+                                                    }}
+                                                    className="text-[10px] uppercase font-bold px-2 py-1 rounded bg-accent/15 text-accent hover:bg-accent/25 transition-colors duration-200"
+                                                >
+                                                    Esporta Markdown
+                                                </button>
+                                                <button
+                                                    onClick={() => {
+                                                        import('../services/translation/TranslationDiagnosticLogger').then(({ clearDiagnosticEntries }) => {
+                                                            clearDiagnosticEntries();
+                                                            setDiagnosticLogCount(0);
+                                                        });
+                                                    }}
+                                                    className="text-[10px] uppercase font-bold px-2 py-1 rounded bg-danger/15 text-danger hover:bg-danger/25 transition-colors duration-200"
+                                                >
+                                                    Pulisci
+                                                </button>
+                                            </div>
+                                        )}
                                     </div>
                                 </div>
 

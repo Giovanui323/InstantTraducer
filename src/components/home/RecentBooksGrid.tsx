@@ -1,5 +1,5 @@
 import React, { useState, useMemo } from 'react';
-import { AlertCircle, Pencil, Trash2, MoreHorizontal, Tag, FileDown, Loader2, Plus, Settings, Search, X } from 'lucide-react';
+import { AlertCircle, Pencil, Trash2, MoreHorizontal, Tag, FileDown, Loader2, Plus, Settings, Search, X, BookImage } from 'lucide-react';
 import { useLibrary } from '../../contexts/LibraryContext';
 import { ReadingProgress } from '../../types';
 import { getLanguageFlag } from '../../utils/languageUtils';
@@ -15,6 +15,7 @@ interface RecentBooksGridProps {
   onEditLanguageProject?: (fileId: string, currentLang: string) => void;
   onManageGroups: (fileId: string) => void;
   onExportGpt: (fileId: string) => void;
+  onManageCover: (fileId: string) => void;
   onSetOpenMenuId: (id: string | null) => void;
   openMenuId: string | null;
   isActiveProjectPaused: boolean;
@@ -32,6 +33,7 @@ export const RecentBooksGrid: React.FC<RecentBooksGridProps> = ({
   onEditLanguageProject,
   onManageGroups,
   onExportGpt,
+  onManageCover,
   onSetOpenMenuId,
   openMenuId,
   isActiveProjectPaused,
@@ -44,11 +46,56 @@ export const RecentBooksGrid: React.FC<RecentBooksGridProps> = ({
   const { recentBooks, selectedGroupFilters, currentProjectFileId } = useLibrary();
   const [openingFileId, setOpeningFileId] = useState<string | null>(null);
   const [searchTerm, setSearchTerm] = useState('');
+  const [menuPosition, setMenuPosition] = useState<{top: number; left: number} | null>(null);
+  const scrollContainerRef = React.useRef<HTMLDivElement>(null);
   const isMounted = React.useRef(true);
 
   React.useEffect(() => {
     return () => { isMounted.current = false; };
   }, []);
+
+  React.useEffect(() => {
+    const container = scrollContainerRef.current;
+    if (!container) return;
+    const handleScroll = () => {
+      if (openMenuId) { onSetOpenMenuId(null); setMenuPosition(null); }
+    };
+    container.addEventListener('scroll', handleScroll, { passive: true });
+    return () => container.removeEventListener('scroll', handleScroll);
+  }, [openMenuId, onSetOpenMenuId]);
+
+  React.useEffect(() => {
+    if (!openMenuId) return;
+    // Defer listener registration by one frame so the opening click's events
+    // have fully finished propagating before we start listening for dismiss clicks.
+    // Without this, the mousedown from the click that opened the menu can
+    // immediately trigger the dismiss handler and close it before it's visible.
+    let cancelled = false;
+    const rafId = requestAnimationFrame(() => {
+      if (cancelled) return;
+      const handleClick = (e: MouseEvent) => {
+        const t = e.target as HTMLElement;
+        if (!t.closest('.menu-container') && !t.closest('.menu-trigger')) {
+          onSetOpenMenuId(null); setMenuPosition(null);
+        }
+      };
+      const handleResize = () => { onSetOpenMenuId(null); setMenuPosition(null); };
+      document.addEventListener('mousedown', handleClick);
+      window.addEventListener('resize', handleResize);
+      // Store cleanup in ref-like closure
+      cleanupRef.current = () => {
+        document.removeEventListener('mousedown', handleClick);
+        window.removeEventListener('resize', handleResize);
+      };
+    });
+    // Stable ref for deferred cleanup
+    const cleanupRef = { current: () => {} };
+    return () => {
+      cancelled = true;
+      cancelAnimationFrame(rafId);
+      cleanupRef.current();
+    };
+  }, [openMenuId, onSetOpenMenuId]);
 
   const handleOpen = async (fileId: string) => {
     if (openingFileId || isOpeningProject) return;
@@ -121,7 +168,8 @@ export const RecentBooksGrid: React.FC<RecentBooksGridProps> = ({
       </div>
 
       <div
-        className="overflow-y-auto pr-1 custom-scrollbar"
+        ref={scrollContainerRef}
+        className="overflow-y-auto overflow-x-hidden pr-1 custom-scrollbar"
         role="region"
         aria-label="Scaffale dei progetti"
       >
@@ -168,7 +216,7 @@ export const RecentBooksGrid: React.FC<RecentBooksGridProps> = ({
           )
         ) : (
           <div
-            className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6 gap-x-5 gap-y-10 pb-32 pt-2 px-6"
+            className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6 gap-x-5 gap-y-10 pb-32 pt-2 px-1"
             role="list"
           >
             {filteredBooks.map((book, idx) => {
@@ -300,7 +348,21 @@ export const RecentBooksGrid: React.FC<RecentBooksGridProps> = ({
                         <Trash2 size={11} />
                       </button>
                       <button
-                        onClick={(e) => { e.stopPropagation(); onSetOpenMenuId(menuOpen ? null : (book.fileId || "")); }}
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          if (menuOpen) {
+                            onSetOpenMenuId(null);
+                            setMenuPosition(null);
+                          } else {
+                            const rect = e.currentTarget.getBoundingClientRect();
+                            const menuH = 220;
+                            let top = rect.bottom + 6;
+                            const left = Math.max(8, rect.right - 180);
+                            if (top + menuH > window.innerHeight) top = rect.top - menuH - 6;
+                            setMenuPosition({ top, left });
+                            onSetOpenMenuId(book.fileId || "");
+                          }
+                        }}
                         className={`p-1.5 text-white/85 hover:text-white rounded-md backdrop-blur-md border transition-all duration-150 shadow-sm menu-trigger focus:outline-none ${
                           menuOpen
                             ? 'bg-accent/30 border-accent/40 text-white'
@@ -322,12 +384,13 @@ export const RecentBooksGrid: React.FC<RecentBooksGridProps> = ({
                     </div>
                   </div>
 
-                  {/* ── Dropdown menu — sibling of the cover (NOT inside overflow:hidden) ── */}
-                  {menuOpen && (
+                  {/* ── Dropdown menu — fixed positioned to avoid overflow clipping ── */}
+                  {menuOpen && menuPosition && (
                     <div
                       id={menuDomId}
                       role="menu"
-                      className="absolute left-0 top-full mt-1.5 glass-panel rounded-xl overflow-hidden z-50 flex flex-col min-w-[170px] menu-container animate-fade-in-scale shadow-surface-xl"
+                      className="fixed glass-panel rounded-xl overflow-hidden z-[9999] flex flex-col min-w-[180px] menu-container animate-fade-in-scale shadow-surface-xl"
+                      style={{ top: menuPosition.top, left: menuPosition.left }}
                       onClick={(e) => e.stopPropagation()}
                     >
                       <button
@@ -359,6 +422,13 @@ export const RecentBooksGrid: React.FC<RecentBooksGridProps> = ({
                         role="menuitem"
                       >
                         <FileDown size={13} className="text-txt-muted" /> Esporta (.gpt)
+                      </button>
+                      <button
+                        onClick={(e) => { e.stopPropagation(); onSetOpenMenuId(null); onManageCover(book.fileId || ""); }}
+                        className="flex items-center gap-2.5 w-full px-3 py-2.5 text-[11px] text-txt-secondary hover:bg-white/[0.04] hover:text-txt-primary text-left transition-colors duration-100 focus:outline-none"
+                        role="menuitem"
+                      >
+                        <BookImage size={13} className="text-txt-muted" /> Gestisci Copertina
                       </button>
                       <button
                         onClick={(e) => { e.stopPropagation(); onSetOpenMenuId(null); onDeleteProject(book.fileId || "", e); }}

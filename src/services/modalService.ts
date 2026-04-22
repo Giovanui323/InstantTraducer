@@ -130,8 +130,9 @@ export const translateWithModal = async (
     };
 
     const baseInstruction = getOpenAITranslateUserInstruction(pageNumber, sourceLanguage);
+    // CLEAN RETRY: istruzione minimale per evitare duplicazione contesto
     const effectiveInstruction = extraInstruction?.trim()
-      ? `${baseInstruction}\n\n${extraInstruction.trim()}`
+      ? `Ritraduci la pagina ${pageNumber} dal ${sourceLanguage} all'italiano.\n\n${extraInstruction.trim()}`
       : baseInstruction;
 
     const result = await retry(
@@ -154,11 +155,11 @@ export const translateWithModal = async (
     log.success(`Completata traduzione pagina ${pageNumber} con Modal`, { elapsedMs, chars: result.text.length });
 
     if (skipPostProcessing) {
-      return { text: result.text || '', annotations: [], modelUsed: MODAL_MODEL };
+      return { text: result.text || '', annotations: [], modelUsed: MODAL_MODEL, diagnosticPrompt: systemPrompt, diagnosticUserInstruction: effectiveInstruction };
     }
 
     const cleaned = cleanTranslationText(result.text || '');
-    return { text: cleaned, annotations: [], modelUsed: MODAL_MODEL };
+    return { text: cleaned, annotations: [], modelUsed: MODAL_MODEL, diagnosticPrompt: systemPrompt, diagnosticUserInstruction: effectiveInstruction };
   } finally {
     modalConcurrency.release(`translate-p${pageNumber}`);
   }

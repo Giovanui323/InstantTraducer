@@ -12,6 +12,7 @@ export const translationLogicSearchItems: SettingsSearchItem[] = [
   { id: 'translationLogic.legalContext', sectionId: 'translationLogic', sectionLabel: 'Traduzione & Logica', title: 'Contesto giuridico', description: 'Ottimizza la terminologia per testi di diritto.', keywords: ['legale', 'giuridico', 'terminologia'], anchorId: 'translationLogic.legalContext' },
   { id: 'translationLogic.concurrency', sectionId: 'translationLogic', sectionLabel: 'Traduzione & Logica', title: 'Traduzioni in parallelo', description: 'Numero di pagine elaborate contemporaneamente.', keywords: ['concorrenza', 'parallel', 'velocità'], anchorId: 'translationLogic.concurrency' },
   { id: 'translationLogic.sequential', sectionId: 'translationLogic', sectionLabel: 'Traduzione & Logica', title: 'Continuità narrativa (sequenziale)', description: 'Attende la pagina precedente per coerenza stilistica.', keywords: ['sequenziale', 'contesto', 'coerenza'], anchorId: 'translationLogic.sequential' },
+  { id: 'translationLogic.fullResolution', sectionId: 'translationLogic', sectionLabel: 'Traduzione & Logica', title: 'Traduzione accurata (alta risoluzione)', description: 'Invia immagini a piena risoluzione per massima qualità OCR.', keywords: ['risoluzione', 'accurata', 'qualità', 'immagine', 'token', 'downscale'], anchorId: 'translationLogic.fullResolution' },
 ];
 
 const selectClasses = "bg-surface-4/50 border border-border-muted rounded-xl py-2 px-3 text-[12px] text-txt-primary outline-none focus:border-accent/40 focus:ring-1 focus:ring-accent/20 transition-all duration-200";
@@ -30,6 +31,7 @@ export const TranslationLogicSection = ({
   const legalContext = draftSettings.legalContext ?? true;
   const translationConcurrency = draftSettings.translationConcurrency ?? DEFAULT_CONCURRENT_TRANSLATIONS;
   const sequentialContext = draftSettings.sequentialContext ?? true;
+  const fullResolutionMode = draftSettings.fullResolutionMode ?? false;
 
   return (
     <div className="space-y-4 animate-fade-in">
@@ -74,6 +76,15 @@ export const TranslationLogicSection = ({
           description="Attende la pagina precedente per coerenza. Disattiva per massima velocità."
           right={
             <input type="checkbox" checked={sequentialContext} onChange={(e) => updateDraft({ sequentialContext: e.target.checked })} className="h-4 w-4 accent-accent" />
+          }
+        />
+
+        <SettingRow
+          id="setting-translationLogic.fullResolution"
+          title="Traduzione accurata (alta risoluzione)"
+          description="Invia le immagini a piena risoluzione senza ridimensionamento. Massima qualità OCR ma consuma più token."
+          right={
+            <input type="checkbox" checked={fullResolutionMode} onChange={(e) => updateDraft({ fullResolutionMode: e.target.checked })} className="h-4 w-4 accent-accent" />
           }
         />
       </div>

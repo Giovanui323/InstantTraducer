@@ -145,8 +145,9 @@ export const translateWithOpenAI = async (
   };
 
   const baseInstruction = getOpenAITranslateUserInstruction(pageNumber, sourceLanguage);
+  // CLEAN RETRY: istruzione minimale per evitare duplicazione contesto
   const effectiveInstruction = extraInstruction?.trim() 
-    ? `${baseInstruction}\n\n${extraInstruction.trim()}`
+    ? `Ritraduci la pagina ${pageNumber} dal ${sourceLanguage} all'italiano.\n\n${extraInstruction.trim()}`
     : baseInstruction;
 
   try {
@@ -162,13 +163,13 @@ export const translateWithOpenAI = async (
     if (onProgress) onProgress(`Output pronto: ${data.text.length} caratteri (tempo: ${Math.round(performance.now() - startedAt)}ms)`);
 
     if (skipPostProcessing) {
-      return { text: data.text || "", annotations: [], modelUsed: model };
+      return { text: data.text || "", annotations: [], modelUsed: model, diagnosticPrompt: systemPrompt, diagnosticUserInstruction: effectiveInstruction };
     }
 
     const cleaned1 = cleanTranslationText(data.text || "");
     const cleaned2 = cleaned1.replace(/^(Ecco la traduzione della pagina \d+:?\s*)/i, '');
-    
-    return { text: cleaned2, annotations: [], modelUsed: model };
+
+    return { text: cleaned2, annotations: [], modelUsed: model, diagnosticPrompt: systemPrompt, diagnosticUserInstruction: effectiveInstruction };
   } catch (error) {
     throw normalizeOpenAIError(error);
   }

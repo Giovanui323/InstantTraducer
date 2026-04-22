@@ -13,6 +13,7 @@ import { setupPackageHandlers } from './packageLogic.js';
 import { loadCachedSettings, setupSettingsHandlers } from './settingsLogic.js';
 import { setupPdfHandlers } from './pdfHandlers.js';
 import { setupProjectHandlers, getPendingTranslationWrites, buildFingerprintCache } from './projectHandlers.js';
+import { setupCoverHandlers } from './coverManager.js';
 import { runOriginalFilePathUuidMigrationOnce } from './originalFilePathMigration.js';
 import { ensureProjectsDataDirs } from './fileUtils.js';
 
@@ -230,6 +231,7 @@ function createWindow() {
     setupPackageHandlers(logger, mainWindow);
     setupPdfHandlers(logger, mainWindow);
     setupProjectHandlers(logger, mainWindow);
+    setupCoverHandlers(logger, mainWindow);
 }
 
 // Inizializza i gestori IPC globali

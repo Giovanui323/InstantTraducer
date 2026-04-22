@@ -3,10 +3,11 @@ import { log } from '../logger';
 import { translatePage } from '../aiService';
 import { cleanTranslationText } from '../textClean';
 import { withTimeout, sleep } from '../../utils/async';
-import { estimateBytesFromBase64, downscaleDataUrlToJpeg, buildJpegDataUrlFromBase64 } from '../../utils/imageUtils';
+import { estimateBytesFromBase64, downscaleDataUrlToJpeg, buildJpegDataUrlFromBase64, downscaleBase64ForAI } from '../../utils/imageUtils';
 import { renderDocPageWithFallback } from '../../utils/pdfUtils';
-import { AI_TRANSLATION_TIMEOUT_MS, PAGE_RENDER_TIMEOUT_MS, PAGE_CACHE_MAX_EDGE, PAGE_CACHE_JPEG_QUALITY, VERIFICATION_CONTEXT_TIMEOUT_MS } from '../../constants';
+import { AI_TRANSLATION_TIMEOUT_MS, PAGE_RENDER_TIMEOUT_MS, PAGE_CACHE_MAX_EDGE, PAGE_CACHE_JPEG_QUALITY, VERIFICATION_CONTEXT_TIMEOUT_MS, AI_IMAGE_MAX_LONG_SIDE, AI_IMAGE_JPEG_QUALITY } from '../../constants';
 import { ConcurrencyControl } from '../../hooks/useTranslationQueue';
+import { isDiagnosticLogEnabled, addDiagnosticEntry } from './TranslationDiagnosticLogger';
 
 export interface TranslationExecutionServices {
   updateLibrary: (fileId: string, data: any, priority?: 'CRITICAL' | 'BACKGROUND' | 'BATCH') => Promise<string>;
@@ -85,6 +86,9 @@ export const executePageTranslation = async (
     : aiSettings.provider === 'openrouter' ? 'OpenRouter'
     : aiSettings.provider === 'custom' ? 'Custom'
     : 'OpenAI';
+
+  let imageData: string | undefined;
+  let prevContext = '';
 
   try {
     // PIPELINING SYNCHRONIZATION (Optimized: Before Rendering)
@@ -169,7 +173,7 @@ export const executePageTranslation = async (
       translationMapSize: Object.keys(context.translationMap).length
     });
 
-    let imageData: string | undefined;
+    imageData = undefined;
 
     if (pdfDoc) {
       const fileId = currentProjectFileId || null;
@@ -358,7 +362,7 @@ export const executePageTranslation = async (
       }
     }
 
-    let prevContext = "";
+    prevContext = "";
 
     if (prevTranslatedText && prevOriginalText) {
       // Caso OTTIMALE: Abbiamo entrambi. Forniamo entrambi per massima chiarezza.
@@ -379,18 +383,42 @@ export const executePageTranslation = async (
     const prevPageImageBase64 = prevPageNumber ? await services.getContextImageBase64(prevPageNumber, 'bottom') : undefined;
     const nextPageImageBase64 = nextPageNumber ? await services.getContextImageBase64(nextPageNumber, 'top') : undefined;
 
+    // Downscale immagini per AI: riduce il consumo di token senza perdere qualità OCR.
+    // Mantiene il rapporto d'aspetto originale, cap a AI_IMAGE_MAX_LONG_SIDE px lato lungo.
+    // Se fullResolutionMode è attivo, le immagini vengono inviate a piena risoluzione.
+    let aiReadyImageData = imageData;
+    let aiReadyPrevImage = prevPageImageBase64;
+    let aiReadyNextImage = nextPageImageBase64;
+    if (aiSettings.fullResolutionMode) {
+      services.appendPageConsole(targetPage, `Modalità alta risoluzione attiva: immagine originale ~${Math.round(estimateBytesFromBase64(imageData) / 1024)}KB`);
+    } else {
+      setters.updatePageStatus(targetPage, { loading: `Ottimizzazione immagini per ${providerLabel}...` });
+      try {
+        aiReadyImageData = await downscaleBase64ForAI(imageData, AI_IMAGE_MAX_LONG_SIDE, AI_IMAGE_JPEG_QUALITY);
+        if (prevPageImageBase64) {
+          aiReadyPrevImage = await downscaleBase64ForAI(prevPageImageBase64, AI_IMAGE_MAX_LONG_SIDE, AI_IMAGE_JPEG_QUALITY);
+        }
+        if (nextPageImageBase64) {
+          aiReadyNextImage = await downscaleBase64ForAI(nextPageImageBase64, AI_IMAGE_MAX_LONG_SIDE, AI_IMAGE_JPEG_QUALITY);
+        }
+      } catch (e) {
+        log.warning(`[DOWNSCALE] Fallback: impossibile ridimensionare immagini, uso originali`, e);
+      }
+      services.appendPageConsole(targetPage, `Immagine AI: ~${Math.round(estimateBytesFromBase64(aiReadyImageData) / 1024)}KB (originale: ~${Math.round(estimateBytesFromBase64(imageData) / 1024)}KB)`);
+    }
+
     setters.updatePageStatus(targetPage, { loading: `In attesa di ${providerLabel}...` });
     services.appendPageConsole(targetPage, `Preparazione richiesta ${providerLabel} completata. Invio in corso...`);
 
     const result = await withTimeout(
       translatePage(aiSettings, {
-        imageBase64: imageData,
+        imageBase64: aiReadyImageData,
         pageNumber: targetPage,
         sourceLanguage: docInputLanguage,
         previousContext: prevContext,
-        prevPageImageBase64,
+        prevPageImageBase64: aiReadyPrevImage,
         prevPageNumber,
-        nextPageImageBase64,
+        nextPageImageBase64: aiReadyNextImage,
         nextPageNumber,
         extraInstruction, // Use the instruction from retry if present
         translationModelOverride,
@@ -434,6 +462,25 @@ export const executePageTranslation = async (
       : aiSettings.provider === 'custom' ? aiSettings.customProviders?.find(cp => cp.id === aiSettings.activeCustomProviderId)?.model
       : aiSettings.openai.model
     ) || 'sconosciuto';
+
+    // Diagnostic log
+    if (isDiagnosticLogEnabled()) {
+      addDiagnosticEntry({
+        page: targetPage,
+        timestamp: Date.now(),
+        provider: aiSettings.provider,
+        model: modelLabel,
+        sourceLanguage: docInputLanguage,
+        systemPrompt: result.diagnosticPrompt || '(not captured by this provider)',
+        userInstruction: result.diagnosticUserInstruction || '(not captured by this provider)',
+        previousContext: prevContext,
+        imageBase64Length: imageData?.length || 0,
+        resultText: normalizedText,
+        resultModelUsed: result.modelUsed || null,
+        error: null,
+        durationMs: Math.round(performance.now() - startedAt),
+      });
+    }
     const savedAt = Date.now();
     const metaUpdate = { model: modelLabel, savedAt };
 
@@ -533,6 +580,29 @@ export const executePageTranslation = async (
     }
 
     services.appendPageConsole(targetPage, `ERRORE: ${message}`, err);
+
+    // Diagnostic log for errors
+    if (isDiagnosticLogEnabled()) {
+      addDiagnosticEntry({
+        page: targetPage,
+        timestamp: Date.now(),
+        provider: aiSettings.provider,
+        model: aiSettings.provider === 'gemini' ? aiSettings.gemini.model
+          : aiSettings.provider === 'claude' ? aiSettings.claude?.model
+          : aiSettings.provider === 'openrouter' ? aiSettings.openrouter?.model
+          : aiSettings.provider === 'openai' ? aiSettings.openai?.model
+          : 'unknown',
+        sourceLanguage: docInputLanguage,
+        systemPrompt: '(error before prompt could be captured)',
+        userInstruction: '(error before instruction could be captured)',
+        previousContext: prevContext || '',
+        imageBase64Length: imageData?.length || 0,
+        resultText: null,
+        resultModelUsed: null,
+        error: message,
+        durationMs: Math.round(performance.now() - startedAt),
+      });
+    }
 
     setters.updatePageStatus(targetPage, {
       error: message,

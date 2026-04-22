@@ -32,6 +32,9 @@ const logDebug = (msg, meta) => logger?.debug(String(msg), meta);
 const logError = (msg, meta) => logger?.error(String(msg), meta);
 
 const MAX_JSON_SIZE = 100 * 1024 * 1024; // 100MB
+const MAX_PDF_SIZE = 200 * 1024 * 1024;  // 200MB
+const SUPPORTED_FORMAT_VERSIONS = ['1.0'];
+const APP_VERSION = JSON.parse(fs.readFileSync(new URL('../package.json', import.meta.url), 'utf-8')).version;
 const DEFAULT_IPC_TIMEOUT = 60000;       // 60s
 
 export function setupPackageHandlers(providedLogger, providedMainWindow) {
@@ -74,18 +77,28 @@ export function setupPackageHandlers(providedLogger, providedMainWindow) {
 
             const zip = new AdmZip();
             const jsonContent = await fs.promises.readFile(jsonPath, 'utf-8');
-            
+
+            checkSize(jsonContent, MAX_JSON_SIZE, 'Project JSON');
             const projectData = JSON.parse(jsonContent);
             validateProjectData(projectData);
-            checkSize(jsonContent, MAX_JSON_SIZE, 'Project JSON');
 
-            zip.addFile('project.json', Buffer.from(jsonContent, 'utf-8'));
+            const exportData = { ...projectData, formatVersion: '1.0' };
+            exportData._export = { timestamp: Date.now(), appVersion: APP_VERSION };
+            zip.addFile('project.json', Buffer.from(JSON.stringify(exportData, null, 2), 'utf-8'));
 
             if (hasPdf) {
                 const pdfContent = await fs.promises.readFile(originalPdfPath);
-                checkSize(pdfContent, MAX_JSON_SIZE, 'Original PDF');
+                checkSize(pdfContent, MAX_PDF_SIZE, 'Original PDF');
                 zip.addFile('original.pdf', pdfContent);
             }
+
+            // Include custom cover if exists
+            const coverImgPath = path.join(assetsDir, 'cover.jpg');
+            try {
+                await fs.promises.access(coverImgPath, fs.constants.F_OK);
+                const coverContent = await fs.promises.readFile(coverImgPath);
+                zip.addFile('cover.jpg', coverContent);
+            } catch { /* no custom cover, that's fine */ }
 
             const cleanId = getFileIdStem(safeId);
             const { canceled, filePath } = await dialog.showSaveDialog(mainWindow || undefined, {
@@ -147,13 +160,17 @@ export function setupPackageHandlers(providedLogger, providedMainWindow) {
                 throw new Error(`Pacchetto non valido: JSON corrotto o struttura non valida (${e.message}).`);
             }
 
+            if (projectData.formatVersion && !SUPPORTED_FORMAT_VERSIONS.includes(projectData.formatVersion)) {
+                throw new Error(`Versione formato non supportata: ${projectData.formatVersion}. Versioni compatibili: ${SUPPORTED_FORMAT_VERSIONS.join(', ')}.`);
+            }
+
             const translationsDir = await getTranslationsDir();
             const originalFileName = typeof projectData.fileName === 'string' ? projectData.fileName.trim() : '';
             const finalFileName = originalFileName || 'Imported Project';
 
             const pdfEntry = zipEntries.find(entry => entry.entryName === 'original.pdf');
             const pdfBuffer = pdfEntry ? zip.readFile(pdfEntry) : null;
-            if (pdfBuffer) checkSize(pdfBuffer, MAX_JSON_SIZE, 'Imported Original PDF');
+            if (pdfBuffer) checkSize(pdfBuffer, MAX_PDF_SIZE, 'Imported Original PDF');
 
             let fingerprint = typeof projectData.fingerprint === 'string' ? projectData.fingerprint.trim() : '';
             if (!fingerprint && pdfBuffer) {
@@ -180,17 +197,28 @@ export function setupPackageHandlers(providedLogger, providedMainWindow) {
                 await safeWriteFile(newOriginalPdfPath, pdfBuffer);
             }
 
+            // Extract custom cover image if present
+            const coverEntry = zipEntries.find(entry => entry.entryName === 'cover.jpg');
+            if (coverEntry) {
+                const coverBuffer = zip.readFile(coverEntry);
+                if (coverBuffer) {
+                    const coverPath = path.join(targetAssetsDir, 'cover.jpg');
+                    await safeWriteFile(coverPath, coverBuffer);
+                }
+            }
+
             if (newOriginalPdfPath) {
                 projectData.originalFilePath = newOriginalPdfPath;
             } else {
                 delete projectData.originalFilePath;
             }
+            projectData.importedFrom = projectData.createdAt || undefined;
             projectData.createdAt = Date.now();
             projectData.updatedAt = Date.now();
-            projectData.fileName = finalFileName;
             projectData.fileId = fileId;
             projectData.id = newUUID;
             if (fingerprint) projectData.fingerprint = fingerprint;
+            delete projectData._export;
 
             validateProjectData(projectData);
 

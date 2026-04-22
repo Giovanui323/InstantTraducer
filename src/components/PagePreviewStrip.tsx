@@ -14,18 +14,15 @@ export interface PagePreviewStripProps {
   theme?: 'light' | 'sepia' | 'dark';
 }
 
-// Only render pages within this window of the scroll viewport
-const VIRTUALIZATION_BUFFER = 8; // pages before/after visible area
+const VIRTUALIZATION_BUFFER = 8;
 
-// Lightweight placeholder for off-screen pages (same dimensions, no content)
 const PagePlaceholder: React.FC<{ page: number }> = ({ page }) => (
   <div
-    className="snap-start w-[60px] h-[85px] flex-shrink-0 rounded-lg bg-surface-3/40 border border-border-muted"
+    className="snap-start w-[60px] h-[85px] flex-shrink-0 rounded-lg bg-surface-3/20 border border-border-muted/30"
     data-page-placeholder={page}
   />
 );
 
-// Single page thumbnail — extracted for React.memo optimization
 const PageThumb: React.FC<{
   page: number;
   isActive: boolean;
@@ -38,15 +35,17 @@ const PageThumb: React.FC<{
   <button
     data-active={isActive ? 'true' : 'false'}
     onClick={() => onSelect(page)}
-    className={`snap-start group relative w-[60px] h-[85px] flex-shrink-0 rounded-lg overflow-hidden border-2 transition-all duration-200 ease-out-expo ${
+    className={`snap-start group relative w-[60px] h-[85px] flex-shrink-0 rounded-lg overflow-hidden border transition-all duration-200 ease-out-expo ${
       isActive
-        ? 'border-accent shadow-[0_0_0_2px_rgba(245,158,11,0.25)] scale-110 z-10'
+        ? 'border-accent ring-2 ring-accent/25 scale-110 z-10 shadow-[0_0_12px_rgba(245,158,11,0.2)]'
         : status === 'done'
-          ? 'border-success/40 hover:border-success/70 hover:scale-105'
+          ? 'border-success/30 hover:border-success/60 hover:scale-[1.06]'
           : status === 'error'
-            ? 'border-danger/40 hover:border-danger/70 hover:scale-105'
-            : 'border-border-muted hover:border-border hover:scale-105'
-    } bg-surface-3/40 shadow-surface`}
+            ? 'border-danger/30 hover:border-danger/60 hover:scale-[1.06]'
+            : status === 'in_progress'
+              ? 'border-accent/30 hover:border-accent/50 hover:scale-[1.06]'
+              : 'border-border-muted/40 hover:border-border hover:scale-[1.06]'
+    } bg-surface-3/30`}
     title={`Pagina ${page}${status === 'done' ? ' (tradotta)' : status === 'in_progress' ? ' (in traduzione)' : status === 'error' ? ' (errore)' : ' (da tradurre)'}`}
   >
     {status === 'done' && text ? (
@@ -59,39 +58,46 @@ const PageThumb: React.FC<{
       <img
         src={thumb}
         alt={`Pagina ${page}`}
-        className="w-full h-full object-contain select-none opacity-85 group-hover:opacity-100 transition-opacity duration-200"
+        className="w-full h-full object-contain select-none opacity-80 group-hover:opacity-100 transition-opacity duration-200"
         loading="lazy"
         draggable={false}
       />
     ) : (
-      <div className="w-full h-full bg-surface-4/40 flex items-center justify-center">
-        <div className="w-4 h-6 border border-border rounded-sm bg-surface-4/60" />
+      <div className="w-full h-full bg-surface-4/30 flex items-center justify-center">
+        <div className="w-4 h-6 border border-border/50 rounded-sm bg-surface-4/40" />
       </div>
     )}
 
-    {/* Page number */}
-    <div className="absolute top-1 left-1 px-1 rounded-[3px] bg-black/60 backdrop-blur-sm border border-white/[0.06]">
-      <span className="text-[7px] font-bold text-white/90 font-mono tracking-tighter tabular-nums">{page}</span>
+    {/* Page number pill */}
+    <div className={`absolute top-1 left-1 px-1.5 py-0.5 rounded-md text-[7px] font-bold font-mono tabular-nums tracking-tight backdrop-blur-md transition-colors duration-200 ${
+      isActive
+        ? 'bg-accent/90 text-white border border-accent/60'
+        : 'bg-black/50 text-white/85 border border-white/[0.06]'
+    }`}>
+      {page}
     </div>
 
     {/* Status badge */}
     <div className="absolute bottom-1 right-1">
       {status === 'done' ? (
-        <div className="w-3.5 h-3.5 rounded-full bg-success flex items-center justify-center shadow-surface">
+        <div className="w-3.5 h-3.5 rounded-full bg-success/90 flex items-center justify-center shadow-[0_0_6px_rgba(63,185,80,0.3)]">
           <Check size={8} strokeWidth={3} className="text-white" />
         </div>
       ) : status === 'in_progress' ? (
-        <Loader2 size={12} className="text-accent animate-spin" />
+        <div className="w-3.5 h-3.5 rounded-full bg-accent/20 flex items-center justify-center">
+          <Loader2 size={10} className="text-accent animate-spin" />
+        </div>
       ) : status === 'error' ? (
-        <div className="w-3.5 h-3.5 rounded-full bg-danger flex items-center justify-center shadow-surface">
+        <div className="w-3.5 h-3.5 rounded-full bg-danger/90 flex items-center justify-center shadow-[0_0_6px_rgba(248,81,73,0.3)]">
           <XIcon size={8} strokeWidth={3} className="text-white" />
         </div>
       ) : (
-        <div className="w-3.5 h-3.5 rounded-full bg-surface-5 border border-border" />
+        <div className="w-2 h-2 rounded-full bg-surface-4 border border-border-muted/50" />
       )}
     </div>
 
-    <div className={`absolute inset-0 pointer-events-none rounded-lg transition-opacity duration-200 ${isActive ? 'bg-transparent' : 'bg-black/[0.08] group-hover:bg-transparent'}`} />
+    {/* Hover overlay */}
+    <div className={`absolute inset-0 pointer-events-none rounded-lg transition-opacity duration-200 ${isActive ? 'bg-transparent' : 'bg-black/[0.06] group-hover:bg-transparent'}`} />
   </button>
 ));
 PageThumb.displayName = 'PageThumb';
@@ -117,7 +123,6 @@ export const PagePreviewStrip: React.FC<PagePreviewStripProps> = ({
     return () => window.removeEventListener('keydown', handler);
   }, [onClose]);
 
-  // Scroll active page into view
   useEffect(() => {
     const el = containerRef.current;
     if (!el) return;
@@ -131,7 +136,6 @@ export const PagePreviewStrip: React.FC<PagePreviewStripProps> = ({
     }
   }, [currentPage]);
 
-  // Track scroll position for virtualization
   useEffect(() => {
     const el = containerRef.current;
     if (!el) return;
@@ -142,7 +146,7 @@ export const PagePreviewStrip: React.FC<PagePreviewStripProps> = ({
       raf = requestAnimationFrame(() => {
         raf = null;
         const scrollLeft = el.scrollLeft;
-        const itemWidth = 62; // 60px + 2px gap
+        const itemWidth = 62;
         const centerPage = Math.floor(scrollLeft / itemWidth) + Math.floor(el.clientWidth / itemWidth / 2) + 1;
         setVisibleCenter(Math.max(1, Math.min(totalPages, centerPage)));
       });
@@ -155,7 +159,6 @@ export const PagePreviewStrip: React.FC<PagePreviewStripProps> = ({
     };
   }, [totalPages]);
 
-  // Initialize visible center to current page
   useEffect(() => {
     setVisibleCenter(currentPage);
   }, [currentPage]);
@@ -173,7 +176,6 @@ export const PagePreviewStrip: React.FC<PagePreviewStripProps> = ({
   };
   const currentTheme = themeStyles[theme] || themeStyles.dark;
 
-  // Compute visible range
   const visibleStart = Math.max(1, visibleCenter - VIRTUALIZATION_BUFFER);
   const visibleEnd = Math.min(totalPages, visibleCenter + VIRTUALIZATION_BUFFER);
 
@@ -186,22 +188,21 @@ export const PagePreviewStrip: React.FC<PagePreviewStripProps> = ({
   }, []);
 
   return (
-    <div className="preview-strip-container w-full max-w-5xl mx-auto">
-      <div className="flex items-center gap-2 px-2">
+    <div className="w-full max-w-5xl mx-auto">
+      <div className="glass-panel flex items-center gap-2 px-3 py-2 rounded-2xl shadow-surface-2xl">
         <button
           onClick={handleScrollLeft}
-          className="w-8 h-8 flex items-center justify-center rounded-lg bg-surface-3/50 hover:bg-surface-4 text-txt-muted hover:text-txt-primary border border-border-muted transition-all duration-200 active:scale-90"
+          className="w-7 h-7 flex items-center justify-center rounded-lg hover:bg-white/[0.06] text-txt-muted hover:text-txt-primary transition-all duration-200 active:scale-90"
           title="Scorri a sinistra"
         >
-          <ChevronLeft size={16} />
+          <ChevronLeft size={14} />
         </button>
         <div
           ref={containerRef}
           className="flex-1 overflow-x-auto scroll-smooth snap-x snap-mandatory hide-scrollbar"
         >
-          <div className="flex items-stretch gap-2 py-2 px-1">
+          <div className="flex items-stretch gap-2 px-1">
             {pages.map((page) => {
-              // Virtualization: only render full content for pages near the viewport
               if (page < visibleStart || page > visibleEnd) {
                 return <PagePlaceholder key={page} page={page} />;
               }
@@ -228,10 +229,10 @@ export const PagePreviewStrip: React.FC<PagePreviewStripProps> = ({
         </div>
         <button
           onClick={handleScrollRight}
-          className="w-8 h-8 flex items-center justify-center rounded-lg bg-surface-3/50 hover:bg-surface-4 text-txt-muted hover:text-txt-primary border border-border-muted transition-all duration-200 active:scale-90"
+          className="w-7 h-7 flex items-center justify-center rounded-lg hover:bg-white/[0.06] text-txt-muted hover:text-txt-primary transition-all duration-200 active:scale-90"
           title="Scorri a destra"
         >
-          <ChevronRight size={16} />
+          <ChevronRight size={14} />
         </button>
       </div>
     </div>

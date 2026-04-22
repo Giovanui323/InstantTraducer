@@ -247,6 +247,7 @@ export const translateWithGemini = async (
 
     // Gemini 3 docs: "Negative constraints should be placed at the end of the instruction"
     const effectiveInstruction = userInstruction + criticalBlock;
+    let capturedSystemPrompt = '';
 
     const runAttempt = async (instruction: string, contextForPrompt: string) => {
       streamingActive = true;
@@ -256,6 +257,10 @@ export const translateWithGemini = async (
       const sanitizedMain = ensureBase64(imageBase64);
       const sanitizedPrev = prevPageImageBase64 ? ensureBase64(prevPageImageBase64) : undefined;
       const sanitizedNext = nextPageImageBase64 ? ensureBase64(nextPageImageBase64) : undefined;
+
+      const isRetry = Boolean(extraInstruction && extraInstruction.trim().length > 0);
+      const systemPrompt = getGeminiTranslateSystemPrompt(sourceLanguage, contextForPrompt, legalContext ?? true, isRetry, customPrompt, model);
+      capturedSystemPrompt = systemPrompt;
 
       let response;
       try {
@@ -297,19 +302,16 @@ export const translateWithGemini = async (
           ],
           config: {
             systemInstruction: (() => {
-              const isRetry = Boolean(extraInstruction && extraInstruction.trim().length > 0);
-              const prompt = getGeminiTranslateSystemPrompt(sourceLanguage, contextForPrompt, legalContext ?? true, isRetry, customPrompt, model);
-
               if (onProgress) {
                 const isDev = process.env.NODE_ENV === 'development';
                 onProgress(`[DEBUG] SYSTEM PROMPT GEN (Retry=${isRetry}, ExtraLen=${extraInstruction?.length || 0})`);
                 if (isRetry) {
-                  const debugPrompt = isDev ? prompt : `[REDACTED PROMPT: ${prompt.length} chars]`;
+                  const debugPrompt = isDev ? systemPrompt : `[REDACTED PROMPT: ${systemPrompt.length} chars]`;
                   const debugInstr = isDev ? effectiveInstruction : `[REDACTED INSTR: ${effectiveInstruction.length} chars]`;
                   onProgress(`[DEBUG] CRITICAL MODE ACTIVE.\n\nSYSTEM PROMPT:\n${debugPrompt}\n\nUSER INSTRUCTION:\n${debugInstr}`);
                 }
               }
-              return prompt;
+              return systemPrompt;
             })(),
             safetySettings: DEFAULT_SAFETY_SETTINGS,
             temperature: 1.0,
@@ -485,7 +487,7 @@ export const translateWithGemini = async (
     // Reset retry attempts on successful completion
     resetRetryAttempts(pageNumber);
 
-    return { text: attempt1Text, annotations: [], modelUsed: model };
+    return { text: attempt1Text, annotations: [], modelUsed: model, diagnosticPrompt: capturedSystemPrompt, diagnosticUserInstruction: effectiveInstruction };
   } catch (error: any) {
     const isQuota = isQuotaError(error);
     const isTimeout = String(error?.message || "").includes("Timeout");
