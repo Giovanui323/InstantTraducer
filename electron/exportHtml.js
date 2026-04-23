@@ -277,69 +277,73 @@ export const buildExportHtml = ({ bookName, pages, options = {}, pageDims = {} }
         height: 297mm;
         background: #ffffff;
         box-sizing: border-box;
-        padding: 25mm 25mm 30mm 25mm;
-        font-family: "Iowan Old Style", Palatino, "Palatino Linotype", "Book Antiqua", Georgia, Cambria, "Times New Roman", Times, serif;
-        font-size: 12pt;
-        line-height: 1.5;
+        padding: 22mm 24mm 28mm 24mm;
+        font-family: "Literata", "Iowan Old Style", Palatino, "Palatino Linotype", "Book Antiqua", Georgia, Cambria, "Times New Roman", Times, serif;
+        font-size: 11.5pt;
+        line-height: 1.55;
         color: #1a1a1a;
         position: relative;
         overflow: visible;
         break-inside: avoid;
         page-break-inside: avoid;
+        font-kerning: normal;
+        font-feature-settings: "kern" 1, "liga" 1, "clig" 1, "calt" 1, "onum" 1;
+        letter-spacing: 0.005em;
+        text-rendering: optimizeLegibility;
       }
       .pageInner { position: relative; width: 100%; height: 100%; }
-      .content { color: rgb(17, 24, 39); text-align: justify; hyphens: auto; padding-bottom: 22mm; }
-      .contentTwoCol { display: grid; grid-template-columns: 1fr 1fr; gap: 10mm; }
+      .content { color: #1f2937; text-align: justify; hyphens: auto; padding-bottom: 22mm; max-width: 70ch; margin: 0 auto; }
+      .contentTwoCol { display: grid; grid-template-columns: 1fr 1fr; gap: 8mm; }
       .contentTwoCol .col { text-align: justify; hyphens: auto; }
-      p { margin: 0; text-indent: 1.2em; margin-bottom: 0.2em; }
+      p { margin: 0; text-indent: 1.2em; margin-bottom: 0.15em; }
       p.noIndent { text-indent: 0; }
       h1, h2, h3 { margin: 0; page-break-after: avoid; break-after: avoid-page; }
-      h1 { text-transform: uppercase; font-weight: 700; letter-spacing: 0.02em; padding-bottom: 4mm; border-bottom: 0.6pt solid rgba(0,0,0,0.6); margin-top: 18mm; margin-bottom: 10mm; font-size: 1.8em; }
-      h2 { text-transform: uppercase; font-weight: 700; letter-spacing: 0.02em; margin-top: 12mm; margin-bottom: 6mm; font-size: 1.4em; }
-      h3 { font-weight: 700; margin-top: 10mm; margin-bottom: 4mm; font-size: 1.2em; }
-      .bold { font-weight: 700; }
+      h1 { font-weight: 600; letter-spacing: 0.01em; padding-bottom: 3mm; border-bottom: 0.5pt solid rgba(0,0,0,0.5); margin-top: 16mm; margin-bottom: 8mm; font-size: 1.6em; }
+      h2 { font-weight: 600; letter-spacing: 0.01em; margin-top: 10mm; margin-bottom: 5mm; font-size: 1.3em; }
+      h3 { font-weight: 600; margin-top: 8mm; margin-bottom: 3mm; font-size: 1.15em; }
+      .bold { font-weight: 600; }
       .italic { font-style: italic; }
-      .highlight { background: rgba(250, 204, 21, 0.25); print-color-adjust: exact; -webkit-print-color-adjust: exact; }
-      .footnoteRef { font-size: 0.75em; vertical-align: super; }
+      .highlight { background: rgba(250, 204, 21, 0.3); print-color-adjust: exact; -webkit-print-color-adjust: exact; border-radius: 2px; box-decoration-break: clone; -webkit-box-decoration-break: clone; }
+      .footnoteRef { font-size: 0.72em; vertical-align: super; font-weight: 600; }
       .footnotes { position: absolute; left: 0; right: 0; bottom: 0; }
-      .footnoteSeparator { width: 45mm; border-top: 0.6pt solid rgba(0,0,0,0.6); margin-bottom: 3mm; }
+      .footnoteSeparator { width: 40mm; border-top: 0.5pt solid rgba(0,0,0,0.5); margin-bottom: 3mm; }
       .footnoteList { display: flex; flex-direction: column; gap: 0mm; padding-bottom: 8mm; }
-      .footnote { display: flex; gap: 3mm; font-size: 9pt; line-height: 1.3; color: rgba(0,0,0,0.85); margin-bottom: 2mm; }
-      .footnoteNumber { min-width: 5mm; text-align: right; font-weight: bold; }
-      .footnoteText { flex: 1 1 auto; padding-left: 3mm; text-indent: -5mm; display: block; text-align: justify; hyphens: auto; }
-      .pageNumber { position: absolute; right: 0; bottom: 0; font-size: 9pt; color: rgba(0,0,0,0.6); }
+      .footnote { display: flex; gap: 3mm; font-size: 8.5pt; line-height: 1.35; color: rgba(0,0,0,0.8); margin-bottom: 1.5mm; }
+      .footnoteNumber { min-width: 4.5mm; text-align: right; font-weight: 600; }
+      .footnoteText { flex: 1 1 auto; padding-left: 2.5mm; text-indent: -4.5mm; display: block; text-align: justify; hyphens: auto; }
+      .pageNumber { position: absolute; right: 0; bottom: 0; font-size: 8.5pt; color: rgba(0,0,0,0.5); }
       .figure {
-        margin: 24pt 0;
-        padding: 16pt;
-        background: #ffffff;
-        border: 0.5pt solid #e2e2e2;
-        border-left: 4pt solid #007AFF;
+        margin: 20pt 0;
+        padding: 14pt;
+        background: #fafafa;
+        border: 0.5pt solid #e5e5e5;
+        border-left: 3pt solid #6b7280;
         display: flex;
         align-items: flex-start;
-        gap: 16pt;
+        gap: 14pt;
         page-break-inside: avoid;
-        print-color-adjust: exact; 
+        print-color-adjust: exact;
         -webkit-print-color-adjust: exact;
       }
       .figureIcon {
-        margin-top: 4pt;
-        padding: 8pt;
-        background: rgba(0, 122, 255, 0.1);
-        color: #007AFF;
+        margin-top: 3pt;
+        padding: 7pt;
+        background: rgba(107, 114, 128, 0.08);
+        color: #6b7280;
         border-radius: 4pt;
         flex: 0 0 auto;
-        print-color-adjust: exact; 
+        print-color-adjust: exact;
         -webkit-print-color-adjust: exact;
       }
-      .figureBody { display: flex; flex-direction: column; gap: 4pt; min-width: 0; }
+      .figureBody { display: flex; flex-direction: column; gap: 3pt; min-width: 0; }
       .figureLabel {
-        font-size: 8pt;
+        font-size: 7.5pt;
         font-weight: 800;
         letter-spacing: 0.12em;
         text-transform: uppercase;
-        color: #007AFF;
+        color: #6b7280;
       }
-      .figureText { font-size: 11pt; font-style: italic; color: #4b5563; }
+      .figureText { font-size: 10.5pt; font-style: italic; color: #4b5563; }
     </style>
   </head>
   <body>

@@ -10,7 +10,7 @@ export interface LibraryContextType {
   currentProjectFileId: string | null;
   setCurrentProjectFileId: (id: string | null) => void;
   refreshLibrary: () => Promise<void>;
-  createGroup: (group: string) => void;
+  createGroup: (group: string) => Group | null;
   deleteGroup: (group: string) => void;
   toggleGroupFilter: (group: string) => void;
   addBookToGroup: (fileId: string, group: string) => void;

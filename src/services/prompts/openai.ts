@@ -48,9 +48,9 @@ Se la \`[PAGINA TARGET]\` è impaginata in **due colonne affiancate** (frequente
 Non omettere il marker se le colonne sono due. Non inserirlo se la pagina è a colonna singola.
 
 # Reasoning Steps
-Esegui mentalmente questi tre passaggi PRIMA di scrivere:
+Esegui questi tre passaggi PRIMA di scrivere:
 1. **Osserva** la \`[PAGINA TARGET]\` dall'alto in basso. Identifica e conta i blocchi (titoli, paragrafi, didascalie, note). Stabilisci se è impaginata a UNA o a DUE colonne.
-2. **Decidi** il formato: DUE colonne → userai \`[[PAGE_SPLIT]]\`; UNA colonna → non lo userai.
+2. **Decidi** il formato — questo vincola DIRETTAMENTE ciò che scrivi: DUE colonne → il tuo output DEVE contenere \`[[PAGE_SPLIT]]\`. Se lo dimentichi, fermati e inseriscilo prima di rispondere. UNA colonna → non usare \`[[PAGE_SPLIT]]\`.
 3. **Traduci** ogni blocco identificato al passo 1, in ordine, fino all'ultima riga visibile.
 
 # Output Format
@@ -91,7 +91,7 @@ Estratto della pagina precedente (solo riferimento, **non includere nell'output*
 {{prevContext}}
 
 # Final reminder
-Prima di rispondere verifica internamente: (a) tutti i blocchi del passo 1 sono tradotti? (b) l'output è in italiano? (c) se due colonne, \`[[PAGE_SPLIT]]\` è presente esattamente una volta su riga propria? (d) tutte le note sono incluse, ciascuna nella colonna giusta? Se una verifica fallisce, correggi prima di chiudere il turno.
+Prima di rispondere verifica internamente: (a) tutti i blocchi del passo 1 sono tradotti? (b) l'output è in italiano? (c) VERIFICA LAYOUT INCROCIATA: se hai stabilito DUE colonne ma \`[[PAGE_SPLIT]]\` NON è nel tuo output → INSERISCILO ORA; se hai stabilito UNA colonna ma \`[[PAGE_SPLIT]]\` è presente → RIMUOVILO. (d) tutte le note sono incluse, ciascuna nella colonna giusta? Se una verifica fallisce, correggi prima di chiudere il turno.
 
 {{retryMode}}`;
 

@@ -151,6 +151,8 @@ export interface AISettings {
   translationDiagnosticLog?: boolean;
   /** Traduzione accurata: invia immagini a risoluzione piena (no downscale), massima qualità OCR ma più token */
   fullResolutionMode?: boolean;
+  /** Opzione globale per splittare le pagine a doppia colonna */
+  splitDoubleColumns?: boolean;
 }
 
 export type VerificationState = 'idle' | 'verifying' | 'verified' | 'failed';

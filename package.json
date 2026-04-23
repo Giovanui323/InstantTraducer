@@ -4,7 +4,7 @@
   "description": "The fastest way to translate your PDF books with AI",
   "author": "User",
   "private": true,
-  "version": "4.4.6",
+  "version": "4.4.13",
   "type": "module",
   "scripts": {
     "dev": "vite",

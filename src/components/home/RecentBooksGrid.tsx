@@ -1,4 +1,5 @@
 import React, { useState, useMemo } from 'react';
+import ReactDOM from 'react-dom';
 import { AlertCircle, Pencil, Trash2, MoreHorizontal, Tag, FileDown, Loader2, Plus, Settings, Search, X, BookImage } from 'lucide-react';
 import { useLibrary } from '../../contexts/LibraryContext';
 import { ReadingProgress } from '../../types';
@@ -66,10 +67,6 @@ export const RecentBooksGrid: React.FC<RecentBooksGridProps> = ({
 
   React.useEffect(() => {
     if (!openMenuId) return;
-    // Defer listener registration by one frame so the opening click's events
-    // have fully finished propagating before we start listening for dismiss clicks.
-    // Without this, the mousedown from the click that opened the menu can
-    // immediately trigger the dismiss handler and close it before it's visible.
     let cancelled = false;
     const rafId = requestAnimationFrame(() => {
       if (cancelled) return;
@@ -82,13 +79,11 @@ export const RecentBooksGrid: React.FC<RecentBooksGridProps> = ({
       const handleResize = () => { onSetOpenMenuId(null); setMenuPosition(null); };
       document.addEventListener('mousedown', handleClick);
       window.addEventListener('resize', handleResize);
-      // Store cleanup in ref-like closure
       cleanupRef.current = () => {
         document.removeEventListener('mousedown', handleClick);
         window.removeEventListener('resize', handleResize);
       };
     });
-    // Stable ref for deferred cleanup
     const cleanupRef = { current: () => {} };
     return () => {
       cancelled = true;
@@ -193,7 +188,6 @@ export const RecentBooksGrid: React.FC<RecentBooksGridProps> = ({
             </div>
           ) : (
             <div className="relative flex flex-col items-center justify-center px-6 py-16 text-center rounded-2xl border border-dashed border-border-muted/80 bg-gradient-to-b from-surface-2/40 to-surface-1/20 text-txt-muted animate-fade-in overflow-hidden">
-              {/* Decorative book stack illustration */}
               <div className="relative w-24 h-16 mb-5 opacity-90">
                 <div className="absolute left-0 top-3 w-7 h-12 rounded-sm bg-gradient-to-b from-[#7c1d2e] to-[#2a0e16] shadow-[0_4px_8px_-2px_rgba(0,0,0,0.5)] rotate-[-6deg] border border-black/40" />
                 <div className="absolute left-7 top-1 w-7 h-14 rounded-sm bg-gradient-to-b from-[#1e3a5f] to-[#0b1a30] shadow-[0_4px_8px_-2px_rgba(0,0,0,0.5)] rotate-[2deg] border border-black/40" />
@@ -237,9 +231,7 @@ export const RecentBooksGrid: React.FC<RecentBooksGridProps> = ({
                   }}
                   onClick={() => handleOpen(book.fileId || "")}
                 >
-                  {/* ── Cover wrapper (relative anchor for the menu, no overflow clip) ── */}
                   <div className="relative">
-                  {/* ── Cover (with overflow:hidden for inner art) ── */}
                   <div
                     className={`book-cover relative aspect-[2/3] rounded-sm overflow-hidden border transition-all duration-300 ease-out-expo ${
                       isOpening ? '' : 'group-hover:-translate-y-1.5 group-hover:[transform:translateY(-6px)_rotateX(2deg)_rotateY(-1deg)]'
@@ -258,17 +250,14 @@ export const RecentBooksGrid: React.FC<RecentBooksGridProps> = ({
                       transformOrigin: 'center bottom',
                     }}
                   >
-                    {/* Spine highlight (left edge) — gilded on hover */}
                     <div
                       className="pointer-events-none absolute inset-y-0 left-0 w-[8px] bg-gradient-to-r from-black/40 via-black/20 to-transparent transition-all duration-300 group-hover:from-amber-700/40 group-hover:via-amber-500/15"
                       aria-hidden
                     />
-                    {/* Inner gilt edge on hover */}
                     <div
                       className="pointer-events-none absolute inset-y-0 left-0 w-px bg-amber-300/0 group-hover:bg-amber-300/40 transition-colors duration-300"
                       aria-hidden
                     />
-                    {/* Top sheen — paper light */}
                     <div
                       className="pointer-events-none absolute inset-x-0 top-0 h-1/3 bg-gradient-to-b from-white/[0.06] to-transparent opacity-0 group-hover:opacity-100 transition-opacity duration-300"
                       aria-hidden
@@ -276,7 +265,6 @@ export const RecentBooksGrid: React.FC<RecentBooksGridProps> = ({
 
                     {!book.thumbnail && <FallbackBookCover fileName={book.fileName || ''} />}
 
-                    {/* Language flag */}
                     <div className="absolute top-2 right-2 flex items-center gap-1 z-[2]">
                       {book.inputLanguage && (
                         <span
@@ -288,7 +276,6 @@ export const RecentBooksGrid: React.FC<RecentBooksGridProps> = ({
                       )}
                     </div>
 
-                    {/* Missing PDF warning */}
                     {book.hasSafePdf === false && (
                       <div
                         className="absolute top-2 left-2 bg-danger/90 text-white rounded-full p-1 border border-white/20 shadow-md z-[2]"
@@ -298,7 +285,6 @@ export const RecentBooksGrid: React.FC<RecentBooksGridProps> = ({
                       </div>
                     )}
 
-                    {/* Active "Aperto" brass-style badge */}
                     {isActive && (
                       <div
                         className="absolute top-2 left-2 px-2 py-0.5 text-white text-[8px] font-bold uppercase tracking-[0.15em] rounded-full border border-white/25 shadow-md z-[2]"
@@ -317,36 +303,19 @@ export const RecentBooksGrid: React.FC<RecentBooksGridProps> = ({
                       isCurrentProjectTranslating={isActive && isCurrentTranslating}
                     />
 
-                    {/* Loading overlay */}
                     {isOpening && (
                       <div className="absolute inset-0 flex items-center justify-center bg-surface-0/60 backdrop-blur-sm z-[3]">
                         <Loader2 className="w-6 h-6 text-accent animate-spin" />
                       </div>
                     )}
 
-                    {/* Action bar — soft glass instead of harsh black */}
+                    {/* Three-dots button only */}
                     <div
-                      className={`absolute inset-x-0 bottom-0 px-2 pb-2 pt-10 flex items-end justify-end gap-1 transition-opacity duration-200 z-[2] bg-gradient-to-t from-black/70 via-black/30 to-transparent ${
+                      className={`absolute inset-x-0 bottom-0 px-2 pb-2 pt-10 flex items-end justify-end transition-opacity duration-200 z-[2] bg-gradient-to-t from-black/70 via-black/30 to-transparent ${
                         menuOpen ? 'opacity-100' : 'opacity-0 group-hover:opacity-100'
                       }`}
                       onClick={(e) => e.stopPropagation()}
                     >
-                      <button
-                        onClick={(e) => { e.stopPropagation(); onRenameProject(book.fileId || "", book.fileName || "", e, book.inputLanguage); }}
-                        className="p-1.5 text-white/85 hover:text-white bg-white/10 hover:bg-white/20 rounded-md backdrop-blur-md border border-white/15 transition-all duration-150 shadow-sm focus:outline-none"
-                        title="Rinomina"
-                        aria-label="Rinomina"
-                      >
-                        <Pencil size={11} />
-                      </button>
-                      <button
-                        onClick={(e) => { e.stopPropagation(); onDeleteProject(book.fileId || "", e); }}
-                        className="p-1.5 text-white/85 hover:text-danger bg-white/10 hover:bg-danger/30 rounded-md backdrop-blur-md border border-white/15 hover:border-danger/40 transition-all duration-150 shadow-sm focus:outline-none"
-                        title="Rimuovi"
-                        aria-label="Rimuovi"
-                      >
-                        <Trash2 size={11} />
-                      </button>
                       <button
                         onClick={(e) => {
                           e.stopPropagation();
@@ -355,7 +324,7 @@ export const RecentBooksGrid: React.FC<RecentBooksGridProps> = ({
                             setMenuPosition(null);
                           } else {
                             const rect = e.currentTarget.getBoundingClientRect();
-                            const menuH = 220;
+                            const menuH = 280;
                             let top = rect.bottom + 6;
                             const left = Math.max(8, rect.right - 180);
                             if (top + menuH > window.innerHeight) top = rect.top - menuH - 6;
@@ -368,7 +337,7 @@ export const RecentBooksGrid: React.FC<RecentBooksGridProps> = ({
                             ? 'bg-accent/30 border-accent/40 text-white'
                             : 'bg-white/10 hover:bg-white/20 border-white/15'
                         }`}
-                        title="Altro"
+                        title="Opzioni"
                         aria-haspopup="menu"
                         aria-expanded={menuOpen}
                         aria-controls={menuOpen ? menuDomId : undefined}
@@ -384,8 +353,8 @@ export const RecentBooksGrid: React.FC<RecentBooksGridProps> = ({
                     </div>
                   </div>
 
-                  {/* ── Dropdown menu — fixed positioned to avoid overflow clipping ── */}
-                  {menuOpen && menuPosition && (
+                  {/* Dropdown menu */}
+                  {menuOpen && menuPosition && ReactDOM.createPortal(
                     <div
                       id={menuDomId}
                       role="menu"
@@ -400,6 +369,13 @@ export const RecentBooksGrid: React.FC<RecentBooksGridProps> = ({
                       >
                         <Tag size={13} className="text-txt-muted" /> Gestisci Gruppi
                       </button>
+                      <button
+                        onClick={(e) => { e.stopPropagation(); onSetOpenMenuId(null); onManageCover(book.fileId || ""); }}
+                        className="flex items-center gap-2.5 w-full px-3 py-2.5 text-[11px] text-txt-secondary hover:bg-white/[0.04] hover:text-txt-primary text-left transition-colors duration-100 focus:outline-none"
+                        role="menuitem"
+                      >
+                        <BookImage size={13} className="text-txt-muted" /> Gestisci Copertina
+                      </button>
                       {onEditLanguageProject && (
                         <button
                           onClick={(e) => { e.stopPropagation(); onSetOpenMenuId(null); onEditLanguageProject(book.fileId || "", book.inputLanguage || ""); }}
@@ -409,6 +385,7 @@ export const RecentBooksGrid: React.FC<RecentBooksGridProps> = ({
                           <Settings size={13} className="text-txt-muted" /> Cambia Lingua
                         </button>
                       )}
+                      <div className="border-t border-border-muted" />
                       <button
                         onClick={(e) => { e.stopPropagation(); onSetOpenMenuId(null); onRenameProject(book.fileId || "", book.fileName || "", e, book.inputLanguage); }}
                         className="flex items-center gap-2.5 w-full px-3 py-2.5 text-[11px] text-txt-secondary hover:bg-white/[0.04] hover:text-txt-primary text-left transition-colors duration-100 focus:outline-none"
@@ -418,18 +395,12 @@ export const RecentBooksGrid: React.FC<RecentBooksGridProps> = ({
                       </button>
                       <button
                         onClick={(e) => { e.stopPropagation(); onSetOpenMenuId(null); onExportGpt(book.fileId || ""); }}
-                        className="flex items-center gap-2.5 w-full px-3 py-2.5 text-[11px] text-txt-secondary hover:bg-white/[0.04] hover:text-txt-primary text-left border-t border-border-muted transition-colors duration-100 focus:outline-none"
+                        className="flex items-center gap-2.5 w-full px-3 py-2.5 text-[11px] text-txt-secondary hover:bg-white/[0.04] hover:text-txt-primary text-left transition-colors duration-100 focus:outline-none"
                         role="menuitem"
                       >
                         <FileDown size={13} className="text-txt-muted" /> Esporta (.gpt)
                       </button>
-                      <button
-                        onClick={(e) => { e.stopPropagation(); onSetOpenMenuId(null); onManageCover(book.fileId || ""); }}
-                        className="flex items-center gap-2.5 w-full px-3 py-2.5 text-[11px] text-txt-secondary hover:bg-white/[0.04] hover:text-txt-primary text-left transition-colors duration-100 focus:outline-none"
-                        role="menuitem"
-                      >
-                        <BookImage size={13} className="text-txt-muted" /> Gestisci Copertina
-                      </button>
+                      <div className="border-t border-border-muted" />
                       <button
                         onClick={(e) => { e.stopPropagation(); onSetOpenMenuId(null); onDeleteProject(book.fileId || "", e); }}
                         className="flex items-center gap-2.5 w-full px-3 py-2.5 text-[11px] text-danger/80 hover:bg-danger/5 hover:text-danger text-left transition-colors duration-100 focus:outline-none"
@@ -437,7 +408,8 @@ export const RecentBooksGrid: React.FC<RecentBooksGridProps> = ({
                       >
                         <Trash2 size={13} /> Rimuovi
                       </button>
-                    </div>
+                    </div>,
+                    document.body
                   )}
                   </div>
 

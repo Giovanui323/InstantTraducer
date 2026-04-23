@@ -23,6 +23,7 @@ export interface SaveQueueManagerProps {
   setIsSaving?: (v: boolean) => void;
   showToast?: (message: string, type: 'info' | 'success' | 'warning' | 'error') => void;
   recentBooksRef: React.MutableRefObject<Record<string, ReadingProgress>>;
+  setRecentBooks: React.Dispatch<React.SetStateAction<Record<string, ReadingProgress>>>;
   blacklistedIdsRef: React.MutableRefObject<Set<string>>;
   transitioningIdsRef: React.MutableRefObject<Set<string>>;
   processingSaveIdsRef: React.MutableRefObject<Set<string>>;
@@ -46,6 +47,7 @@ export const useSaveQueueManager = ({
   setIsSaving,
   showToast,
   recentBooksRef,
+  setRecentBooks,
   blacklistedIdsRef,
   transitioningIdsRef,
   processingSaveIdsRef,
@@ -327,6 +329,16 @@ export const useSaveQueueManager = ({
     if (equal(existingContent, candidateContent)) {
        return safeId;
     }
+
+    // CRITICAL FIX: Optimistically update UI state immediately
+    setRecentBooks(prev => {
+      const existing = prev[safeId];
+      if (!existing) return prev;
+      return {
+        ...prev,
+        [safeId]: { ...existing, ...data }
+      };
+    });
 
     const saveRequest: SaveRequest = {
       fileId: safeId,

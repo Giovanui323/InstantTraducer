@@ -45,6 +45,7 @@ import {
   PageSelectionModal,
   CreateGroupModal,
   GroupManagementModal,
+  GroupSidebarManageModal,
   CoverManagerModal,
   SimpleConfirmModal,
   PdfRenderErrorNotification,
@@ -432,6 +433,7 @@ const App: React.FC = () => {
   const [editLanguagePromptOpen, setEditLanguagePromptOpen] = useState<boolean>(false);
   const [pendingUpload, setPendingUpload] = useState<null | any>(null);
   const [createGroupModalOpen, setCreateGroupModalOpen] = useState(false);
+  const [groupManagerOpen, setGroupManagerOpen] = useState(false);
   const [activeGroupModalBookId, setActiveGroupModalBookId] = useState<string | null>(null);
   const [coverModalFileId, setCoverModalFileId] = useState<string | null>(null);
   const [renameState, setRenameState] = useState<null | any>(null);
@@ -1311,8 +1313,12 @@ const App: React.FC = () => {
       annotations.setUserHighlights(data.userHighlights || {});
       annotations.setUserNotes(data.userNotes || {});
       quality.setVerificationMap(data.verifications || {});
+      // CRITICAL FIX: Sync verificationMapRef immediately for auto-resume (same pattern as translationMapRef)
+      quality.verificationMapRef.current = data.verifications || {};
       quality.setVerificationsMeta(data.verificationsMeta || {});
       setAnnotationMap(data.annotations || {});
+      // Also sync the shared verificationMapRef used by useProjectManagement
+      verificationMapRef.current = data.verifications || {};
 
       // MARK PROJECT AS FULLY LOADED
       // This prevents the prefetch/auto-translate logic from running on partial state
@@ -2400,6 +2406,7 @@ const App: React.FC = () => {
         editLanguagePromptOpen ||
         Boolean(renameState) ||
         createGroupModalOpen ||
+        groupManagerOpen ||
         Boolean(activeGroupModalBookId) ||
         Boolean(coverModalFileId) ||
         Boolean(cropModal) ||
@@ -2433,6 +2440,7 @@ const App: React.FC = () => {
     editLanguagePromptOpen,
     renameState,
     createGroupModalOpen,
+    groupManagerOpen,
     activeGroupModalBookId,
     coverModalFileId,
     cropModal,
@@ -2775,7 +2783,7 @@ const App: React.FC = () => {
                   resetProjectState("Project Deleted");
                 }
               }}
-              onCreateGroup={() => setCreateGroupModalOpen(true)}
+              onOpenGroupManager={() => setGroupManagerOpen(true)}
               onSetOpenMenuId={setOpenMenuId}
               onOpenSettings={() => setIsSettingsOpen(true)}
               onManageGroups={setActiveGroupModalBookId}
@@ -2847,6 +2855,7 @@ const App: React.FC = () => {
               onRetryAllCritical={handleRetryAllCritical}
 
               onScaleChange={setScale}
+              onExportPdf={handleExportPdf}
               showConfirm={showConfirm}
               pageRotations={pageRotations}
               bottomPadding={bottomBarHeight + 120}
@@ -3079,6 +3088,11 @@ const App: React.FC = () => {
           />
         )}
 
+        <GroupSidebarManageModal
+          isOpen={groupManagerOpen}
+          onClose={() => setGroupManagerOpen(false)}
+        />
+
         {activeGroupModalBookId && (
           <GroupManagementModal
             isOpen={!!activeGroupModalBookId}
@@ -3087,7 +3101,12 @@ const App: React.FC = () => {
             assignedGroups={library.recentBooks[activeGroupModalBookId]?.groups || []}
             onClose={() => setActiveGroupModalBookId(null)}
             onToggleGroup={(group: string) => library.addBookToGroup(activeGroupModalBookId, group)}
-            onCreateGroup={(group: string) => library.createGroup(group)}
+            onCreateGroup={(group: string) => {
+              const newGroup = library.createGroup(group);
+              if (newGroup) {
+                library.addBookToGroup(activeGroupModalBookId, newGroup.id);
+              }
+            }}
           />
         )}
 

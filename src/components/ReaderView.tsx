@@ -68,6 +68,7 @@ interface ReaderViewProps {
   onToggleTranslatedMode?: () => void;
   showConfirm?: (title: string, message: string, onConfirm: () => void, type?: 'danger' | 'info' | 'alert') => void;
   pageRotations?: Record<number, number>;
+  onExportPdf?: () => void;
 }
 
 const formatPageRanges = (pages: number[]) => {
@@ -152,7 +153,8 @@ export const ReaderView: React.FC<ReaderViewProps> = ({
   onScaleChange,
   onToggleTranslatedMode,
   showConfirm,
-  pageRotations
+  pageRotations,
+  onExportPdf
 }) => {
   const initialThumbnail = useMemo(() => {
     const saved = localStorage.getItem('showThumbnail');
@@ -160,6 +162,7 @@ export const ReaderView: React.FC<ReaderViewProps> = ({
   }, []);
 
   const [state, dispatch] = useReducer(readerReducer, initialReaderState(initialThumbnail));
+  const [isExporting, setIsExporting] = useState(false);
 
   const {
     showHighlights, showUserNotes, showThumbnail,
@@ -756,7 +759,7 @@ export const ReaderView: React.FC<ReaderViewProps> = ({
         highlightColor={highlightColor}
         showThumbnail={showThumbnail}
         canUseNoteTool={canUseNoteTool}
-        isExporting={false}
+        isExporting={isExporting}
         isCriticalRetryDismissed={false}
         totalCriticalCount={0}
         pageForTools={pageForTools}
@@ -764,7 +767,11 @@ export const ReaderView: React.FC<ReaderViewProps> = ({
         onToolChange={(tool) => dispatch({ type: 'SET_TOOL', tool })}
         onHighlightColorChange={(color) => dispatch({ type: 'SET_HIGHLIGHT_COLOR', color })}
         onToggleThumbnail={toggleThumbnail}
-        onExport={() => {}}
+        onExport={async () => {
+          if (!onExportPdf || isExporting) return;
+          setIsExporting(true);
+          try { await onExportPdf(); } finally { setIsExporting(false); }
+        }}
         onRestoreCriticalRetry={() => {}}
       />
 

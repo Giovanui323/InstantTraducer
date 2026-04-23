@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useState, useCallback } from 'react';
 import { AISettings, GeminiModel, GroqModel } from '../../../types';
 import { SettingRow } from '../SettingRow';
 import { testGeminiConnection } from '../../../services/geminiService';
@@ -8,9 +8,10 @@ import { testGroqConnection } from '../../../services/groqService';
 import { testModalConnection } from '../../../services/modalService';
 import { testZaiConnection } from '../../../services/zaiService';
 import { testOpenRouterConnection } from '../../../services/openrouterService';
-import { BrainCircuit, Check, Key, X, Zap, Cpu, Globe } from 'lucide-react';
+import { BrainCircuit, Check, Key, X, Zap, Cpu, Globe, Loader2 } from 'lucide-react';
 import { SettingsSearchItem } from '../search';
 import { GEMINI_TRANSLATION_MODEL } from '../../../constants';
+import { inputClasses, btnClasses } from '../sharedStyles';
 
 export const apiKeysSearchItems: SettingsSearchItem[] = [
   { id: 'apiKeys.gemini', sectionId: 'apiKeys', sectionLabel: 'API Keys', title: 'Chiave API Gemini', description: 'Inserisci o modifica la chiave API per Google Gemini.', keywords: ['gemini', 'api key', 'chiave'], anchorId: 'apiKeys.gemini' },
@@ -23,8 +24,8 @@ export const apiKeysSearchItems: SettingsSearchItem[] = [
   { id: 'apiKeys.custom', sectionId: 'apiKeys', sectionLabel: 'API Keys', title: 'Provider Custom', description: 'Gestisci provider personalizzati con API custom.', keywords: ['custom', 'provider', 'api key', 'chiave'], anchorId: 'apiKeys.custom' }
 ];
 
-const inputClasses = "w-[240px] bg-surface-4/50 border border-border-muted rounded-xl py-2 px-3 text-[12px] text-txt-primary placeholder:text-txt-faint outline-none focus:border-accent/40 focus:ring-1 focus:ring-accent/20 font-mono transition-all duration-200";
-const btnClasses = "px-2.5 py-2 rounded-xl text-[11px] font-bold border transition-all duration-200";
+type ProviderKey = 'gemini' | 'openai' | 'claude' | 'groq' | 'modal' | 'zai' | 'openrouter';
+type TestStatus = 'idle' | 'testing' | 'success' | 'error';
 
 export const ApiKeysSection = ({
   draftSettings,
@@ -49,15 +50,30 @@ export const ApiKeysSection = ({
   const [editing, setEditing] = useState<Record<string, boolean>>({ gemini: false, openai: false, claude: false, groq: false, modal: false, zai: false, openrouter: false });
   const [tempKeys, setTempKeys] = useState({ gemini: geminiKey, openai: openAIKey, claude: claudeKey, groq: groqKey, modal: modalKey, zai: zaiKey, openrouter: openrouterKey });
 
+  const [testStatuses, setTestStatuses] = useState<Record<ProviderKey, { status: TestStatus; message?: string }>>({
+    gemini: { status: 'idle' }, openai: { status: 'idle' }, claude: { status: 'idle' },
+    groq: { status: 'idle' }, modal: { status: 'idle' }, zai: { status: 'idle' }, openrouter: { status: 'idle' }
+  });
+
   useEffect(() => {
     setTempKeys({ gemini: geminiKey, openai: openAIKey, claude: claudeKey, groq: groqKey, modal: modalKey, zai: zaiKey, openrouter: openrouterKey });
   }, [geminiKey, openAIKey, claudeKey, groqKey, modalKey, zaiKey, openrouterKey]);
 
-  const renderKeyControl = (p: 'gemini' | 'openai' | 'claude' | 'groq' | 'modal' | 'zai' | 'openrouter') => {
+  const showTestResult = useCallback((p: ProviderKey, status: TestStatus, message?: string) => {
+    setTestStatuses(prev => ({ ...prev, [p]: { status, message } }));
+    if (status !== 'testing') {
+      setTimeout(() => {
+        setTestStatuses(prev => ({ ...prev, [p]: { status: 'idle' } }));
+      }, 4000);
+    }
+  }, []);
+
+  const renderKeyControl = (p: ProviderKey) => {
     const isEditing = editing[p];
     const value = tempKeys[p] || '';
     const currentKey = p === 'gemini' ? geminiKey : p === 'openai' ? openAIKey : p === 'claude' ? claudeKey : p === 'groq' ? groqKey : p === 'modal' ? modalKey : p === 'zai' ? zaiKey : openrouterKey;
     const hasKey = Boolean(currentKey?.trim());
+    const ts = testStatuses[p];
 
     const onToggleEdit = () => {
       if (isEditing) {
@@ -76,31 +92,19 @@ export const ApiKeysSection = ({
     };
 
     const onTest = async () => {
+      showTestResult(p, 'testing');
       try {
-        if (p === 'gemini') {
-          const res = await testGeminiConnection(geminiKey, geminiModel as GeminiModel);
-          alert(res.success ? 'Connessione Gemini OK!' : `Errore Gemini: ${res.message}`);
-        } else if (p === 'openai') {
-          const res = await testOpenAIConnection(openAIKey, openAIModel);
-          alert(res.success ? 'Connessione OpenAI OK!' : `Errore OpenAI: ${res.message}`);
-        } else if (p === 'claude') {
-          const res = await testClaudeConnection(claudeKey, claudeModel as any);
-          alert(res.success ? 'Connessione Claude OK!' : `Errore Claude: ${res.message}`);
-        } else if (p === 'groq') {
-          const res = await testGroqConnection(groqKey, groqModel as GroqModel);
-          alert(res.success ? 'Connessione Groq OK!' : `Errore Groq: ${res.message}`);
-        } else if (p === 'modal') {
-          const res = await testModalConnection(modalKey);
-          alert(res.success ? 'Connessione Modal OK!' : `Errore Modal: ${res.message}`);
-        } else if (p === 'zai') {
-          const res = await testZaiConnection(zaiKey, 'glm-4-flash');
-          alert(res.success ? 'Connessione Z.ai OK!' : `Errore Z.ai: ${res.message}`);
-        } else if (p === 'openrouter') {
-          const res = await testOpenRouterConnection(openrouterKey, openrouterModel);
-          alert(res.success ? 'Connessione OpenRouter OK!' : `Errore OpenRouter: ${res.message}`);
-        }
+        let res: { success: boolean; message: string };
+        if (p === 'gemini') res = await testGeminiConnection(geminiKey, geminiModel as GeminiModel);
+        else if (p === 'openai') res = await testOpenAIConnection(openAIKey, openAIModel);
+        else if (p === 'claude') res = await testClaudeConnection(claudeKey, claudeModel as any);
+        else if (p === 'groq') res = await testGroqConnection(groqKey, groqModel as GroqModel);
+        else if (p === 'modal') res = await testModalConnection(modalKey);
+        else if (p === 'zai') res = await testZaiConnection(zaiKey, 'glm-4-flash');
+        else res = await testOpenRouterConnection(openrouterKey, openrouterModel);
+        showTestResult(p, res.success ? 'success' : 'error', res.message);
       } catch (e: any) {
-        alert(e?.message || String(e));
+        showTestResult(p, 'error', e?.message || String(e));
       }
     };
 
@@ -124,11 +128,15 @@ export const ApiKeysSection = ({
         </button>
         <button
           onClick={onTest}
-          className={`${btnClasses} bg-surface-4/50 text-txt-secondary border-border-muted hover:text-txt-primary hover:bg-surface-4`}
+          disabled={ts.status === 'testing'}
+          className={`${btnClasses} bg-surface-4/50 text-txt-secondary border-border-muted hover:text-txt-primary hover:bg-surface-4 disabled:opacity-50`}
         >
-          Test
+          {ts.status === 'testing' ? <Loader2 size={12} className="animate-spin" /> : 'Test'}
         </button>
-        {hasKey ? <Check size={14} className="text-success" /> : <X size={14} className="text-danger/50" />}
+        {ts.status === 'success' && <Check size={14} className="text-success animate-scale-in" />}
+        {ts.status === 'error' && <X size={14} className="text-danger animate-scale-in" />}
+        {ts.status === 'idle' && (hasKey ? <Check size={14} className="text-success/60" /> : <X size={14} className="text-danger/50" />)}
+        {ts.status === 'testing' && <Loader2 size={14} className="text-txt-muted animate-spin" />}
       </div>
     );
   };
@@ -145,7 +153,7 @@ export const ApiKeysSection = ({
         description="Chiave API per Gemini."
         right={
           <div className="flex items-center gap-2">
-            <div className="w-8 h-8 rounded-xl bg-accent/10 border border-accent/15 flex items-center justify-center text-accent">
+            <div className="w-8 h-8 rounded-xl bg-accent/10 border border-accent/15 flex items-center justify-center text-accent shrink-0">
               <Zap size={16} />
             </div>
             {renderKeyControl('gemini')}
@@ -159,7 +167,7 @@ export const ApiKeysSection = ({
         description="Chiave API per OpenAI."
         right={
           <div className="flex items-center gap-2">
-            <div className="w-8 h-8 rounded-xl bg-accent/10 border border-accent/15 flex items-center justify-center text-accent">
+            <div className="w-8 h-8 rounded-xl bg-accent/10 border border-accent/15 flex items-center justify-center text-accent shrink-0">
               <BrainCircuit size={16} />
             </div>
             {renderKeyControl('openai')}
@@ -173,7 +181,7 @@ export const ApiKeysSection = ({
         description="Chiave API per Claude."
         right={
           <div className="flex items-center gap-2">
-            <div className="w-8 h-8 rounded-xl bg-warning/10 border border-warning/15 flex items-center justify-center text-warning">
+            <div className="w-8 h-8 rounded-xl bg-warning/10 border border-warning/15 flex items-center justify-center text-warning shrink-0">
               <Key size={16} />
             </div>
             {renderKeyControl('claude')}
@@ -187,7 +195,7 @@ export const ApiKeysSection = ({
         description="Chiave API per Groq (gratis sul tuo account)."
         right={
           <div className="flex items-center gap-2">
-            <div className="w-8 h-8 rounded-xl bg-success/10 border border-success/15 flex items-center justify-center text-success">
+            <div className="w-8 h-8 rounded-xl bg-success/10 border border-success/15 flex items-center justify-center text-success shrink-0">
               <Zap size={16} />
             </div>
             {renderKeyControl('groq')}
@@ -201,7 +209,7 @@ export const ApiKeysSection = ({
         description="Chiave API per Modal — 1 richiesta alla volta."
         right={
           <div className="flex items-center gap-2">
-            <div className="w-8 h-8 rounded-xl bg-purple-500/10 border border-purple-500/15 flex items-center justify-center text-purple-400">
+            <div className="w-8 h-8 rounded-xl bg-purple-500/10 border border-purple-500/15 flex items-center justify-center text-purple-400 shrink-0">
               <Cpu size={16} />
             </div>
             {renderKeyControl('modal')}
@@ -215,7 +223,7 @@ export const ApiKeysSection = ({
         description="Chiave API Zhipu (formato: id.secret). Genera JWT automaticamente."
         right={
           <div className="flex items-center gap-2">
-            <div className="w-8 h-8 rounded-xl bg-blue-500/10 border border-blue-500/15 flex items-center justify-center text-blue-400">
+            <div className="w-8 h-8 rounded-xl bg-blue-500/10 border border-blue-500/15 flex items-center justify-center text-blue-400 shrink-0">
               <BrainCircuit size={16} />
             </div>
             {renderKeyControl('zai')}
@@ -229,13 +237,26 @@ export const ApiKeysSection = ({
         description="Chiave API per OpenRouter (accesso a 300+ modelli)."
         right={
           <div className="flex items-center gap-2">
-            <div className="w-8 h-8 rounded-xl bg-orange-500/10 border border-orange-500/15 flex items-center justify-center text-orange-400">
+            <div className="w-8 h-8 rounded-xl bg-orange-500/10 border border-orange-500/15 flex items-center justify-center text-orange-400 shrink-0">
               <Globe size={16} />
             </div>
             {renderKeyControl('openrouter')}
           </div>
         }
       />
+
+      {/* Test error details */}
+      {Object.entries(testStatuses).some(([, v]) => v.status === 'error' && v.message) && (
+        <div className="space-y-1">
+          {Object.entries(testStatuses).map(([p, v]) =>
+            v.status === 'error' && v.message ? (
+              <div key={p} className="px-3 py-2 rounded-xl bg-danger/5 border border-danger/20 text-[11px] text-danger animate-fade-in">
+                <span className="font-bold capitalize">{p}:</span> {v.message}
+              </div>
+            ) : null
+          )}
+        </div>
+      )}
     </div>
   );
 };

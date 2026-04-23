@@ -1,5 +1,6 @@
-import React from 'react';
-import { Hand, MessageSquare, Highlighter, Eraser, Eye, EyeOff, FileDown, Loader2, ShieldCheck } from 'lucide-react';
+import React, { useRef } from 'react';
+import { Hand, MessageSquare, Highlighter, Eraser, Eye, EyeOff, FileDown, Loader2, ShieldCheck, GripVertical } from 'lucide-react';
+import Draggable from 'react-draggable';
 import { HIGHLIGHT_COLORS, getHighlightButtonStyles } from '../../utils/highlightStyles';
 
 interface ReaderToolbarProps {
@@ -45,13 +46,21 @@ export const ReaderToolbar: React.FC<ReaderToolbarProps> = ({
   onExport,
   onRestoreCriticalRetry
 }) => {
+  const nodeRef = useRef<HTMLDivElement>(null);
   const activeHighlight = HIGHLIGHT_COLORS.find(c => c.id === highlightColor) || HIGHLIGHT_COLORS[0];
 
   return (
-    <div className="fixed bottom-24 left-1/2 -translate-x-1/2 z-[160] pointer-events-auto animate-fade-in-up">
-      <div className="flex items-center gap-1 px-2 py-1.5 bg-surface-1/85 backdrop-blur-xl border border-border-muted rounded-full shadow-surface-2xl">
+    <div className="fixed inset-0 z-[160] pointer-events-none animate-fade-in-up flex items-end justify-center pb-24">
+      <Draggable nodeRef={nodeRef} bounds="parent" handle=".drag-handle">
+        <div ref={nodeRef} className="flex items-center gap-1 px-2 py-1.5 bg-surface-1/85 backdrop-blur-xl border border-border-muted rounded-full shadow-surface-2xl pointer-events-auto h-fit">
+          
+          <div className="drag-handle cursor-move px-1.5 text-txt-muted hover:text-white flex items-center justify-center transition-colors" title="Sposta barra">
+            <GripVertical size={18} />
+          </div>
+          
+          <div className="w-px h-6 bg-border-muted/60 mx-0.5" />
 
-        {isCriticalRetryDismissed && totalCriticalCount > 0 && (
+          {isCriticalRetryDismissed && totalCriticalCount > 0 && (
           <>
             <div className="relative group">
               <div className={TOOLTIP_BASE}>
@@ -179,6 +188,7 @@ export const ReaderToolbar: React.FC<ReaderToolbarProps> = ({
           </button>
         </div>
       </div>
+      </Draggable>
     </div>
   );
 };

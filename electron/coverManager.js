@@ -21,6 +21,48 @@ const logError = (msg, meta) => logger?.error(String(msg), meta);
 const MAX_IMAGE_SIZE = 20 * 1024 * 1024; // 20MB
 const COVER_WIDTH = 400;
 
+function detectImageMime(buf) {
+    if (buf[0] === 0xFF && buf[1] === 0xD8 && buf[2] === 0xFF) return 'image/jpeg';
+    if (buf[0] === 0x89 && buf[1] === 0x50 && buf[2] === 0x4E && buf[3] === 0x47) return 'image/png';
+    if (buf[8] === 0x57 && buf[9] === 0x45 && buf[10] === 0x42 && buf[11] === 0x50) return 'image/webp';
+    if (buf[0] === 0x47 && buf[1] === 0x49 && buf[2] === 0x46) return 'image/gif';
+    return 'image/jpeg';
+}
+
+function imageFromBuffer(buf) {
+    if (!buf || buf.length === 0) throw new Error('Dati immagine vuoti.');
+    // Skip createFromBuffer entirely on Electron >= 39 — it has type conversion issues.
+    // Go straight to createFromDataURL which is more reliable.
+    const mime = detectImageMime(buf);
+    const b64 = buf.toString('base64');
+    for (const tryMime of [mime, 'image/png', 'image/jpeg', 'image/webp']) {
+        try {
+            const img = nativeImage.createFromDataURL(`data:${tryMime};base64,${b64}`);
+            if (!img.isEmpty()) return img;
+        } catch { /* next mime type */ }
+    }
+    // Last resort: try createFromBuffer directly
+    try {
+        const img = nativeImage.createFromBuffer(buf);
+        if (!img.isEmpty()) return img;
+    } catch { /* give up */ }
+    throw new Error('Formato immagine non supportato.');
+}
+
+function isWindowAlive(win) {
+    try { return win && !win.isDestroyed(); } catch { return false; }
+}
+
+/**
+ * Safely create a nativeImage from a data URL string.
+ */
+function imageFromDataURL(dataUrl) {
+    if (!dataUrl || typeof dataUrl !== 'string') throw new Error('Data URL immagine non valido.');
+    const img = nativeImage.createFromDataURL(dataUrl);
+    if (img.isEmpty()) throw new Error('Formato immagine non supportato.');
+    return img;
+}
+
 export function setupCoverHandlers(providedLogger, providedMainWindow) {
     logger = providedLogger;
     mainWindow = providedMainWindow;
@@ -44,7 +86,8 @@ export function setupCoverHandlers(providedLogger, providedMainWindow) {
         const cid = `cov_${Math.random().toString(36).slice(2, 7)}`;
         try {
             const safeId = requireUuidV4FileId(fileId);
-            const { canceled, filePaths } = await dialog.showOpenDialog(mainWindow || undefined, {
+            const parentWin = isWindowAlive(mainWindow) ? mainWindow : undefined;
+            const { canceled, filePaths } = await dialog.showOpenDialog(parentWin, {
                 title: 'Seleziona Copertina',
                 properties: ['openFile'],
                 filters: [{ name: 'Immagini', extensions: ['jpg', 'jpeg', 'png', 'webp', 'gif'] }]
@@ -55,11 +98,10 @@ export function setupCoverHandlers(providedLogger, providedMainWindow) {
             const raw = await fs.promises.readFile(imgPath);
             checkSize(raw, MAX_IMAGE_SIZE, 'Immagine copertina');
 
-            const nImg = nativeImage.createFromBuffer(raw);
-            if (nImg.isEmpty()) throw new Error('Formato immagine non supportato.');
+            const nImg = imageFromBuffer(raw);
 
             const resized = nImg.resize({ width: COVER_WIDTH });
-            const jpegBuf = resized.toJPEG(0.85);
+            const jpegBuf = resized.toJPEG(85);
 
             const assetsDir = await projectAssetsDirFromFileId(safeId);
             const coverPath = path.join(assetsDir, 'cover.jpg');
@@ -82,15 +124,17 @@ export function setupCoverHandlers(providedLogger, providedMainWindow) {
         try {
             const safeId = requireUuidV4FileId(fileId);
 
+            if (!dataUrl || typeof dataUrl !== 'string') {
+                throw new Error('Data URL immagine non valido.');
+            }
             const base64 = dataUrl.replace(/^data:image\/\w+;base64,/, '');
             const raw = Buffer.from(base64, 'base64');
             checkSize(raw, MAX_IMAGE_SIZE, 'Immagine copertina');
 
-            const nImg = nativeImage.createFromBuffer(raw);
-            if (nImg.isEmpty()) throw new Error('Formato immagine non supportato.');
+            const nImg = imageFromDataURL(dataUrl);
 
             const resized = nImg.resize({ width: COVER_WIDTH });
-            const jpegBuf = resized.toJPEG(0.85);
+            const jpegBuf = resized.toJPEG(85);
 
             const assetsDir = await projectAssetsDirFromFileId(safeId);
             const coverPath = path.join(assetsDir, 'cover.jpg');
@@ -116,11 +160,10 @@ export function setupCoverHandlers(providedLogger, providedMainWindow) {
             const raw = await downloadBuffer(url);
             checkSize(raw, MAX_IMAGE_SIZE, 'Immagine copertina da URL');
 
-            const nImg = nativeImage.createFromBuffer(raw);
-            if (nImg.isEmpty()) throw new Error('Formato immagine non supportato.');
+            const nImg = imageFromBuffer(raw);
 
             const resized = nImg.resize({ width: COVER_WIDTH });
-            const jpegBuf = resized.toJPEG(0.85);
+            const jpegBuf = resized.toJPEG(85);
 
             const assetsDir = await projectAssetsDirFromFileId(safeId);
             const coverPath = path.join(assetsDir, 'cover.jpg');

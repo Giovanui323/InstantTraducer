@@ -1,9 +1,9 @@
 import { AISettings, GeminiModel, PageAnnotation, PageStatus, PDFMetadata, PageVerification } from '../../types';
 import { log } from '../logger';
-import { translatePage } from '../aiService';
+import { translatePage, detectPageColumns } from '../aiService';
 import { cleanTranslationText } from '../textClean';
 import { withTimeout, sleep } from '../../utils/async';
-import { estimateBytesFromBase64, downscaleDataUrlToJpeg, buildJpegDataUrlFromBase64, downscaleBase64ForAI } from '../../utils/imageUtils';
+import { estimateBytesFromBase64, downscaleDataUrlToJpeg, buildJpegDataUrlFromBase64, downscaleBase64ForAI, splitImageVertically } from '../../utils/imageUtils';
 import { renderDocPageWithFallback } from '../../utils/pdfUtils';
 import { AI_TRANSLATION_TIMEOUT_MS, PAGE_RENDER_TIMEOUT_MS, PAGE_CACHE_MAX_EDGE, PAGE_CACHE_JPEG_QUALITY, VERIFICATION_CONTEXT_TIMEOUT_MS, AI_IMAGE_MAX_LONG_SIDE, AI_IMAGE_JPEG_QUALITY } from '../../constants';
 import { ConcurrencyControl } from '../../hooks/useTranslationQueue';
@@ -327,61 +327,66 @@ export const executePageTranslation = async (
     setters.updatePageStatus(targetPage, { loading: "Recupero contesto (pagine adiacenti)..." });
     services.appendPageConsole(targetPage, "Recupero contesto visivo (rendering pagine adiacenti)...");
 
-    // Recupero contesto pagina precedente (Traduzione e/o Originale)
-    const currentTranslationMap = services.getLatestTranslationMap();
-    let prevTranslatedText = currentTranslationMap[targetPage - 1] || "";
+    let prevTranslatedText = "";
+    let prevOriginalText = "";
+    let prevContext = "";
+    let prevPageNumber: number | undefined;
+    let nextPageNumber: number | undefined;
+    let prevPageImageBase64: string | undefined;
+    let nextPageImageBase64: string | undefined;
 
-    if (prevTranslatedText && context.verificationMap) {
-      const prevVerification = context.verificationMap[targetPage - 1];
-      if (prevVerification?.severity === 'severe') {
-        prevTranslatedText = "";
-        services.appendPageConsole(targetPage, "Context: Ignorata traduzione pagina precedente (Quality Check fallito: SEVERE).");
-      } else if (prevVerification?.state === 'verifying' && prevVerification.startedAt) {
-        const elapsed = Date.now() - prevVerification.startedAt;
-        if (elapsed > VERIFICATION_CONTEXT_TIMEOUT_MS) {
+    if (!isRetry) {
+      // Recupero contesto pagina precedente (Traduzione e/o Originale) SOLO SE NON È UN RETRY
+      // Questo garantisce che la ritraduzione parta con un "contesto pulito"
+      const currentTranslationMap = services.getLatestTranslationMap();
+      prevTranslatedText = currentTranslationMap[targetPage - 1] || "";
+
+      if (prevTranslatedText && context.verificationMap) {
+        const prevVerification = context.verificationMap[targetPage - 1];
+        if (prevVerification?.severity === 'severe') {
           prevTranslatedText = "";
-          services.appendPageConsole(targetPage, "Context: Verifica precedente in ritardo, uso solo originale.");
+          services.appendPageConsole(targetPage, "Context: Ignorata traduzione pagina precedente (Quality Check fallito: SEVERE).");
+        } else if (prevVerification?.state === 'verifying' && prevVerification.startedAt) {
+          const elapsed = Date.now() - prevVerification.startedAt;
+          if (elapsed > VERIFICATION_CONTEXT_TIMEOUT_MS) {
+            prevTranslatedText = "";
+            services.appendPageConsole(targetPage, "Context: Verifica precedente in ritardo, uso solo originale.");
+          }
         }
       }
-    }
 
-    let prevOriginalText = "";
-
-    // Tentiamo SEMPRE di recuperare il testo originale per arricchire il contesto (se pagina > 1)
-    if (targetPage > 1 && pdfDoc) {
-      try {
-        const prevPage = await pdfDoc.getPage(targetPage - 1);
-        const textContent = await prevPage.getTextContent();
-        prevOriginalText = textContent.items
-          .map((item: any) => item.str)
-          .join(' ')
-          .replace(/\s+/g, ' ')
-          .trim();
-      } catch (e) {
-        // Ignoriamo errori nel recupero del testo originale
+      // Tentiamo SEMPRE di recuperare il testo originale per arricchire il contesto (se pagina > 1)
+      if (targetPage > 1 && pdfDoc) {
+        try {
+          const prevPage = await pdfDoc.getPage(targetPage - 1);
+          const textContent = await prevPage.getTextContent();
+          prevOriginalText = textContent.items
+            .map((item: any) => item.str)
+            .join(' ')
+            .replace(/\s+/g, ' ')
+            .trim();
+        } catch (e) {
+          // Ignoriamo errori nel recupero del testo originale
+        }
       }
+
+      if (prevTranslatedText && prevOriginalText) {
+        prevContext = `[TESTO ORIGINALE PAGINA PRECEDENTE]: ${prevOriginalText}\n\n[TRADUZIONE PAGINA PRECEDENTE]: ${prevTranslatedText}`;
+        services.appendPageConsole(targetPage, "Context: Usato doppio contesto (Originale + Traduzione).");
+      } else if (prevTranslatedText) {
+        prevContext = prevTranslatedText;
+      } else if (prevOriginalText) {
+        prevContext = `[TESTO ORIGINALE]: ${prevOriginalText}`;
+        services.appendPageConsole(targetPage, "Context fallback: usato testo originale pagina precedente.");
+      }
+
+      prevPageNumber = targetPage > 1 ? targetPage - 1 : undefined;
+      nextPageNumber = targetPage + 1 <= (pdfDoc?.numPages || 0) ? targetPage + 1 : undefined;
+      prevPageImageBase64 = prevPageNumber ? await services.getContextImageBase64(prevPageNumber, 'bottom') : undefined;
+      nextPageImageBase64 = nextPageNumber ? await services.getContextImageBase64(nextPageNumber, 'top') : undefined;
+    } else {
+      services.appendPageConsole(targetPage, "Context: Modalità retry, ignorato contesto adiacente per velocizzare e pulire il prompt.");
     }
-
-    prevContext = "";
-
-    if (prevTranslatedText && prevOriginalText) {
-      // Caso OTTIMALE: Abbiamo entrambi. Forniamo entrambi per massima chiarezza.
-      // Mettiamo prima l'originale, poi la traduzione, così il slice(-3000) nel prompt preserva la traduzione (più importante).
-      prevContext = `[TESTO ORIGINALE PAGINA PRECEDENTE]: ${prevOriginalText}\n\n[TRADUZIONE PAGINA PRECEDENTE]: ${prevTranslatedText}`;
-      services.appendPageConsole(targetPage, "Context: Usato doppio contesto (Originale + Traduzione).");
-    } else if (prevTranslatedText) {
-      // Caso STANDARD: Abbiamo solo la traduzione.
-      prevContext = prevTranslatedText;
-    } else if (prevOriginalText) {
-      // Caso FALLBACK: Solo originale.
-      prevContext = `[TESTO ORIGINALE]: ${prevOriginalText}`;
-      services.appendPageConsole(targetPage, "Context fallback: usato testo originale pagina precedente.");
-    }
-
-    const prevPageNumber = targetPage > 1 ? targetPage - 1 : undefined;
-    const nextPageNumber = targetPage + 1 <= (pdfDoc?.numPages || 0) ? targetPage + 1 : undefined;
-    const prevPageImageBase64 = prevPageNumber ? await services.getContextImageBase64(prevPageNumber, 'bottom') : undefined;
-    const nextPageImageBase64 = nextPageNumber ? await services.getContextImageBase64(nextPageNumber, 'top') : undefined;
 
     // Downscale immagini per AI: riduce il consumo di token senza perdere qualità OCR.
     // Mantiene il rapporto d'aspetto originale, cap a AI_IMAGE_MAX_LONG_SIDE px lato lungo.
@@ -410,43 +415,86 @@ export const executePageTranslation = async (
     setters.updatePageStatus(targetPage, { loading: `In attesa di ${providerLabel}...` });
     services.appendPageConsole(targetPage, `Preparazione richiesta ${providerLabel} completata. Invio in corso...`);
 
-    const result = await withTimeout(
-      translatePage(aiSettings, {
-        imageBase64: aiReadyImageData,
-        pageNumber: targetPage,
-        sourceLanguage: docInputLanguage,
-        previousContext: prevContext,
-        prevPageImageBase64: aiReadyPrevImage,
-        prevPageNumber,
-        nextPageImageBase64: aiReadyNextImage,
-        nextPageNumber,
-        extraInstruction, // Use the instruction from retry if present
-        translationModelOverride,
-        skipPostProcessing: true // OPTIMIZATION: Defer cleaning until after QC
-      }, (progressText, partial) => {
-        const progressData: any = { sessionId, traceId, page: targetPage };
-        if (partial !== undefined) progressData.partialChars = partial.length;
-        services.appendPageConsole(targetPage, progressText, progressData);
-        setters.updatePageStatus(targetPage, { loading: progressText });
-        if (partial !== undefined) {
-          setters.setPartialTranslations(prev => ({ ...prev, [targetPage]: partial }));
-        }
-      }, { signal }),
-      AI_TRANSLATION_TIMEOUT_MS,
-      () => {
-        aiTimeout = true;
-        // Forziamo l'abort della richiesta AI al timeout dell'app
-        try {
-          if (inFlightRef?.current) {
-            const ctrl = inFlightRef.current[targetPage];
-            if (ctrl) {
-              log.warning(`Timeout globale app (${AI_TRANSLATION_TIMEOUT_MS}ms) superato per pagina ${targetPage}. Forzo interruzione.`);
-              ctrl.abort();
-            }
+    const callTranslation = async (imgBase64: string, customInstruction?: string) => {
+      return await withTimeout(
+        translatePage(aiSettings, {
+          imageBase64: imgBase64,
+          pageNumber: targetPage,
+          sourceLanguage: docInputLanguage,
+          previousContext: prevContext,
+          prevPageImageBase64: aiReadyPrevImage,
+          prevPageNumber,
+          nextPageImageBase64: aiReadyNextImage,
+          nextPageNumber,
+          extraInstruction: customInstruction ?? extraInstruction,
+          translationModelOverride,
+          skipPostProcessing: true // OPTIMIZATION: Defer cleaning until after QC
+        }, (progressText, partial) => {
+          const progressData: any = { sessionId, traceId, page: targetPage };
+          if (partial !== undefined) progressData.partialChars = partial.length;
+          services.appendPageConsole(targetPage, progressText, progressData);
+          setters.updatePageStatus(targetPage, { loading: progressText });
+          if (partial !== undefined) {
+            setters.setPartialTranslations(prev => ({ ...prev, [targetPage]: partial }));
           }
-        } catch (e) { }
+        }, { signal }),
+        AI_TRANSLATION_TIMEOUT_MS,
+        () => {
+          aiTimeout = true;
+          // Forziamo l'abort della richiesta AI al timeout dell'app
+          try {
+            if (inFlightRef?.current) {
+              const ctrl = inFlightRef.current[targetPage];
+              if (ctrl) {
+                log.warning(`Timeout globale app (${AI_TRANSLATION_TIMEOUT_MS}ms) superato per pagina ${targetPage}. Forzo interruzione.`);
+                ctrl.abort();
+              }
+            }
+          } catch (e) { }
+        }
+      );
+    };
+
+    let result;
+    
+    // -- SPLIT DOUBLE COLUMNS LOGIC --
+    if (aiSettings.splitDoubleColumns && !isRetry) {
+      setters.updatePageStatus(targetPage, { loading: "Analisi layout colonna (pre-flight)..." });
+      services.appendPageConsole(targetPage, "Esecuzione pre-flight VLM per rilevamento doppie colonne...");
+      const columns = await detectPageColumns(aiReadyImageData, aiSettings, signal);
+      
+      if (columns === 2) {
+        setters.updatePageStatus(targetPage, { loading: "Rilevate 2 colonne: separazione in corso..." });
+        services.appendPageConsole(targetPage, "Rilevate 2 colonne: procedo al taglio verticale dell'immagine...");
+        
+        const [leftBase64, rightBase64] = await splitImageVertically(aiReadyImageData);
+        
+        services.appendPageConsole(targetPage, "Esecuzione traduzioni parallele per le due colonne...");
+        
+        // Eseguiamo in parallelo se il rate limit lo permette, altrimenti sequenziale
+        const [leftRes, rightRes] = await Promise.all([
+          callTranslation(leftBase64, "Traduci solo questa parte dell'immagine (Colonna SINISTRA)."),
+          callTranslation(rightBase64, "Traduci solo questa parte dell'immagine (Colonna DESTRA).")
+        ]);
+
+        if (!leftRes.text || !rightRes.text) throw new Error('Risposta vuota da una delle colonne tradotte');
+
+        result = {
+          text: leftRes.text.trim() + "\n\n[[PAGE_SPLIT]]\n\n" + rightRes.text.trim(),
+          annotations: [...(leftRes.annotations || []), ...(rightRes.annotations || [])],
+          modelUsed: leftRes.modelUsed || rightRes.modelUsed,
+          diagnosticPrompt: leftRes.diagnosticPrompt,
+          diagnosticUserInstruction: leftRes.diagnosticUserInstruction
+        };
+        services.appendPageConsole(targetPage, "Colonne unite con successo.");
+      } else {
+        services.appendPageConsole(targetPage, "Rilevata 1 colonna: traduzione standard.");
+        result = await callTranslation(aiReadyImageData);
       }
-    );
+    } else {
+      result = await callTranslation(aiReadyImageData);
+    }
+    // -- END SPLIT DOUBLE COLUMNS LOGIC --
 
     if (!result.text || result.text.trim().length === 0) throw new Error('Risposta vuota dal provider AI');
 

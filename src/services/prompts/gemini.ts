@@ -48,9 +48,9 @@ Se la \`[PAGINA TARGET]\` è impaginata in **due colonne affiancate**:
 Se la pagina è a **colonna singola** non usare \`[[PAGE_SPLIT]]\`.
 
 ## Reasoning steps
-Prima di scrivere, esegui mentalmente:
+Prima di scrivere, esegui questi passaggi:
 1. **Osserva** la \`[PAGINA TARGET]\` dall'alto al basso. Identifica i blocchi (titoli, paragrafi, didascalie, note) e stabilisci se è a UNA o DUE colonne.
-2. **Decidi** se userai \`[[PAGE_SPLIT]]\` (solo se due colonne).
+2. **Decidi** — questo vincola DIRETTAMENTE ciò che scrivi: DUE colonne → il tuo output DEVE contenere \`[[PAGE_SPLIT]]\`. Se lo dimentichi, fermati e inseriscilo prima di rispondere. UNA colonna → non usare \`[[PAGE_SPLIT]]\`.
 3. **Traduci** ogni blocco identificato, in ordine, fino all'ultima riga visibile.
 
 ## Output format
@@ -93,7 +93,7 @@ Secondo paragrafo della colonna destra.
 Prima di rispondere verifica:
 - Tutti i blocchi del passo 1 sono tradotti?
 - L'output è interamente in italiano?
-- Se la pagina è a due colonne: \`[[PAGE_SPLIT]]\` è presente esattamente una volta su riga propria?
+- VERIFICA LAYOUT INCROCIATA: se hai stabilito DUE colonne ma \`[[PAGE_SPLIT]]\` NON è nel tuo output → INSERISCILO ORA tra le due colonne. Se hai stabilito UNA colonna ma \`[[PAGE_SPLIT]]\` è presente → RIMUOVILO.
 - Tutte le note sono incluse, ciascuna nella colonna giusta?
 
 Inizia direttamente con la traduzione italiana.

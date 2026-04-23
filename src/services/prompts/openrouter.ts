@@ -55,9 +55,9 @@ Ricevi fino a 3 immagini, in questo ordine e con queste etichette esatte:
 </image_layout>
 
 <instructions>
-Esegui mentalmente questi tre passaggi PRIMA di scrivere:
+Esegui questi tre passaggi PRIMA di scrivere:
 1. OSSERVA la [PAGINA TARGET] dall'alto in basso. Identifica e conta i blocchi (titoli, paragrafi, didascalie, note). Stabilisci se la pagina è a UNA o a DUE colonne.
-2. DECIDI il formato: DUE colonne → userai [[PAGE_SPLIT]] esattamente una volta tra sinistra e destra; UNA colonna → non lo userai.
+2. DECIDI il formato — questo vincola DIRETTAMENTE ciò che scrivi: DUE colonne → il tuo output DEVE contenere [[PAGE_SPLIT]] esattamente una volta tra sinistra e destra. Se lo dimentichi, FERMATI e inseriscilo. UNA colonna → NON usare [[PAGE_SPLIT]].
 3. TRADUCI ciascun blocco identificato al passo 1, in ordine, fino all'ULTIMA riga visibile.
 </instructions>
 
@@ -109,7 +109,7 @@ Secondo paragrafo della colonna destra.
 PRIMA di rispondere verifica:
 - Tutti i blocchi del passo 1 sono tradotti?
 - L'output è in italiano (non in {{sourceLang}})?
-- Se due colonne: [[PAGE_SPLIT]] presente esattamente una volta su riga propria?
+- VERIFICA LAYOUT INCROCIATA: se hai stabilito DUE colonne ma [[PAGE_SPLIT]] NON è nel tuo output → INSERISCILO ORA. Se hai stabilito UNA colonna ma [[PAGE_SPLIT]] è presente → RIMUOVILO.
 - Tutte le note incluse, ciascuna nella colonna giusta?
 </final_check>
 
@@ -145,9 +145,9 @@ Riceverai fino a 3 immagini etichettate:
 </image_layout>
 
 <workflow>
-PRIMA di scrivere, esegui mentalmente:
+PRIMA di scrivere, esegui questi passaggi:
 1. OSSERVA la [PAGINA TARGET]: titoli, paragrafi, note. Una colonna o DUE?
-2. Se DUE colonne → DEVI usare [[PAGE_SPLIT]]. Se UNA → NON usarlo.
+2. DECIDI — questo vincola DIRETTAMENTE il tuo output: DUE colonne → il tuo output DEVE contenere [[PAGE_SPLIT]] esattamente una volta. Se lo dimentichi, FERMATI e inseriscilo. UNA colonna → NON usare [[PAGE_SPLIT]].
 3. TRADUCI ogni blocco in ordine fino all'ULTIMA riga.
 </workflow>
 
@@ -186,7 +186,7 @@ Primo paragrafo della colonna destra².
 PRIMA di rispondere:
 - Tutti i blocchi tradotti?
 - Output in italiano?
-- Se due colonne: [[PAGE_SPLIT]] esattamente una volta?
+- VERIFICA LAYOUT INCROCIATA: se hai stabilito DUE colonne ma [[PAGE_SPLIT]] NON è nel tuo output → INSERISCILO ORA. Se hai stabilito UNA colonna ma [[PAGE_SPLIT]] è presente → RIMUOVILO.
 </final_check>
 
 <output_format>

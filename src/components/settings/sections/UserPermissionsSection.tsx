@@ -1,6 +1,7 @@
 import React from 'react';
 import { Users, ShieldCheck, Info } from 'lucide-react';
 import type { AISettings, AIProvider, UserPermissions } from '../../../types';
+import { ToggleSwitch } from '../ToggleSwitch';
 import {
   GEMINI_MODELS_LIST,
   OPENAI_MODELS_LIST,
@@ -80,15 +81,13 @@ export const UserPermissionsSection: React.FC<UserPermissionsSectionProps> = ({ 
             <div key={p.id} className="rounded-xl border border-border-muted bg-surface-3/40 p-4">
               <div className="flex flex-wrap items-center justify-between gap-3">
                 <div className="flex items-center gap-3">
-                  <label className="inline-flex items-center gap-2 text-[12px] font-bold text-txt-primary cursor-pointer">
-                    <input
-                      type="checkbox"
+                  <div className="flex items-center gap-2">
+                    <ToggleSwitch
                       checked={allowed}
-                      onChange={(e) => setProviderPerm(p.id, e.target.checked ? (selectedModel || firstModelId) : null)}
-                      className="w-4 h-4 rounded border-border-muted accent-accent"
+                      onChange={(v) => setProviderPerm(p.id, v ? (selectedModel || firstModelId) : null)}
                     />
-                    <span>Permetti</span>
-                  </label>
+                    <span className="text-[12px] font-bold text-txt-primary">Permetti</span>
+                  </div>
                   <div>
                     <div className="text-sm font-bold text-txt-primary">{p.label}</div>
                     <div className="text-[11px] text-txt-muted">{p.list.length} modelli disponibili</div>

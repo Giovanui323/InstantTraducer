@@ -22,6 +22,8 @@ import { getAvailableModels } from '../../../services/modelManager';
 import { SettingsSearchItem } from '../search';
 import { CustomModelManager } from '../../CustomModelManager';
 import { CustomProvidersSection } from './CustomProvidersSection';
+import { ToggleSwitch } from '../ToggleSwitch';
+import { selectClasses, inputClasses } from '../sharedStyles';
 
 export const aiRolesSearchItems: SettingsSearchItem[] = [
   {
@@ -95,9 +97,6 @@ const SectionTitle = ({ title, description }: { title: string; description?: str
     {description && <div className="text-[11px] text-txt-muted">{description}</div>}
   </div>
 );
-
-const selectClasses = "bg-surface-4/50 border border-border-muted rounded-xl py-2 px-3 text-[12px] text-txt-primary outline-none focus:border-accent/40 focus:ring-1 focus:ring-accent/20 transition-all duration-200";
-const inputClasses = "w-[240px] bg-surface-4/50 border border-border-muted rounded-xl py-2 px-3 text-[12px] text-txt-primary placeholder:text-txt-faint outline-none focus:border-accent/40 focus:ring-1 focus:ring-accent/20 font-mono transition-all duration-200";
 
 const ModelOption = ({ model }: { model: { id: string, name: string, pricing?: { input: string | number, output: string | number } } }) => {
   const info = getModelPriceInfo(model.pricing);
@@ -596,14 +595,12 @@ export const AiRolesSection = ({
               title="Modalità Flash"
               description="Se attiva, forza un modello Flash."
               right={
-                <input
-                  type="checkbox"
+                <ToggleSwitch
                   checked={draftSettings.fastMode ?? false}
-                  onChange={(e) => {
-                    setFastMode(e.target.checked);
-                    if (e.target.checked) setGeminiModel(GEMINI_TRANSLATION_FAST_MODEL as any);
+                  onChange={(v) => {
+                    setFastMode(v);
+                    if (v) setGeminiModel(GEMINI_TRANSLATION_FLASH_MODEL as any);
                   }}
-                  className="h-4 w-4 accent-accent"
                 />
               }
             />
@@ -637,7 +634,7 @@ export const AiRolesSection = ({
           title="Abilitata"
           description="Attiva/disattiva la verifica automatica."
           right={
-            <input type="checkbox" checked={qualityCheck.enabled} onChange={(e) => setQualityEnabled(e.target.checked)} className="h-4 w-4 accent-success" />
+            <ToggleSwitch checked={qualityCheck.enabled} onChange={(v) => setQualityEnabled(v)} />
           }
         />
         <div className={qualityCheck.enabled ? '' : 'opacity-40 pointer-events-none'}>
@@ -684,7 +681,7 @@ export const AiRolesSection = ({
         <SettingRow
           title="Abilitata"
           description="Attiva/disattiva estrazione metadati."
-          right={<input type="checkbox" checked={metadataExtraction.enabled} onChange={(e) => setMetadataEnabled(e.target.checked)} className="h-4 w-4 accent-accent" />}
+          right={<ToggleSwitch checked={metadataExtraction.enabled} onChange={(v) => setMetadataEnabled(v)} />}
         />
         <div className={metadataExtraction.enabled ? '' : 'opacity-40 pointer-events-none'}>
           <div className="grid grid-cols-1 lg:grid-cols-2 gap-3">
@@ -719,11 +716,9 @@ export const AiRolesSection = ({
           title="Abilita Claude Opus Fast"
           description="Permette di selezionare il modello Opus 4.6 Fast su OpenRouter. Attenzione: costi molto elevati ($30/$150)."
           right={
-            <input
-              type="checkbox"
+            <ToggleSwitch
               checked={draftSettings.enableClaudeOpusFast ?? false}
-              onChange={(e) => updateDraft({ enableClaudeOpusFast: e.target.checked })}
-              className="h-4 w-4 accent-red-500"
+              onChange={(v) => updateDraft({ enableClaudeOpusFast: v })}
             />
           }
         />

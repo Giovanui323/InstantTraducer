@@ -27,7 +27,7 @@ interface HomeViewProps {
   onRenameProject: (fileId: string, currentName: string, e: React.MouseEvent, currentLanguage?: string) => void;
   onDeleteProject: (fileId: string, e: React.MouseEvent) => void;
   onEditLanguageProject?: (fileId: string, currentLang: string) => void;
-  onCreateGroup: () => void;
+  onOpenGroupManager: () => void;
   onSetOpenMenuId: (id: string | null) => void;
   onOpenSettings: () => void;
   onManageGroups: (fileId: string) => void;
@@ -62,7 +62,7 @@ export const HomeView: React.FC<HomeViewProps> = ({
   onRenameProject,
   onDeleteProject,
   onEditLanguageProject,
-  onCreateGroup,
+  onOpenGroupManager,
   onSetOpenMenuId,
   onOpenSettings,
   onManageGroups,
@@ -247,7 +247,7 @@ export const HomeView: React.FC<HomeViewProps> = ({
               </div>
             </div>
             <div className="library-room space-y-4">
-              <GroupFilterBar onCreateGroup={onCreateGroup} />
+              <GroupFilterBar onOpenGroupManager={onOpenGroupManager} />
               <RecentBooksGrid
                 onOpenProject={onOpenProject}
                 onRenameProject={onRenameProject}

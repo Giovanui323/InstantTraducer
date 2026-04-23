@@ -41,6 +41,7 @@ export const useAppLibrary = (
     setIsSaving,
     showToast,
     recentBooksRef,
+    setRecentBooks,
     blacklistedIdsRef: saveBlockingManager.blacklistedIdsRef,
     transitioningIdsRef: saveBlockingManager.transitioningIdsRef,
     processingSaveIdsRef,

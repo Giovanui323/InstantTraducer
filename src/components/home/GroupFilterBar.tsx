@@ -1,13 +1,13 @@
 import React from 'react';
-import { Tag, Plus, X } from 'lucide-react';
+import { Tag } from 'lucide-react';
 import { useLibrary } from '../../contexts/LibraryContext';
 
 interface GroupFilterBarProps {
-  onCreateGroup: () => void;
+  onOpenGroupManager: () => void;
 }
 
-export const GroupFilterBar: React.FC<GroupFilterBarProps> = ({ onCreateGroup }) => {
-  const { availableGroups, selectedGroupFilters, toggleGroupFilter, deleteGroup } = useLibrary();
+export const GroupFilterBar: React.FC<GroupFilterBarProps> = ({ onOpenGroupManager }) => {
+  const { availableGroups, selectedGroupFilters, toggleGroupFilter } = useLibrary();
 
   return (
     <div className="px-2">
@@ -16,11 +16,10 @@ export const GroupFilterBar: React.FC<GroupFilterBarProps> = ({ onCreateGroup })
           <Tag size={12} className="text-txt-muted" /> Gruppi
         </h3>
         <button
-          onClick={onCreateGroup}
-          className="text-txt-muted hover:text-accent transition-colors duration-150 p-1 hover:bg-white/[0.04] rounded-md"
-          title="Crea nuovo gruppo"
+          onClick={onOpenGroupManager}
+          className="text-[10px] font-semibold text-txt-muted hover:text-accent uppercase tracking-wider transition-colors duration-150 px-1.5 py-0.5 hover:bg-white/[0.04] rounded-md"
         >
-          <Plus size={14} />
+          Gestisci
         </button>
       </div>
       <div className="flex flex-wrap gap-1.5">
@@ -28,36 +27,19 @@ export const GroupFilterBar: React.FC<GroupFilterBarProps> = ({ onCreateGroup })
         {availableGroups.map(g => {
           const isSelected = selectedGroupFilters.includes(g.id);
           return (
-            <div
+            <button
               key={g.id}
-              className={`inline-flex items-stretch rounded-lg border transition-all duration-200 overflow-hidden group ${
+              type="button"
+              onClick={() => toggleGroupFilter(g.id)}
+              className={`inline-flex items-center rounded-lg border px-2.5 py-1 text-[10px] font-semibold tracking-wide transition-all duration-200 focus:outline-none ${
                 isSelected
-                  ? 'bg-accent/10 border-accent/25 shadow-glow-accent'
-                  : 'bg-white/[0.03] border-border-muted hover:bg-white/[0.05] hover:border-border'
+                  ? 'bg-accent/10 border-accent/25 text-accent shadow-glow-accent'
+                  : 'bg-white/[0.03] border-border-muted text-txt-secondary hover:bg-white/[0.05] hover:border-border hover:text-txt-primary'
               }`}
+              aria-pressed={isSelected}
             >
-              <button
-                type="button"
-                onClick={() => toggleGroupFilter(g.id)}
-                className={`px-2.5 py-1 text-[10px] font-semibold tracking-wide flex items-center gap-1.5 transition-colors duration-150 focus:outline-none ${
-                  isSelected ? 'text-accent' : 'text-txt-secondary hover:text-txt-primary'
-                }`}
-                aria-pressed={isSelected}
-              >
-                {g.name}
-              </button>
-              <button
-                type="button"
-                onClick={() => deleteGroup(g.id)}
-                className={`px-1.5 flex items-center justify-center text-txt-muted hover:text-danger hover:bg-danger/10 transition-all duration-150 focus:outline-none ${
-                  isSelected ? 'border-l border-accent/15' : 'border-l border-border-muted'
-                } opacity-0 group-hover:opacity-100 focus:opacity-100 focus-within:opacity-100`}
-                aria-label={`Elimina gruppo ${g.name}`}
-                title={`Elimina gruppo ${g.name}`}
-              >
-                <X size={10} />
-              </button>
-            </div>
+              {g.name}
+            </button>
           );
         })}
       </div>

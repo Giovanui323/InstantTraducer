@@ -27,11 +27,11 @@ Ricevi fino a 3 immagini, in questo ordine e con queste etichette esatte:
 </image_layout>
 
 <instructions>
-Esegui mentalmente questi tre passaggi PRIMA di scrivere anche un solo carattere:
+Esegui questi tre passaggi PRIMA di scrivere anche un solo carattere:
 
 1. OSSERVA la [PAGINA TARGET] dall'alto in basso. Identifica e conta tutti i blocchi: titoli, sottotitoli, paragrafi, didascalie, note a piè di pagina. Stabilisci se la pagina è impaginata a UNA o a DUE colonne.
-2. DECIDI il formato di output:
-   - DUE colonne affiancate → DEVI inserire il marker [[PAGE_SPLIT]] esattamente una volta tra colonna sinistra e destra.
+2. DECIDI il formato di output — questo vincola DIRETTAMENTE ciò che scrivi:
+   - DUE colonne affiancate → il tuo output DEVE contenere [[PAGE_SPLIT]] esattamente una volta, su riga separata, tra la colonna sinistra e la colonna destra. Se lo dimentichi, FERMATI e inseriscilo prima di terminare.
    - UNA colonna → NON inserire [[PAGE_SPLIT]].
 3. TRADUCI ciascun blocco identificato al passo 1, in ordine, fino all'ULTIMA riga visibile della pagina target. Non saltare nessun blocco identificato.
 </instructions>
@@ -84,7 +84,7 @@ Secondo paragrafo della colonna destra.
 PRIMA di emettere l'output, verifica internamente:
 - Hai coperto tutti i blocchi identificati al passo 1 dell'<instructions>?
 - L'output è in italiano (non in {{sourceLang}})?
-- Se la pagina è a due colonne: è presente [[PAGE_SPLIT]] esattamente una volta, su riga propria?
+- VERIFICA LAYOUT INCROCIATA: se hai stabilito che la pagina è a DUE colonne ma [[PAGE_SPLIT]] NON è presente nel tuo output → INSERISCILO ORA tra le due colonne, prima di rispondere. Se hai stabilito che la pagina è a UNA colonna ma [[PAGE_SPLIT]] è presente → RIMUOVILO.
 - Tutte le note a piè di pagina sono incluse, ciascuna nella colonna giusta?
 Se anche una sola verifica fallisce, correggi PRIMA di rispondere.
 </final_check>

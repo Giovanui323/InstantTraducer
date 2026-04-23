@@ -6,7 +6,7 @@ import { retry, withTimeout } from "../utils/async";
 import { safeParseJsonObject } from "../utils/json";
 import { getClaudeTranslateSystemPromptBlocks, getClaudeTranslateUserInstruction, getClaudeAssistantPrefill } from './prompts/claude';
 import { getMetadataExtractionPrompt, buildRetryInstruction } from './prompts/shared';
-import { getVerifyQualitySystemPrompt } from "./verifierPrompts";
+import { getClaudeVerifyQualitySystemPrompt } from "./verifierPrompts";
 import { AI_VERIFICATION_TIMEOUT_MS } from "../constants";
 import { trackUsage } from "./usageTracker";
 
@@ -208,7 +208,7 @@ export const verifyTranslationQualityWithClaude = async (params: {
 
   const systemPrompt = customPrompt && customPrompt.trim().length > 0 
     ? customPrompt 
-    : getVerifyQualitySystemPrompt(legalContext, sourceLanguage);
+    : getClaudeVerifyQualitySystemPrompt(legalContext, sourceLanguage);
 
   const contentBlocks: any[] = [];
   

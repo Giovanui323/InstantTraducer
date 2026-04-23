@@ -55,6 +55,7 @@ import { ReadOnlyModelsSection } from './settings/sections/ReadOnlyModelsSection
 import { UserPermissionsSection } from './settings/sections/UserPermissionsSection';
 import { UserApiKeysSection } from './settings/sections/UserApiKeysSection';
 import { useAdminAuth } from '../hooks/useAdminAuth';
+import { ToggleSwitch } from './settings/ToggleSwitch';
 
 // Sezioni visibili solo agli admin (gate UX con password in AdminSection).
 const ADMIN_ONLY_SECTIONS: readonly SettingsSection[] = [
@@ -803,7 +804,7 @@ export const SettingsModal = React.memo(({
                                                 <select
                                                     value={modelCostSort}
                                                     onChange={(e) => setModelCostSort(e.target.value as any)}
-                                                    className="bg-surface-4/50 border border-border-muted rounded-lg py-1.5 px-2 text-[10px] text-txt-primary"
+                                                    className="bg-surface-4/50 border border-border-muted rounded-xl py-1.5 px-2 text-[10px] text-txt-primary"
                                                 >
                                                     <option value="total">Ordina: Totale</option>
                                                     <option value="avg">Ordina: Medio</option>
@@ -812,7 +813,7 @@ export const SettingsModal = React.memo(({
                                                 <select
                                                     value={modelCostSortDir}
                                                     onChange={(e) => setModelCostSortDir(e.target.value as any)}
-                                                    className="bg-surface-4/50 border border-border-muted rounded-lg py-1.5 px-2 text-[10px] text-txt-primary"
+                                                    className="bg-surface-4/50 border border-border-muted rounded-xl py-1.5 px-2 text-[10px] text-txt-primary"
                                                 >
                                                     <option value="desc">?</option>
                                                     <option value="asc">?</option>
@@ -921,16 +922,16 @@ export const SettingsModal = React.memo(({
                                             {/* Legenda Colori */}
                                             <div className="flex flex-wrap items-center gap-x-4 gap-y-2 bg-surface-4/40 border border-border-muted rounded-xl px-3 py-2">
                                                 <div className="flex items-center gap-1.5 text-[10px] text-txt-muted">
-                                                    <span className="text-green-500">🟢</span> <span>Gratis</span>
+                                                    <span className="w-2 h-2 rounded-full bg-green-500 shrink-0" /> <span>Gratis</span>
                                                 </div>
                                                 <div className="flex items-center gap-1.5 text-[10px] text-txt-muted">
-                                                    <span className="text-blue-500">🔹</span> <span>Economico</span>
+                                                    <span className="w-2 h-2 rounded-full bg-blue-500 shrink-0" /> <span>Economico</span>
                                                 </div>
                                                 <div className="flex items-center gap-1.5 text-[10px] text-txt-muted">
-                                                    <span className="text-orange-500">🔸</span> <span>Standard/Pro</span>
+                                                    <span className="w-2 h-2 rounded-full bg-orange-500 shrink-0" /> <span>Standard/Pro</span>
                                                 </div>
                                                 <div className="flex items-center gap-1.5 text-[10px] text-txt-muted">
-                                                    <span className="text-red-500">🔴</span> <span>Premium/Caro</span>
+                                                    <span className="w-2 h-2 rounded-full bg-red-500 shrink-0" /> <span>Premium/Caro</span>
                                                 </div>
                                             </div>
                                         </div>
@@ -1033,7 +1034,7 @@ export const SettingsModal = React.memo(({
                                                     <button
                                                         onClick={handleRestoreAll}
                                                         disabled={isActionRunning}
-                                                        className="text-[10px] font-bold text-accent hover:text-accent-hover transition-colors duration-200 flex items-center gap-1 bg-accent/10 px-2 py-1 rounded-md"
+                                                        className="text-[10px] font-bold text-accent hover:text-accent-hover transition-colors duration-200 flex items-center gap-1 bg-accent/10 px-2 py-1 rounded-xl"
                                                     >
                                                         <RotateCcw size={10} />
                                                         Ripristina Tutto
@@ -1041,7 +1042,7 @@ export const SettingsModal = React.memo(({
                                                     <button
                                                         onClick={handleEmptyTrash}
                                                         disabled={isActionRunning}
-                                                        className="text-[10px] font-bold text-danger hover:text-danger transition-colors duration-200 flex items-center gap-1 bg-danger/10 px-2 py-1 rounded-md"
+                                                        className="text-[10px] font-bold text-danger hover:text-danger transition-colors duration-200 flex items-center gap-1 bg-danger/10 px-2 py-1 rounded-xl"
                                                     >
                                                         <Trash size={10} />
                                                         Svuota
@@ -1102,11 +1103,11 @@ export const SettingsModal = React.memo(({
                                         <div className="bg-surface-4/50 border border-border-muted rounded-xl p-3 space-y-3">
                                             <label className="flex items-center justify-between gap-3 text-sm text-txt-primary">
                                                 <span className="text-xs font-semibold text-txt-primary">Mantieni spread in due pagine</span>
-                                                <input type="checkbox" checked={exportSplitSpread} onChange={(e) => setExportSplitSpread(e.target.checked)} className="h-4 w-4 accent-accent" />
+                                                <ToggleSwitch checked={exportSplitSpread} onChange={setExportSplitSpread} />
                                             </label>
                                             <label className="flex items-center justify-between gap-3 text-sm text-txt-primary">
                                                 <span className="text-xs font-semibold text-txt-primary">Inserisci pagine bianche se meta vuota</span>
-                                                <input type="checkbox" checked={exportInsertBlank} onChange={(e) => setExportInsertBlank(e.target.checked)} className="h-4 w-4 accent-accent" />
+                                                <ToggleSwitch checked={exportInsertBlank} onChange={setExportInsertBlank} />
                                             </label>
                                             <div className="grid grid-cols-2 gap-3">
                                                 <div className="space-y-1">
@@ -1114,7 +1115,7 @@ export const SettingsModal = React.memo(({
                                                     <select
                                                         value={exportFormat}
                                                         onChange={(e) => setExportFormat(e.target.value as 'A4' | 'original')}
-                                                        className="w-full bg-surface-4/50 border border-border-muted rounded-lg py-2 px-2 text-xs text-txt-primary focus:outline-none focus:border-accent/50 focus:ring-1 focus:ring-accent/20 transition-all duration-200"
+                                                        className="w-full bg-surface-4/50 border border-border-muted rounded-xl py-2 px-2 text-xs text-txt-primary focus:outline-none focus:border-accent/50 focus:ring-1 focus:ring-accent/20 transition-all duration-200"
                                                     >
                                                         <option value="A4">A4</option>
                                                         <option value="original">Originale (rapporto)</option>
@@ -1124,7 +1125,7 @@ export const SettingsModal = React.memo(({
                                                     <div className="text-[10px] font-bold text-txt-muted uppercase tracking-wider">Anteprima export nel reader</div>
                                                     <label className="flex items-center justify-between gap-3 text-sm text-txt-primary">
                                                         <span className="text-xs font-semibold text-txt-primary">Abilita</span>
-                                                        <input type="checkbox" checked={previewInReader} onChange={(e) => setPreviewInReader(e.target.checked)} className="h-4 w-4 accent-accent" />
+                                                        <ToggleSwitch checked={previewInReader} onChange={setPreviewInReader} />
                                                     </label>
                                                 </div>
                                             </div>
@@ -1140,7 +1141,7 @@ export const SettingsModal = React.memo(({
                                         <div className="bg-surface-4/50 border border-border-muted rounded-xl p-3 space-y-3">
                                         <label className="flex items-center justify-between gap-3 text-sm text-txt-primary">
                                             <span className="text-xs font-semibold text-txt-primary">Log di Debug (Avanzato)</span>
-                                            <input type="checkbox" checked={verboseEnabled} onChange={(e) => setVerboseEnabled(e.target.checked)} className="h-4 w-4 accent-accent" />
+                                            <ToggleSwitch checked={verboseEnabled} onChange={setVerboseEnabled} />
                                         </label>
                                         <div className="text-[10px] text-txt-muted leading-relaxed">Abilita messaggi dettagliati in console e file di log separati (debug-*.log).</div>
 
@@ -1226,7 +1227,7 @@ export const SettingsModal = React.memo(({
                                                 <span className="text-xs font-semibold text-txt-primary">Log Traduzioni (Prompt + Risultato)</span>
                                                 <div className="text-[10px] text-txt-muted leading-relaxed mt-0.5">Salva immagine, prompt e risultato di ogni traduzione. Esporta il report per analisi con AI esterna.</div>
                                             </div>
-                                            <input type="checkbox" checked={diagnosticLogEnabled} onChange={(e) => setDiagnosticLogEnabled(e.target.checked)} className="h-4 w-4 accent-accent" />
+                                            <ToggleSwitch checked={diagnosticLogEnabled} onChange={setDiagnosticLogEnabled} />
                                         </label>
 
                                         {diagnosticLogEnabled && (

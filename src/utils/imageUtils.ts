@@ -282,3 +282,46 @@ export const downscaleBase64ForAI = async (
   }
 };
 
+/**
+ * Taglia un'immagine base64 a metà verticalmente, restituendo due immagini base64 (sinistra, destra).
+ */
+export const splitImageVertically = async (base64: string): Promise<[string, string]> => {
+  const img = new Image();
+  img.src = buildJpegDataUrlFromBase64(base64);
+  try {
+    await img.decode();
+  } catch {
+    await new Promise<void>((resolve, reject) => {
+      img.onload = () => resolve();
+      img.onerror = () => reject(new Error('Impossibile caricare immagine per split'));
+    });
+  }
+
+  const w = img.naturalWidth || img.width;
+  const h = img.naturalHeight || img.height;
+  const halfW = Math.floor(w / 2);
+
+  const createHalf = (isLeft: boolean): string => {
+    const canvas = document.createElement('canvas');
+    try {
+      canvas.width = halfW;
+      canvas.height = h;
+      const ctx = canvas.getContext('2d', { alpha: false });
+      if (!ctx) throw new Error("Canvas non disponibile per lo split");
+      ctx.fillStyle = 'white';
+      ctx.fillRect(0, 0, halfW, h);
+      
+      const sx = isLeft ? 0 : halfW;
+      ctx.drawImage(img, sx, 0, halfW, h, 0, 0, halfW, h);
+      
+      const dataUrl = canvas.toDataURL('image/jpeg', PAGE_CACHE_JPEG_QUALITY);
+      return dataUrlToBase64(dataUrl);
+    } finally {
+      canvas.width = 0;
+      canvas.height = 0;
+    }
+  };
+
+  return [createHalf(true), createHalf(false)];
+};
+

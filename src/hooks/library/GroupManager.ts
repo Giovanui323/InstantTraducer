@@ -6,7 +6,7 @@ export interface GroupManagerResult {
   availableGroups: Group[];
   selectedGroupFilters: string[];
   loadGroups: () => Promise<void>;
-  handleCreateGroup: (groupName: string) => void;
+  handleCreateGroup: (groupName: string) => Group | null;
   handleDeleteGroup: (groupId: string) => void;
   handleToggleGroupFilter: (groupId: string) => void;
   handleAssignGroup: (fileId: string, groupIdOrName: string) => void;
@@ -79,22 +79,30 @@ export const useGroupManager = ({
     }
   }, []);
 
-  const handleCreateGroup = useCallback((groupName: string) => {
+  const handleCreateGroup = useCallback((groupName: string): Group | null => {
     const trimmed = groupName.trim();
-    if (!trimmed) return;
+    if (!trimmed) return null;
+
+    let createdGroup: Group | null = null;
 
     setGroups(prev => {
       // Check for duplicate name
       const exists = prev.some(g => g.name.toLowerCase() === trimmed.toLowerCase());
-      if (exists) return prev;
+      if (exists) {
+        // Return existing group for caller
+        createdGroup = prev.find(g => g.name.toLowerCase() === trimmed.toLowerCase()) || null;
+        return prev;
+      }
 
       const newGroup: Group = { id: crypto.randomUUID(), name: trimmed };
+      createdGroup = newGroup;
       const newGroups = [...prev, newGroup].sort((a, b) => a.name.localeCompare(b.name, undefined, { sensitivity: 'base' }));
 
       window.electronAPI?.saveGroups(newGroups).catch(e => log.error("Failed to save groups", e));
-      setGroups(newGroups);
       return newGroups;
     });
+
+    return createdGroup;
   }, []);
 
   const handleDeleteGroup = useCallback((groupId: string) => {

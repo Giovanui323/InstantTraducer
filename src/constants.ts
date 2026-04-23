@@ -99,13 +99,24 @@ export const OPENROUTER_MODELS_LIST: ModelInfo[] = [
     { id: 'x-ai/grok-4.20-multi-agent', name: 'Grok 4.20 Multi-Agent (OpenRouter)', category: 'pro', pricing: { input: '$2.00', output: '$6.00' }, features: '2M contesto, multi-agent reasoning, deep research' },
     { id: 'xiaomi/mimo-v2-flash', name: 'MiMo V2 Flash (OpenRouter)', category: 'flash', pricing: { input: '$0.09', output: '$0.29' }, features: '262K contesto, top open-source, ragionamento — economico' },
     
-    // --- MODELLI FREE CON VISION (OPENROUTER) ---
-    { id: 'qwen/qwen3.6-plus:free', name: 'Qwen 3.6 Plus 👁️ (FREE)', category: 'pro', pricing: { input: '$0.00', output: '$0.00' }, features: '1M contesto, VISION, IL MIGLIORE FREE, OmniDocBench 91.2' },
-    { id: 'google/gemma-4-31b-it:free', name: 'Gemma 4 31B 👁️ (FREE)', category: 'flash', pricing: { input: '$0.00', output: '$0.00' }, features: '262K contesto, tutti i parametri attivi, document understanding' },
-    { id: 'nvidia/nemotron-nano-12b-v2-vl:free', name: 'Nemotron Nano 12B v2 VL 👁️ (FREE)', category: 'flash', pricing: { input: '$0.00', output: '$0.00' }, features: '128K contesto, specializzato OCR e documenti' },
-    { id: 'google/gemma-4-26b-a4b-it:free', name: 'Gemma 4 26B A4B 👁️ (FREE)', category: 'flash', pricing: { input: '$0.00', output: '$0.00' }, features: '262K contesto, MoE 3.8B attivi, economico in compute' },
-    { id: 'google/gemma-3-27b-it:free', name: 'Gemma 3 27B 👁️ (FREE)', category: 'standard', pricing: { input: '$0.00', output: '$0.00' }, features: '131K contesto, solido modello generazione precedente' },
-    { id: 'google/gemma-3-12b-it:free', name: 'Gemma 3 12B 👁️ (FREE)', category: 'standard', pricing: { input: '$0.00', output: '$0.00' }, features: '⚠️ Solo 33K contesto! Potrebbe essere insufficiente per prompt ricchi' },
+    // --- MODELLI FREE (OPENROUTER) ---
+    { id: 'z-ai/glm-4.5-air:free', name: 'Z.ai: GLM 4.5 Air 👁️ (FREE)', category: 'flash', pricing: { input: '$0.00', output: '$0.00' }, features: '131K contesto, lightweight variant, agent-centric, reasoning mode' },
+    { id: 'inclusionai/ling-2.6-flash:free', name: 'InclusionAI: Ling 2.6 Flash 👁️ (FREE)', category: 'flash', pricing: { input: '$0.00', output: '$0.00' }, features: '262K contesto, 104B MoE, ultra-veloce, eccellente per agenti' },
+    { id: 'nvidia/nemotron-nano-12b-2-vl:free', name: 'NVIDIA: Nemotron Nano 12B 2 VL 👁️ (FREE)', category: 'flash', pricing: { input: '$0.00', output: '$0.00' }, features: '128K contesto, Hybrid Transformer-Mamba, top OCR/documenti' },
+    { id: 'google/gemma-4-31b:free', name: 'Google: Gemma 4 31B 👁️ (FREE)', category: 'pro', pricing: { input: '$0.00', output: '$0.00' }, features: '262K contesto, dense multimodal, 140+ lingue, coding/reasoning' },
+    { id: 'google/gemma-4-26b-a4b:free', name: 'Google: Gemma 4 26B A4B 👁️ (FREE)', category: 'flash', pricing: { input: '$0.00', output: '$0.00' }, features: '262K contesto, MoE 25B (3.8B attivi), alta qualità/basso costo' },
+    { id: 'openai/gpt-oss-20b:free', name: 'OpenAI: GPT-OSS 20B 👁️ (FREE)', category: 'standard', pricing: { input: '$0.00', output: '$0.00' }, features: '131K contesto, MoE 21B, bassa latenza, agentic capabilities' },
+    { id: 'qwen/qwen3-coder-480b-a35b:free', name: 'Qwen: Qwen3 Coder 480B 👁️ (FREE)', category: 'pro', pricing: { input: '$0.00', output: '$0.00' }, features: '262K contesto, MoE 480B (35B attivi), ottimizzato coding/agenti' },
+    { id: 'meta-llama/llama-3.3-70b-instruct:free', name: 'Llama 3.3 70B 👁️ (FREE)', category: 'pro', pricing: { input: '$0.00', output: '$0.00' }, features: '66K contesto, solido per compiti generali e traduzione' },
+    { id: 'qwen/qwen3-next-80b-a3b-instruct:free', name: 'Qwen3 Next 80B 👁️ (FREE)', category: 'pro', pricing: { input: '$0.00', output: '$0.00' }, features: '262K contesto, MoE 80B (3B attivi), alta velocità e stabilità' },
+    { id: 'liquid/lfm2.5-1.2b-thinking:free', name: 'LiquidAI: LFM 2.5 1.2B Thinking 👁️ (FREE)', category: 'mini', pricing: { input: '$0.00', output: '$0.00' }, features: '33K contesto, reasoning su edge, ottimo per estrazione dati' },
+    { id: 'liquid/lfm2.5-1.2b-instruct:free', name: 'LiquidAI: LFM 2.5 1.2B Instruct 👁️ (FREE)', category: 'mini', pricing: { input: '$0.00', output: '$0.00' }, features: '33K contesto, compatto e velocissimo' },
+    { id: 'google/gemma-3-27b:free', name: 'Google: Gemma 3 27B 👁️ (FREE)', category: 'pro', pricing: { input: '$0.00', output: '$0.00' }, features: '131K contesto, vision-language, 140+ lingue' },
+    { id: 'venice/uncensored:free', name: 'Venice: Uncensored 👁️ (FREE)', category: 'standard', pricing: { input: '$0.00', output: '$0.00' }, features: '33K contesto, Mistral-24B fine-tune, senza filtri di sicurezza' },
+    { id: 'nousresearch/hermes-3-405b:free', name: 'Hermes 3 405B 👁️ (FREE)', category: 'pro', pricing: { input: '$0.00', output: '$0.00' }, features: '131K contesto, flagship Llama-3.1 405B fine-tune, agentic' },
+    { id: 'meta-llama/llama-3.2-3b-instruct:free', name: 'Llama 3.2 3B 👁️ (FREE)', category: 'mini', pricing: { input: '$0.00', output: '$0.00' }, features: '131K contesto, leggero e multilingua' },
+    { id: 'google/gemma-3-4b:free', name: 'Google: Gemma 3 4B 👁️ (FREE)', category: 'mini', pricing: { input: '$0.00', output: '$0.00' }, features: '33K contesto, vision-language ultra-compatto' },
+    { id: 'nvidia/llama-nemotron-embed-vl-1b-v2:free', name: 'Nemotron Embed VL 👁️ (FREE)', category: 'mini', pricing: { input: '$0.00', output: '$0.00' }, features: '131K contesto, ottimizzato per retrieval multimodale' },
     { id: 'openrouter/free', name: 'Auto Free 👁️ (Vision Router)', category: 'standard', pricing: { input: '$0.00', output: '$0.00' }, features: '200K contesto, ruota tra modelli free con vision, inconsistente' },
     
     // Nuovi Modelli Aggiunti
@@ -142,14 +153,8 @@ export const OPENROUTER_MODELS_LIST: ModelInfo[] = [
     { id: 'bytedance-seed/seed-2.0', name: 'Seed 2.0 (OpenRouter)', category: 'pro', pricing: { input: '$1.00', output: '$4.00' }, features: '262K contesto, versione full, capabilities avanzate' },
     { id: 'cohere/cohere-r7b-vision', name: 'Cohere R7B Vision (OpenRouter)', category: 'flash', pricing: { input: '$0.04', output: '$0.04' }, features: '131K contesto, vision specializzata per documenti/RAG' },
     { id: 'amazon/nova-pro-v1', name: 'Amazon Nova Pro (OpenRouter)', category: 'pro', pricing: { input: '$0.80', output: '$3.20' }, features: '300K contesto, vision forte su documenti' },
-    { id: 'amazon/nova-lite-v1', name: 'Amazon Nova Lite (OpenRouter)', category: 'flash', pricing: { input: '$0.06', output: '$0.24' }, features: '300K contesto, vision, economico' },
+    { id: 'amazon/nova-lite-v1', name: 'Amazon Nova Lite (OpenRouter)', category: 'flash', pricing: { input: '$0.06', output: '$0.24' }, features: '300K contesto, vision, economico' }
 
-    // --- TIER 3: FREE CON VISION (AGGIORNAMENTO) ---
-    { id: 'qwen/qwen2.5-vl-72b-instruct:free', name: 'Qwen 2.5 VL 72B 👁️ (FREE)', category: 'pro', pricing: { input: '$0.00', output: '$0.00' }, features: '131K contesto, vision flagship Qwen, GRATIS' },
-    { id: 'qwen/qwen2.5-vl-32b-instruct:free', name: 'Qwen 2.5 VL 32B 👁️ (FREE)', category: 'flash', pricing: { input: '$0.00', output: '$0.00' }, features: '131K contesto, specializzato vision, GRATIS' },
-    { id: 'meta-llama/llama-4-maverick:free', name: 'Llama 4 Maverick 👁️ (FREE)', category: 'flash', pricing: { input: '$0.00', output: '$0.00' }, features: '262K contesto, Maverick MoE, GRATIS' },
-    { id: 'meta-llama/llama-4-scout:free', name: 'Llama 4 Scout 👁️ (FREE)', category: 'flash', pricing: { input: '$0.00', output: '$0.00' }, features: '512K contesto, Scout MoE, GRATIS' },
-    { id: 'microsoft/phi-4-multimodal-instruct:free', name: 'Phi-4 Multimodal 👁️ (FREE)', category: 'flash', pricing: { input: '$0.00', output: '$0.00' }, features: '131K contesto, piccolo e veloce, multimodale nativo, GRATIS' }
 ];
 
 export const availableOpenRouterModels = OPENROUTER_MODELS_LIST;
@@ -161,9 +166,9 @@ LAYOUT IMMAGINI:
 - PAGINA TARGET: l'immagine da tradurre (UNICA fonte di output).
 - CONTESTO (precedente/successivo): immagini delle pagine adiacenti — NON tradurle, sono solo riferimento visivo.
 
-WORKFLOW (esegui mentalmente prima di scrivere):
+WORKFLOW (esegui prima di scrivere):
 1. OSSERVA la PAGINA TARGET dall'alto al basso: titoli, paragrafi, didascalie, note. Una colonna o DUE?
-2. DECIDI: due colonne → DEVI usare [[PAGE_SPLIT]]. Una colonna → NON usarlo.
+2. DECIDI — questo vincola DIRETTAMENTE ciò che scrivi: due colonne → il tuo output DEVE contenere [[PAGE_SPLIT]]. Se lo dimentichi, FERMATI e inseriscilo. Una colonna → NON usarlo.
 3. TRADUCI ogni blocco identificato, in ordine, fino all'ULTIMA riga visibile.
 
 REGOLE CRITICHE:
@@ -205,7 +210,7 @@ CONTESTO PRECEDENTE (solo riferimento per coerenza lessicale — NON tradurre, N
 VERIFICA FINALE prima di rispondere:
 - Ho tradotto tutti i blocchi identificati nello step 1?
 - L'output è in italiano (non trascritto in {{sourceLang}})?
-- Se due colonne: ho inserito [[PAGE_SPLIT]] esattamente una volta su riga separata?
+- VERIFICA LAYOUT INCROCIATA: se ho stabilito DUE colonne ma [[PAGE_SPLIT]] NON è nel mio output → INSERISCILO ORA. Se ho stabilito UNA colonna ma [[PAGE_SPLIT]] è presente → RIMUOVILO.
 - Ho incluso tutte le note?
 
 OUTPUT: solo il testo tradotto. Nessun preambolo, nessun commento, nessun "Ecco la traduzione".
@@ -217,9 +222,9 @@ export const LITE_TRANSLATION_PROMPT_TEMPLATE = `RUOLO: Traduttore editoriale {{
 
 LAYOUT IMMAGINI: la PAGINA TARGET è l'immagine da tradurre. Eventuali immagini di CONTESTO (pagine adiacenti) sono solo riferimento visivo: NON tradurle.
 
-WORKFLOW (esegui mentalmente prima di scrivere):
+WORKFLOW (esegui prima di scrivere):
 1. OSSERVA la PAGINA TARGET: una colonna o DUE? Quanti paragrafi? Note?
-2. Se DUE colonne → DEVI usare [[PAGE_SPLIT]]. Se UNA → NON usarlo.
+2. DECIDI — questo vincola DIRETTAMENTE il tuo output: DUE colonne → il tuo output DEVE contenere [[PAGE_SPLIT]]. Se lo dimentichi, FERMATI e inseriscilo. UNA colonna → NON usarlo.
 3. TRADUCI ogni blocco in ordine fino all'ULTIMA riga.
 
 REGOLE CRITICHE:
@@ -251,7 +256,7 @@ CONTESTO PRECEDENTE (NON tradurre, solo riferimento):
 
 VERIFICA prima di rispondere:
 - Tutti i blocchi tradotti? Output in italiano?
-- Se due colonne: [[PAGE_SPLIT]] esattamente una volta?
+- VERIFICA LAYOUT INCROCIATA: se hai stabilito DUE colonne ma [[PAGE_SPLIT]] NON è nel tuo output → INSERISCILO ORA. Se hai stabilito UNA colonna ma [[PAGE_SPLIT]] è presente → RIMUOVILO.
 
 OUTPUT: solo il testo tradotto, nessun preambolo né commento.
 
@@ -275,13 +280,26 @@ export const LITE_PROMPT_MODELS = [
   'anthropic/claude-haiku-4.5',
   'google/gemini-3.1-flash-lite-preview',
   'google/gemma-4-26b-a4b-it',
-  'google/gemma-4-31b-it:free',
-  'nvidia/nemotron-nano-12b-v2-vl:free',
-  'google/gemma-4-26b-a4b-it:free',
-  'google/gemma-3-27b-it:free',
-  'google/gemma-3-12b-it:free',
+  // OpenRouter Free
+  'z-ai/glm-4.5-air:free',
+  'inclusionai/ling-2.6-flash:free',
+  'nvidia/nemotron-nano-12b-2-vl:free',
+  'google/gemma-4-31b:free',
+  'google/gemma-4-26b-a4b:free',
+  'openai/gpt-oss-20b:free',
+  'qwen/qwen3-coder-480b-a35b:free',
+  'meta-llama/llama-3.3-70b-instruct:free',
+  'qwen/qwen3-next-80b-a3b-instruct:free',
+  'liquid/lfm2.5-1.2b-thinking:free',
+  'liquid/lfm2.5-1.2b-instruct:free',
+  'google/gemma-3-27b:free',
+  'venice/uncensored:free',
+  'nousresearch/hermes-3-405b:free',
+  'meta-llama/llama-3.2-3b-instruct:free',
+  'google/gemma-3-4b:free',
+  'nvidia/llama-nemotron-embed-vl-1b-v2:free',
   'openrouter/free',
-  // Nuovi Lite Tiers
+  // Altri Lite Tiers
   'meta-llama/llama-4-maverick-17b-128e-instruct',
   'meta-llama/llama-4-scout-17b-16e-instruct',
   'qwen/qwen2.5-vl-32b-instruct',
@@ -289,10 +307,6 @@ export const LITE_PROMPT_MODELS = [
   'microsoft/phi-4-multimodal-instruct',
   'cohere/cohere-r7b-vision',
   'amazon/nova-lite-v1',
-  'qwen/qwen2.5-vl-32b-instruct:free',
-  'meta-llama/llama-4-maverick:free',
-  'meta-llama/llama-4-scout:free',
-  'microsoft/phi-4-multimodal-instruct:free',
   // Gemini diretti
   'gemini-3.1-flash-lite-preview',
   'gemini-2.5-flash-lite',

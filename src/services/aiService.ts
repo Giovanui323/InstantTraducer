@@ -504,3 +504,39 @@ export const extractPdfMetadata = async (
 
   throw new Error("Provider non supportato per l'estrazione metadati.");
 };
+
+/**
+ * Rileva il layout della pagina (1 o 2 colonne) usando un VLM leggero.
+ */
+export const detectPageColumns = async (
+  imageBase64: string,
+  settings: AISettings,
+  signal?: AbortSignal
+): Promise<1 | 2> => {
+  try {
+    const detectSettings: AISettings = {
+      ...settings,
+      customPrompt: "Sei un analista di layout specializzato. Il tuo compito è contare quante colonne PRINCIPALI di testo ci sono nella pagina fornita. Rispondi SOLO E TASSATIVAMENTE con il numero '1' (una colonna) o '2' (due colonne). Nient'altro."
+    };
+
+    const res = await translatePage(
+      detectSettings,
+      {
+        imageBase64,
+        pageNumber: 0, // Mock page number
+        sourceLanguage: "unknown",
+        previousContext: "",
+        extraInstruction: "Quante colonne ci sono? Rispondi SOLO 1 o 2.",
+        skipPostProcessing: true
+      },
+      undefined,
+      { signal }
+    );
+
+    const text = (res.text || "").trim();
+    return text.includes("2") ? 2 : 1;
+  } catch (error) {
+    log.warning("Errore durante pre-flight detectPageColumns, fallback a 1 colonna.", error);
+    return 1;
+  }
+};
