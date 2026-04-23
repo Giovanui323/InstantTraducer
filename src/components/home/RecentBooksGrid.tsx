@@ -1,6 +1,6 @@
-import React, { useState, useMemo } from 'react';
+import React, { useState, useMemo, useEffect } from 'react';
 import ReactDOM from 'react-dom';
-import { AlertCircle, Pencil, Trash2, MoreHorizontal, Tag, FileDown, Loader2, Plus, Settings, Search, X, BookImage } from 'lucide-react';
+import { AlertCircle, Pencil, Trash2, MoreHorizontal, Tag, FileDown, Loader2, Plus, Settings, Search, X, BookImage, ChevronLeft, ChevronRight } from 'lucide-react';
 import { useLibrary } from '../../contexts/LibraryContext';
 import { ReadingProgress } from '../../types';
 import { getLanguageFlag } from '../../utils/languageUtils';
@@ -25,6 +25,7 @@ interface RecentBooksGridProps {
   onStopActiveProject: () => void;
   isOpeningProject?: string | null;
   onCreateNewProject?: () => void;
+  booksPerPage?: number;
 }
 
 export const RecentBooksGrid: React.FC<RecentBooksGridProps> = ({
@@ -42,11 +43,13 @@ export const RecentBooksGrid: React.FC<RecentBooksGridProps> = ({
   onPauseActiveProject,
   onStopActiveProject,
   isOpeningProject,
-  onCreateNewProject
+  onCreateNewProject,
+  booksPerPage = 20
 }) => {
   const { recentBooks, selectedGroupFilters, currentProjectFileId, availableGroups } = useLibrary();
   const [openingFileId, setOpeningFileId] = useState<string | null>(null);
   const [searchTerm, setSearchTerm] = useState('');
+  const [currentPage, setCurrentPage] = useState(1);
   const [menuPosition, setMenuPosition] = useState<{top: number; left: number} | null>(null);
   const scrollContainerRef = React.useRef<HTMLDivElement>(null);
   const isMounted = React.useRef(true);
@@ -119,6 +122,17 @@ export const RecentBooksGrid: React.FC<RecentBooksGridProps> = ({
     : allBooks;
   const hasSearchActive = normalizedSearch.length > 0;
   const totalBooks = allBooks.length;
+
+  // Pagination
+  const perPage = booksPerPage || 0;
+  const totalPages = perPage > 0 ? Math.ceil(filteredBooks.length / perPage) : 1;
+  const safePage = Math.max(1, Math.min(currentPage, totalPages));
+  const pagedBooks = perPage > 0
+    ? filteredBooks.slice((safePage - 1) * perPage, safePage * perPage)
+    : filteredBooks;
+  const showPagination = perPage > 0 && filteredBooks.length > perPage;
+
+  useEffect(() => { setCurrentPage(1); }, [normalizedSearch, selectedGroupFilters, perPage]);
 
   const isCurrentTranslating = activeProjectQueueStats.active > 0 || activeProjectQueueStats.queued > 0;
 
@@ -213,7 +227,7 @@ export const RecentBooksGrid: React.FC<RecentBooksGridProps> = ({
             className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6 gap-x-5 gap-y-10 pb-32 pt-2 px-1"
             role="list"
           >
-            {filteredBooks.map((book, idx) => {
+            {pagedBooks.map((book, idx) => {
               const isActive = book.fileId === currentProjectFileId;
               const isOpening = openingFileId === book.fileId || isOpeningProject === book.fileId;
               const menuDomId = `book-menu-${book.fileId}`;
@@ -467,6 +481,58 @@ export const RecentBooksGrid: React.FC<RecentBooksGridProps> = ({
                 </div>
               );
             })}
+          </div>
+        )}
+
+        {/* Pagination controls */}
+        {showPagination && (
+          <div className="flex items-center justify-center gap-2 pt-4 pb-28">
+            <button
+              onClick={() => setCurrentPage(Math.max(1, safePage - 1))}
+              disabled={safePage <= 1}
+              className={`p-1.5 rounded-lg border transition-all duration-200 ${
+                safePage <= 1
+                  ? 'text-txt-faint/40 border-border-muted/30 cursor-not-allowed'
+                  : 'text-txt-secondary border-border-muted hover:text-accent hover:border-accent/30 hover:bg-accent/5'
+              }`}
+            >
+              <ChevronLeft size={16} />
+            </button>
+            {Array.from({ length: totalPages }, (_, i) => i + 1)
+              .filter(p => p === 1 || p === totalPages || Math.abs(p - safePage) <= 1)
+              .reduce<(number | string)[]>((acc, p, i, arr) => {
+                if (i > 0 && (arr[i] as number) - (arr[i - 1] as number) > 1) acc.push('...');
+                acc.push(p);
+                return acc;
+              }, [])
+              .map((item, i) =>
+                typeof item === 'string' ? (
+                  <span key={`dots-${i}`} className="text-[11px] text-txt-faint px-1">...</span>
+                ) : (
+                  <button
+                    key={item}
+                    onClick={() => setCurrentPage(item)}
+                    className={`w-8 h-8 text-[11px] font-bold rounded-lg border transition-all duration-200 ${
+                      safePage === item
+                        ? 'bg-accent/15 text-accent border-accent/25'
+                        : 'text-txt-muted border-border-muted hover:text-txt-secondary hover:border-accent/20'
+                    }`}
+                  >
+                    {item}
+                  </button>
+                )
+              )}
+            <button
+              onClick={() => setCurrentPage(Math.min(totalPages, safePage + 1))}
+              disabled={safePage >= totalPages}
+              className={`p-1.5 rounded-lg border transition-all duration-200 ${
+                safePage >= totalPages
+                  ? 'text-txt-faint/40 border-border-muted/30 cursor-not-allowed'
+                  : 'text-txt-secondary border-border-muted hover:text-accent hover:border-accent/30 hover:bg-accent/5'
+              }`}
+            >
+              <ChevronRight size={16} />
+            </button>
           </div>
         )}
       </div>

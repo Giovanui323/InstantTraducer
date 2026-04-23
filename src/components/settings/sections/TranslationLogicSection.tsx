@@ -34,6 +34,7 @@ export const TranslationLogicSection = ({
   const sequentialContext = draftSettings.sequentialContext ?? true;
   const fullResolutionMode = draftSettings.fullResolutionMode ?? false;
   const splitDoubleColumns = draftSettings.splitDoubleColumns ?? false;
+  const booksPerPage = draftSettings.booksPerPage ?? 20;
   const [showConcurrencyInfo, setShowConcurrencyInfo] = useState(false);
 
   return (
@@ -103,6 +104,28 @@ export const TranslationLogicSection = ({
           description="Rileva e traduce separatamente le colonne. Richiede pre-flight (più lento) ma previene crash sulle pagine doppie."
           right={
             <ToggleSwitch checked={splitDoubleColumns} onChange={(v) => updateDraft({ splitDoubleColumns: v })} />
+          }
+        />
+
+        <SettingRow
+          id="setting-translationLogic.booksPerPage"
+          title="Volumi per pagina (Home)"
+          description="Quanti volumi mostrare nella home prima di paginare. 0 = tutti."
+          right={
+            <select
+              value={String(booksPerPage)}
+              onChange={(e) => updateDraft({ booksPerPage: Number(e.target.value) })}
+              className={selectClasses}
+            >
+              <option value="0">Tutti</option>
+              <option value="12">12</option>
+              <option value="16">16</option>
+              <option value="20">20</option>
+              <option value="24">24</option>
+              <option value="30">30</option>
+              <option value="40">40</option>
+              <option value="60">60</option>
+            </select>
           }
         />
       </div>

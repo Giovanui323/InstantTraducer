@@ -764,6 +764,7 @@ export const SettingsModal = React.memo(({
                                   updateDraft={updateDraft}
                                   getPageImage={getPageImage}
                                   totalPages={totalPages}
+                                  currentProjectName={currentBookTitle}
                                 />
                             )}
 

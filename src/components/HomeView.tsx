@@ -40,6 +40,7 @@ interface HomeViewProps {
   onStopActiveProject: () => void;
   isOpeningProject?: string | null;
   isClosingSession?: boolean;
+  booksPerPage?: number;
 }
 
 export const HomeView: React.FC<HomeViewProps> = ({
@@ -74,7 +75,8 @@ export const HomeView: React.FC<HomeViewProps> = ({
   onPauseActiveProject,
   onStopActiveProject,
   isOpeningProject,
-  isClosingSession
+  isClosingSession,
+  booksPerPage
 }) => {
   const [isActivityModalOpen, setIsActivityModalOpen] = useState(false);
 
@@ -264,6 +266,7 @@ export const HomeView: React.FC<HomeViewProps> = ({
                 onStopActiveProject={onStopActiveProject}
                 isOpeningProject={isOpeningProject}
                 onCreateNewProject={isConsultationMode ? undefined : onBrowseClick}
+                booksPerPage={booksPerPage}
               />
             </div>
           </section>

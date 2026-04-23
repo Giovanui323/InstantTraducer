@@ -2796,6 +2796,7 @@ const App: React.FC = () => {
               onStopActiveProject={handleStopActiveProject}
               isOpeningProject={isOpeningProject}
               isClosingSession={isClosingSession}
+              booksPerPage={aiSettings.booksPerPage}
             />
           ) : (
             <ReaderView

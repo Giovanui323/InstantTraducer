@@ -1,7 +1,7 @@
 import React, { useState, useCallback, useRef, useMemo } from 'react';
 import {
   Cpu, Loader2, Play, Square, AlertTriangle, Check, X,
-  ChevronDown, ChevronRight, Award, DollarSign, Clock, ArrowUpDown
+  ChevronDown, ChevronRight, Award, DollarSign, Clock, ArrowUpDown, Trash2
 } from 'lucide-react';
 import type { AIProvider, AISettings } from '../../../types';
 import { getAvailableModels, MergedModelInfo } from '../../../services/modelManager';
@@ -21,6 +21,7 @@ interface ModelBenchmarkSectionProps {
   updateDraft: (updates: Partial<AISettings>) => void;
   getPageImage?: (page: number) => Promise<string | null | undefined>;
   totalPages?: number;
+  currentProjectName?: string;
 }
 
 // ─── Provider meta ───
@@ -37,16 +38,54 @@ const PROVIDER_META: Record<string, { name: string; color: string; hasApiKey: (s
 
 type SortKey = 'quality' | 'cost' | 'speed';
 
+interface SavedBenchmark {
+  id: string;
+  timestamp: number;
+  projectName: string;
+  provider: AIProvider;
+  page: number;
+  sourceLanguage: string;
+  results: BenchmarkModelResult[];
+}
+
+const BENCHMARK_STORAGE_KEY = 'itraducer_benchmarks';
+
+const loadSavedBenchmarks = (): SavedBenchmark[] => {
+  try {
+    const raw = localStorage.getItem(BENCHMARK_STORAGE_KEY);
+    return raw ? JSON.parse(raw) : [];
+  } catch { return []; }
+};
+
+const saveBenchmark = (b: SavedBenchmark) => {
+  const all = loadSavedBenchmarks();
+  all.unshift(b);
+  // Keep last 20 benchmarks
+  if (all.length > 20) all.length = 20;
+  localStorage.setItem(BENCHMARK_STORAGE_KEY, JSON.stringify(all));
+};
+
+const deleteSavedBenchmark = (id: string) => {
+  const all = loadSavedBenchmarks().filter(b => b.id !== id);
+  localStorage.setItem(BENCHMARK_STORAGE_KEY, JSON.stringify(all));
+};
+
+const LANG_LABELS: Record<string, string> = {
+  en: 'Inglese', de: 'Tedesco', fr: 'Francese', es: 'Spagnolo', pt: 'Portoghese',
+  ja: 'Giapponese', zh: 'Cinese', ko: 'Coreano', ru: 'Russo', ar: 'Arabo',
+};
+
 // ─── Component ───
 
 export const ModelBenchmarkSection: React.FC<ModelBenchmarkSectionProps> = ({
   draftSettings,
   getPageImage,
   totalPages = 0,
+  currentProjectName,
 }) => {
   const [selectedProvider, setSelectedProvider] = useState<AIProvider>('gemini');
   const [selectedPage, setSelectedPage] = useState(1);
-  const [sourceLanguage, setSourceLanguage] = useState('en');
+  const [sourceLanguage, setSourceLanguage] = useState('de');
   const [judgeProvider, setJudgeProvider] = useState<AIProvider>(
     draftSettings.qualityCheck?.verifierProvider || 'gemini'
   );
@@ -57,9 +96,13 @@ export const ModelBenchmarkSection: React.FC<ModelBenchmarkSectionProps> = ({
   const [isRunning, setIsRunning] = useState(false);
   const [creditExhausted, setCreditExhausted] = useState(false);
   const [currentModelIndex, setCurrentModelIndex] = useState(-1);
+  const [currentModelName, setCurrentModelName] = useState('');
+  const [currentStatus, setCurrentStatus] = useState<string>('');
   const [totalModels, setTotalModels] = useState(0);
   const [sortBy, setSortBy] = useState<SortKey>('quality');
   const [expandedRow, setExpandedRow] = useState<string | null>(null);
+  const [savedBenchmarks, setSavedBenchmarks] = useState<SavedBenchmark[]>(loadSavedBenchmarks);
+  const [showHistory, setShowHistory] = useState(false);
   const abortRef = useRef<AbortController | null>(null);
 
   const models = useMemo(
@@ -97,6 +140,8 @@ export const ModelBenchmarkSection: React.FC<ModelBenchmarkSectionProps> = ({
     setCreditExhausted(false);
     setResults([]);
     setCurrentModelIndex(0);
+    setCurrentModelName('');
+    setCurrentStatus('Avvio...');
     setTotalModels(models.length);
 
     const controller = new AbortController();
@@ -122,27 +167,59 @@ export const ModelBenchmarkSection: React.FC<ModelBenchmarkSectionProps> = ({
       });
 
       const collected: BenchmarkModelResult[] = [];
-      for await (const { index, result, creditExhausted: noCredit } of generator) {
+      for await (const { index, result, creditExhausted: noCredit, modelName, status } of generator) {
         if (controller.signal.aborted) break;
         collected.push(result);
         setResults([...collected]);
         setCurrentModelIndex(index + 1);
+        setCurrentModelName(modelName);
+        setCurrentStatus(status === 'translating' ? 'Traduzione' : status === 'verifying' ? 'Verifica qualità' : status === 'success' ? 'Completato' : 'Errore');
         if (noCredit) {
           setCreditExhausted(true);
           controller.abort();
         }
+      }
+
+      // Save benchmark results
+      if (collected.length > 0) {
+        const saved: SavedBenchmark = {
+          id: `bench-${Date.now()}`,
+          timestamp: Date.now(),
+          projectName: currentProjectName || 'Progetto sconosciuto',
+          provider: selectedProvider,
+          page: selectedPage,
+          sourceLanguage,
+          results: collected,
+        };
+        saveBenchmark(saved);
+        setSavedBenchmarks(loadSavedBenchmarks());
       }
     } catch {
       // aborted or error
     } finally {
       setIsRunning(false);
       setCurrentModelIndex(-1);
+      setCurrentModelName('');
+      setCurrentStatus('');
       abortRef.current = null;
     }
-  }, [getPageImage, draftSettings, selectedProvider, selectedPage, sourceLanguage, judgeProvider, judgeModel, models.length]);
+  }, [getPageImage, draftSettings, selectedProvider, selectedPage, sourceLanguage, judgeProvider, judgeModel, models.length, currentProjectName]);
 
   const stopBenchmark = useCallback(() => {
     abortRef.current?.abort();
+  }, []);
+
+  const loadBenchmark = useCallback((b: SavedBenchmark) => {
+    setResults(b.results);
+    setSelectedProvider(b.provider);
+    setSelectedPage(b.page);
+    setSourceLanguage(b.sourceLanguage);
+    setShowHistory(false);
+  }, []);
+
+  const handleDeleteBenchmark = useCallback((id: string) => {
+    deleteSavedBenchmark(id);
+    setSavedBenchmarks(loadSavedBenchmarks());
   }, []);
 
   // ─── Score badge ───
@@ -171,13 +248,72 @@ export const ModelBenchmarkSection: React.FC<ModelBenchmarkSectionProps> = ({
           </div>
           <div className="min-w-0">
             <div className="text-sm font-bold text-txt-primary">Benchmark Modelli</div>
-            <div className="text-[11px] text-txt-muted">Confronta tutti i modelli di un provider su una pagina di prova</div>
+            <div className="text-[11px] text-txt-muted">Confronta tutti i modelli di un provider su una pagina di prova — verifica severa</div>
           </div>
+        </div>
+        <div className="flex items-center gap-2">
+          {savedBenchmarks.length > 0 && (
+            <button
+              onClick={() => setShowHistory(!showHistory)}
+              className={`text-[10px] font-bold px-2 py-1 rounded-lg flex items-center gap-1 transition-all ${
+                showHistory
+                  ? 'bg-accent/15 text-accent border border-accent/20'
+                  : 'text-txt-muted hover:text-txt-secondary'
+              }`}
+            >
+              <Clock size={10} /> {showHistory ? 'Nascondi' : 'Cronologia'} ({savedBenchmarks.length})
+            </button>
+          )}
         </div>
       </div>
 
+      {/* History panel */}
+      {showHistory && savedBenchmarks.length > 0 && (
+        <div className="bg-surface-4/20 border border-border-muted rounded-xl p-3 space-y-2 animate-fade-in max-h-[200px] overflow-y-auto">
+          <div className="text-[10px] font-bold uppercase text-txt-muted tracking-wider">Benchmark salvati</div>
+          {savedBenchmarks.map(b => (
+            <div key={b.id} className="flex items-center justify-between gap-3 px-2 py-1.5 rounded-lg hover:bg-surface-4/30 transition-colors group">
+              <button
+                onClick={() => loadBenchmark(b)}
+                className="flex items-center gap-3 min-w-0 text-left flex-1"
+              >
+                <div className="text-[11px] font-medium text-txt-primary truncate">
+                  {b.projectName} — Pag. {b.page} ({LANG_LABELS[b.sourceLanguage] || b.sourceLanguage})
+                </div>
+                <div className="text-[10px] text-txt-muted shrink-0">
+                  {PROVIDER_META[b.provider]?.name || b.provider} — {new Date(b.timestamp).toLocaleString('it-IT', { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' })}
+                </div>
+                <div className="text-[10px] text-txt-muted shrink-0">
+                  {b.results.filter(r => r.status === 'success').length}/{b.results.length} modelli
+                </div>
+              </button>
+              <button
+                onClick={(e) => { e.stopPropagation(); handleDeleteBenchmark(b.id); }}
+                className="text-txt-muted hover:text-red-400 transition-colors opacity-0 group-hover:opacity-100"
+                title="Elimina"
+              >
+                <Trash2 size={12} />
+              </button>
+            </div>
+          ))}
+        </div>
+      )}
+
       {/* Config */}
       <div className="bg-surface-4/20 border border-border-muted rounded-xl p-4 space-y-3">
+        {/* Project info */}
+        {currentProjectName && (
+          <div className="text-[11px] text-txt-muted flex items-center gap-2 pb-1 border-b border-border-muted/50">
+            <span className="font-bold text-txt-secondary">Progetto:</span> {currentProjectName}
+            {totalPages > 0 && <span className="ml-2">({totalPages} pagine)</span>}
+          </div>
+        )}
+        {!currentProjectName && (
+          <div className="text-[11px] text-amber-400 flex items-center gap-1 pb-1 border-b border-border-muted/50">
+            <AlertTriangle size={10} /> Nessun progetto aperto — apri un progetto PDF per eseguire il benchmark
+          </div>
+        )}
+
         <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
           {/* Provider */}
           <div className="space-y-1">
@@ -220,8 +356,8 @@ export const ModelBenchmarkSection: React.FC<ModelBenchmarkSectionProps> = ({
               onChange={(e) => setSourceLanguage(e.target.value)}
               className={`${selectClasses} w-full`}
             >
-              <option value="en">Inglese</option>
               <option value="de">Tedesco</option>
+              <option value="en">Inglese</option>
               <option value="fr">Francese</option>
               <option value="es">Spagnolo</option>
               <option value="pt">Portoghese</option>
@@ -245,8 +381,8 @@ export const ModelBenchmarkSection: React.FC<ModelBenchmarkSectionProps> = ({
               }}
               className={`${selectClasses} w-full`}
             >
-              <option value={`gemini|${GEMINI_VERIFIER_PRO_MODEL}`}>Gemini Pro (consigliato)</option>
-              <option value={`claude|claude-sonnet-4-20250514`}>Claude Sonnet 4</option>
+              <option value={`gemini|${GEMINI_VERIFIER_PRO_MODEL}`}>Gemini 3.1 Pro (consigliato)</option>
+              <option value={`claude|claude-sonnet-4-6`}>Claude Sonnet 4.6</option>
               <option value={`openai|gpt-4o`}>GPT-4o</option>
             </select>
           </div>
@@ -255,7 +391,8 @@ export const ModelBenchmarkSection: React.FC<ModelBenchmarkSectionProps> = ({
         {/* Models count + cost estimate */}
         <div className="flex items-center justify-between gap-3 pt-1">
           <div className="text-[10px] text-txt-muted">
-            {models.length} modelli disponibili — Costo stimato totale: <span className="text-warning font-bold">${estimatedCost.toFixed(4)}</span>
+            {models.length} modelli — Costo stimato: <span className="text-warning font-bold">${estimatedCost.toFixed(4)}</span>
+            <span className="ml-2 text-[9px] opacity-60">Verifica severa attiva</span>
           </div>
           <div className="flex items-center gap-2">
             {!hasApiKey && (
@@ -303,7 +440,12 @@ export const ModelBenchmarkSection: React.FC<ModelBenchmarkSectionProps> = ({
           </div>
           <div className="text-[11px] text-txt-muted flex items-center gap-2">
             <Loader2 size={12} className="animate-spin text-accent" />
-            <span>{currentModelIndex}/{totalModels} — Traduzione e verifica in corso...</span>
+            <span className="font-medium">{currentModelIndex}/{totalModels}</span>
+            {currentModelName && (
+              <span className="text-txt-secondary">
+                — <span className="font-medium">{currentModelName}</span>: {currentStatus}
+              </span>
+            )}
           </div>
         </div>
       )}
@@ -420,12 +562,27 @@ export const ModelBenchmarkSection: React.FC<ModelBenchmarkSectionProps> = ({
                     )}
                     {r.verification.evidence && r.verification.evidence.length > 0 && (
                       <div className="space-y-1">
-                        <span className="text-[10px] font-bold uppercase text-txt-muted">Evidenze:</span>
+                        <span className="text-[10px] font-bold uppercase text-txt-muted">Evidenze ({r.verification.evidence.length}):</span>
                         {r.verification.evidence.map((ev, i) => (
                           <div key={i} className="text-[11px] text-txt-muted pl-3 border-l-2 border-border-muted">
                             {ev}
                           </div>
                         ))}
+                      </div>
+                    )}
+                    {r.verification.annotations && r.verification.annotations.length > 0 && (
+                      <div className="space-y-1">
+                        <span className="text-[10px] font-bold uppercase text-txt-muted">Annotazioni ({r.verification.annotations.length}):</span>
+                        {r.verification.annotations.map((a, i) => (
+                          <div key={i} className="text-[11px] text-txt-muted pl-3 border-l-2 border-border-muted">
+                            <span className="font-medium">{a.originalText}</span> — {a.comment}
+                          </div>
+                        ))}
+                      </div>
+                    )}
+                    {r.verification.retryHint && (
+                      <div className="text-[10px] text-amber-400/80 pl-3 border-l-2 border-amber-500/30">
+                        Suggerimento: {r.verification.retryHint}
                       </div>
                     )}
                     <div className="flex gap-4 text-[10px] text-txt-muted pt-1">
@@ -445,7 +602,7 @@ export const ModelBenchmarkSection: React.FC<ModelBenchmarkSectionProps> = ({
         <div className="text-center py-10 text-txt-muted">
           <Cpu size={32} className="mx-auto mb-3 opacity-20" />
           <div className="text-[12px]">Seleziona un provider e avvia il benchmark per confrontare i modelli.</div>
-          <div className="text-[10px] mt-1">Ogni modello tradurrà la pagina selezionata e verrà valutato dal giudice.</div>
+          <div className="text-[10px] mt-1">Ogni modello tradurrà la pagina selezionata e verrà valutato con verifica severa dal giudice.</div>
         </div>
       )}
     </div>

@@ -19,7 +19,7 @@ export interface GroupManagerProps {
   setAvailableGroups?: React.Dispatch<React.SetStateAction<Group[]>>;
   selectedGroupFilters?: string[];
   setSelectedGroupFilters?: React.Dispatch<React.SetStateAction<string[]>>;
-  updateLibrary?: (fileId: string, data: Partial<ReadingProgress> & { fileId: string }) => void;
+  updateLibrary?: (fileId: string, data: Partial<ReadingProgress> & { fileId: string }, priority?: string, silent?: boolean) => void;
 }
 
 export const useGroupManager = ({
