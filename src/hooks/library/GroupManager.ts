@@ -112,7 +112,7 @@ export const useGroupManager = ({
 
       showConfirm(
         "Elimina Gruppo",
-        `Sei sicuro di voler eliminare il gruppo "${groupName}" dalla lista globale? (Resterà comunque assegnato ai libri esistenti)`,
+        `Sei sicuro di voler eliminare il gruppo "${groupName}" dalla lista globale? Questo lo rimuoverà anche da tutti i libri a cui è stato assegnato.`,
         () => {
           setGroups(prev => {
             const next = prev.filter(g => g.id !== groupId);
@@ -120,11 +120,22 @@ export const useGroupManager = ({
             return next;
           });
           setFilters(prev => prev.filter(g => g !== groupId));
+
+          // Deep clean: remove the deleted group ID from all affected books
+          if (recentBooksRef && updateLibrary) {
+            const affectedBooks = Object.values(recentBooksRef.current).filter(b => b.groups?.includes(groupId));
+            affectedBooks.forEach(book => {
+              if (!book.fileId) return;
+              const newGroups = book.groups!.filter(g => g !== groupId);
+              // Trigger a background save for the affected book
+              updateLibrary(book.fileId, { fileId: book.fileId, groups: newGroups }, 'BACKGROUND', true);
+            });
+          }
         },
         'danger'
       );
     }
-  }, [showConfirm, groups, setGroups, setFilters]);
+  }, [showConfirm, groups, setGroups, setFilters, recentBooksRef, updateLibrary]);
 
   const handleToggleGroupFilter = useCallback((groupId: string) => {
     setFilters(prev =>
