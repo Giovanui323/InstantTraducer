@@ -49,6 +49,7 @@ import { ApiKeysSection, apiKeysSearchItems } from './settings/sections/ApiKeysS
 import { TranslationLogicSection, translationLogicSearchItems } from './settings/sections/TranslationLogicSection';
 import { AiRolesSection, aiRolesSearchItems } from './settings/sections/AiRolesSection';
 import { AiDiagnosticSection } from './settings/sections/AiDiagnosticSection';
+import { ModelBenchmarkSection } from './settings/sections/ModelBenchmarkSection';
 import { PromptsSection, promptsSearchItems } from './settings/sections/PromptsSection';
 import { AdminSection } from './settings/sections/AdminSection';
 import { ReadOnlyModelsSection } from './settings/sections/ReadOnlyModelsSection';
@@ -59,7 +60,7 @@ import { ToggleSwitch } from './settings/ToggleSwitch';
 
 // Sezioni visibili solo agli admin (gate UX con password in AdminSection).
 const ADMIN_ONLY_SECTIONS: readonly SettingsSection[] = [
-    'aiRoles', 'apiKeys', 'testAi', 'prompts', 'translationLogic', 'costs', 'logsDiagnostic', 'userPermissions'
+    'aiRoles', 'apiKeys', 'testAi', 'modelBenchmark', 'prompts', 'translationLogic', 'costs', 'logsDiagnostic', 'userPermissions'
 ];
 const isAdminOnlySection = (s: SettingsSection) => ADMIN_ONLY_SECTIONS.includes(s);
 
@@ -79,6 +80,8 @@ interface SettingsModalProps {
     isLibraryView?: boolean;
     currentBookTitle?: string;
     showConfirm?: (title: string, message: string, onConfirm: () => void, type?: 'info' | 'danger') => void;
+    getPageImage?: (page: number) => Promise<string | null | undefined>;
+    totalPages?: number;
 }
 
 const areSettingsModalPropsEqual = (prev: SettingsModalProps, next: SettingsModalProps) => {
@@ -117,7 +120,9 @@ export const SettingsModal = React.memo(({
     onRefreshLibrary,
     isLibraryView,
     currentBookTitle,
-    showConfirm
+    showConfirm,
+    getPageImage,
+    totalPages
 }: SettingsModalProps) => {
     // --- Admin gate ---
     const adminAuth = useAdminAuth();
@@ -515,6 +520,7 @@ export const SettingsModal = React.memo(({
             { id: 'aiRoles', label: 'Modelli & Ruoli', icon: <BrainCircuit size={14} /> },
             { id: 'apiKeys', label: 'API Keys', icon: <Key size={14} /> },
             { id: 'testAi', label: 'Test AI & Connessione', icon: <Activity size={14} /> },
+            { id: 'modelBenchmark', label: 'Benchmark Modelli', icon: <Cpu size={14} /> },
             { id: 'prompts', label: 'Gestione Prompt', icon: <MessageSquare size={14} /> },
             { id: 'translationLogic', label: 'Traduzione & Logica', icon: <Zap size={14} /> },
             { id: 'costs', label: 'Info & Costi Modelli', icon: <Info size={14} /> },
@@ -750,6 +756,15 @@ export const SettingsModal = React.memo(({
 
                             {activeSection === 'testAi' && isAdmin && (
                                 <AiDiagnosticSection draftSettings={draftSettings} updateDraft={updateDraft} />
+                            )}
+
+                            {activeSection === 'modelBenchmark' && isAdmin && (
+                                <ModelBenchmarkSection
+                                  draftSettings={draftSettings}
+                                  updateDraft={updateDraft}
+                                  getPageImage={getPageImage}
+                                  totalPages={totalPages}
+                                />
                             )}
 
                             {activeSection === 'prompts' && isSuperAdmin && (

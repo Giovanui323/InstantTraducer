@@ -5,6 +5,45 @@ export function isLiteModel(modelId: string): boolean {
   return LITE_PROMPT_MODELS.includes(modelId);
 }
 
+export type GeminiModelFamily = 'pro31' | 'flash3' | 'legacy25' | 'lite';
+
+export function classifyGeminiModelFamily(modelId: string): GeminiModelFamily {
+  if (!modelId) return 'legacy25';
+  const m = modelId.toLowerCase();
+  if (isLiteModel(modelId)) return 'lite';
+  if (m.includes('3.1-pro')) return 'pro31';
+  if (m.includes('3-flash') || m.includes('3.1-flash')) return 'flash3';
+  if (m.includes('2.5-pro') || m.includes('2.5-flash')) return 'legacy25';
+  return 'legacy25';
+}
+
+export type ModelRole = 'translation' | 'verification' | 'metadata';
+
+const RECOMMENDED_MODELS: Record<ModelRole, { primary: string; secondary?: string; label: string }> = {
+  translation: {
+    primary: 'gemini-3.1-pro-preview',
+    secondary: 'gemini-3-flash-preview',
+    label: '★ Consigliato'
+  },
+  verification: {
+    primary: 'gemini-3-flash-preview',
+    secondary: 'gemini-3.1-flash-preview',
+    label: '★ Consigliato'
+  },
+  metadata: {
+    primary: 'gemini-3.1-flash-lite-preview',
+    label: '★ Consigliato'
+  }
+};
+
+export function getModelRecommendation(modelId: string, role: ModelRole): string {
+  const rec = RECOMMENDED_MODELS[role];
+  if (!rec) return '';
+  if (modelId === rec.primary) return rec.label;
+  if (rec.secondary && modelId === rec.secondary) return '★ Rapporto Q/P';
+  return '';
+}
+
 export const ITALIAN_COMMON_WORDS = new Set([
   'IL', 'LO', 'LA', 'I', 'GLI', 'LE', 'DI', 'A', 'DA', 'IN', 'CON', 'SU', 'PER', 'TRA', 'FRA',
   'UN', 'UNO', 'UNA', 'CHE', 'NON', 'SI', 'MA', 'ED', 'E', 'O', 'SE', 'PERCHÉ', 'QUANDO', 'DOVE',

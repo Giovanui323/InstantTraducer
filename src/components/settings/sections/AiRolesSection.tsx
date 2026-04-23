@@ -17,7 +17,8 @@ import {
   isGroqVisionModel,
   CLAUDE_MODELS_LIST
 } from '../../../constants';
-import { getModelPriceInfo } from '../../../services/aiUtils';
+import { getModelPriceInfo, getModelRecommendation, ModelRole } from '../../../services/aiUtils';
+import { estimateModelCostPerPageUSD } from '../../../services/usageTracker';
 import { getAvailableModels } from '../../../services/modelManager';
 import { SettingsSearchItem } from '../search';
 import { CustomModelManager } from '../../CustomModelManager';
@@ -98,11 +99,17 @@ const SectionTitle = ({ title, description }: { title: string; description?: str
   </div>
 );
 
-const ModelOption = ({ model }: { model: { id: string, name: string, pricing?: { input: string | number, output: string | number } } }) => {
+const ModelOption = ({ model, role }: { model: { id: string, name: string, pricing?: { input: string | number, output: string | number } }, role?: ModelRole }) => {
   const info = getModelPriceInfo(model.pricing);
+  const pricingOverride = model.pricing
+    ? { input: String(model.pricing.input), output: String(model.pricing.output) }
+    : undefined;
+  const costPerPage = estimateModelCostPerPageUSD(model.id, { pricingOverride });
+  const costLabel = costPerPage === 0 ? 'FREE' : `~$${costPerPage.toFixed(4)}/pag`;
+  const badge = role ? getModelRecommendation(model.id, role) : '';
   return (
     <option key={model.id} value={model.id} style={{ color: info.color }}>
-      {info.indicator} {model.name} {info.label && `(${info.label})`}
+      {badge ? `${badge} ` : ''}{info.indicator} {model.name} — {costLabel}
     </option>
   );
 };
@@ -197,7 +204,7 @@ export const AiRolesSection = ({
           className={selectClasses}
         >
           {availableGeminiModels.map((m) => (
-            <ModelOption key={m.id} model={m} />
+            <ModelOption key={m.id} model={m} role="translation" />
           ))}
         </select>
       );
@@ -410,7 +417,7 @@ export const AiRolesSection = ({
       return (
         <select value={qualityCheck.verifierModel} onChange={(e) => setQualityModel(e.target.value)} className={selectClasses}>
           {availableGeminiModels.map((m) => (
-            <ModelOption key={m.id} model={m} />
+            <ModelOption key={m.id} model={m} role="verification" />
           ))}
         </select>
       );
@@ -474,7 +481,7 @@ export const AiRolesSection = ({
       return (
         <select value={metadataExtraction.model} onChange={(e) => setMetadataModel(e.target.value)} className={selectClasses}>
           {GEMINI_MODELS_LIST.map((m) => (
-            <ModelOption key={m.id} model={m} />
+            <ModelOption key={m.id} model={m} role="metadata" />
           ))}
         </select>
       );

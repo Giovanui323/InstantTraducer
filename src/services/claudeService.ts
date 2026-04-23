@@ -32,7 +32,7 @@ export const translateWithClaude = async (
   apiKey: string,
   model: ClaudeModel,
   extraInstruction?: string,
-  onProgress?: (text: string) => void,
+  onProgress?: (text: string, partialText?: string) => void,
   signal?: AbortSignal,
   legalContext?: boolean,
   customPrompt?: string,
@@ -48,7 +48,7 @@ export const translateWithClaude = async (
   );
   const fullSystemPrompt = systemStable + (systemVariable ? '\n' + systemVariable : '');
 
-  if (onProgress) onProgress(`Preparazione richiesta Claude (${model})`);
+  if (onProgress) onProgress(`Preparazione richiesta (${model})`);
   log.wait(`[CLAUDE-TRANSLATION] Richiesta (${model})...`, {
     imageKB: Math.round(imageBytesApprox / 1024),
     systemStableChars: systemStable.length,
@@ -120,7 +120,47 @@ export const translateWithClaude = async (
         createParams.max_tokens = 8192;
       }
 
-      messageResponse = await anthropic.messages.create(createParams, { signal });
+      // STREAMING: usa messages.stream() per ottenere testo parziale in tempo reale,
+      // abilitando la "Streaming Anteprima" nel reader, come già fa Gemini.
+      const stream = anthropic.messages.stream(createParams);
+      let fullText = '';
+      let lastProgressAt = 0;
+      let lastNotifiedLength = 0;
+      let firstChunkAt: number | null = null;
+      const streamStartedAt = performance.now();
+
+      for await (const event of stream) {
+        if (signal?.aborted) {
+          log.warning("Richiesta Claude annullata durante streaming.");
+          throw new Error("Operazione annullata");
+        }
+
+        if (event.type === 'content_block_delta' && event.delta.type === 'text_delta') {
+          fullText += event.delta.text;
+
+          if (firstChunkAt === null) {
+            firstChunkAt = performance.now();
+            const ttftMs = Math.round(firstChunkAt - streamStartedAt);
+            const ttftS = Math.round((ttftMs / 1000) * 10) / 10;
+            if (onProgress) onProgress(`Prima risposta ricevuta dopo ${ttftS}s (${ttftMs}ms) [${model}]`);
+          }
+
+          if (fullText.length > 40000) {
+            log.warning(`Runaway generation rilevata (>40k caratteri) per pagina ${pageNumber}. Interruzione streaming.`);
+            break;
+          }
+
+          const now = performance.now();
+          const deltaChars = fullText.length - lastNotifiedLength;
+          if (onProgress && (deltaChars >= 600 || now - lastProgressAt >= 900)) {
+            lastProgressAt = now;
+            lastNotifiedLength = fullText.length;
+            onProgress(`Streaming in corso: ${fullText.length} caratteri ricevuti`, fullText);
+          }
+        }
+      }
+
+      messageResponse = await stream.finalMessage();
     } catch (e: any) {
       if (e?.name === 'AbortError') {
         log.warning("Richiesta Claude annullata (AbortError).");
@@ -131,7 +171,7 @@ export const translateWithClaude = async (
     }
 
     const requestId = messageResponse.id;
-    if (onProgress) onProgress(`Risposta Claude ricevuta (request_id: ${requestId})`);
+    if (onProgress) onProgress(`Risposta ricevuta (${requestId})`);
 
     if (messageResponse.usage) {
        const usage = messageResponse.usage as Anthropic.Usage & {
@@ -164,8 +204,8 @@ export const translateWithClaude = async (
     2,
     3000,
     (err, attempt) => {
-      if (onProgress) onProgress(`Errore temporaneo (Claude), tentativo ${attempt}/2 in corso...`);
-      log.warning(`Ritento Claude (attempt ${attempt}) causa errore transiente`, err);
+      if (onProgress) onProgress(`Errore temporaneo, tentativo ${attempt}/2 in corso...`);
+      log.warning(`Ritento ${model} (attempt ${attempt}) causa errore transiente`, err);
     },
     (err) => {
       const name = String((err as any)?.name || "");
@@ -174,8 +214,8 @@ export const translateWithClaude = async (
     }
   );
   const elapsedMs = Math.round(performance.now() - startedAt);
-  log.recv(`Ricevuta traduzione Claude (${attempt1.text.length} caratteri)`, { elapsedMs, requestId: attempt1.requestId });
-  if (onProgress) onProgress(`Output pronto: ${attempt1.text.length} caratteri (tempo: ${elapsedMs}ms)`);
+  log.recv(`Ricevuta traduzione ${model} (${attempt1.text.length} caratteri)`, { elapsedMs, requestId: attempt1.requestId });
+  if (onProgress) onProgress(`Completato: ${attempt1.text.length} caratteri (tempo: ${elapsedMs}ms)`);
 
   if (skipPostProcessing) {
     return { text: attempt1.text || "", annotations: [], modelUsed: model, diagnosticPrompt: fullSystemPrompt, diagnosticUserInstruction: effectiveInstruction };

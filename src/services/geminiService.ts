@@ -6,7 +6,8 @@ import { log } from "./logger";
 import { cleanTranslationText, stripPreamble } from "./textClean";
 import { ensureBase64, detectImageMime } from "../utils/imageUtils";
 import {
-  looksLikeItalian
+  looksLikeItalian,
+  classifyGeminiModelFamily
 } from "./aiUtils";
 import { retry, withTimeout } from "../utils/async";
 import { safeParseJsonObject } from "../utils/json";
@@ -80,6 +81,11 @@ const isHardLimitZero = (e: any): boolean => {
 };
 
 const cleanOutput = (text: string): string => cleanTranslationText(text);
+
+const shouldEnableThinking = (modelId: string): boolean => {
+  const family = classifyGeminiModelFamily(modelId);
+  return family === 'pro31' || family === 'flash3';
+};
 
 const DEFAULT_SAFETY_SETTINGS = [
   { category: HarmCategory.HARM_CATEGORY_HATE_SPEECH, threshold: HarmBlockThreshold.BLOCK_NONE },
@@ -161,7 +167,7 @@ export const translateWithGemini = async (
 
   const startedAt = performance.now();
   const imageBytesApprox = Math.floor((imageBase64.length * 3) / 4);
-  if (onProgress) onProgress(`Preparazione richiesta Gemini (${model}) - Immagine: ${Math.round(imageBytesApprox / 1024)}KB`);
+  if (onProgress) onProgress(`Preparazione richiesta (${model})`);
   const ai = getGeminiInstance(apiKey);
   const safePreviousContext = looksLikeItalian(previousContext, sourceLanguage) ? previousContext : "";
   const requestStartedAt = performance.now();
@@ -229,21 +235,15 @@ export const translateWithGemini = async (
       }, 5_000);
     }
 
-    const userInstruction = getGeminiTranslateUserInstruction(pageNumber, sourceLanguage);
+    const userInstruction = getGeminiTranslateUserInstruction(pageNumber, sourceLanguage, model);
 
     // CRITICAL FIX: isRetry must be true ONLY if we have actual corrective instructions.
     // This prevents the AI from entering "critical mode" for empty strings or spaces.
     const isRetry = Boolean(extraInstruction && extraInstruction.trim().length > 0);
 
-    const criticalBlock = isRetry ? (
-      `\n\n#############################################################\n` +
-      `### ATTENZIONE: MODALITÀ RITRADUZIONE CORRETTIVA          ###\n` +
-      `#############################################################\n` +
-      `La precedente traduzione presentava errori critici (es. omissioni).\n` +
-      `Segui TASSATIVAMENTE le seguenti istruzioni per correggere, ignorando qualsiasi istruzione contrastante:\n\n` +
-      `${extraInstruction?.trim() ? extraInstruction.trim() : "Rileggi l'immagine con attenzione massima. TRADUCI TUTTO IN ITALIANO. Non lasciare testo in lingua originale."}\n\n` +
-      `#############################################################`
-    ) : "";
+    // The retry directive is now in the system prompt via buildRetryBlock().
+    // Here we append only the specific corrective instructions from the quality check.
+    const criticalBlock = isRetry ? `\n\nCorreggi secondo queste indicazioni:\n${extraInstruction!.trim()}` : "";
 
     // Gemini 3 docs: "Negative constraints should be placed at the end of the instruction"
     const effectiveInstruction = userInstruction + criticalBlock;
@@ -319,7 +319,7 @@ export const translateWithGemini = async (
               tools: [{ googleSearch: {} }] as any[]
             } : {}),
             // @ts-ignore - Supporto Gemini thinking_config
-            ...(model.includes("thinking") || model.includes("3.1-pro") || model.includes("3-flash") || model.includes("3.1-flash") ? {
+            ...(shouldEnableThinking(model) ? {
               thinkingConfig: {
                 includeThoughts: true,
                 // @ts-ignore
@@ -749,7 +749,7 @@ export const verifyTranslationQualityWithGemini = async (params: {
           temperature: 0,
           tools: [{ googleSearch: {} }],
           // @ts-ignore
-          ...(verifierModel.includes("thinking") || verifierModel.includes("3.1-pro") || verifierModel.includes("3-flash") || verifierModel.includes("3.1-flash") ? { thinkingConfig: { thinkingLevel: thinkingLevel ? thinkingLevel.toUpperCase() : "HIGH" } } : {}) as any
+          ...(shouldEnableThinking(verifierModel) ? { thinkingConfig: { thinkingLevel: thinkingLevel ? thinkingLevel.toUpperCase() : "HIGH" } } : {}) as any
         }
       }),
       AI_VERIFICATION_TIMEOUT_MS,
@@ -843,7 +843,7 @@ export const testGeminiConnection = async (apiKey: string, model: GeminiModel, s
         temperature: 0,
         tools: [{ googleSearch: {} }],
         // @ts-ignore
-        ...(model.includes("thinking") || model.includes("3.1-pro") ? { thinkingConfig: { thinkingLevel: "HIGH" } } : {}) as any
+        ...(shouldEnableThinking(model) ? { thinkingConfig: { thinkingLevel: "HIGH" } } : {}) as any
       }
     });
 
@@ -923,7 +923,7 @@ export const extractPdfMetadataWithGemini = async (
           temperature: 0,
           tools: [{ googleSearch: {} }],
           // @ts-ignore
-          ...(currentModel.includes("thinking") || currentModel.includes("3.1-pro") ? { thinkingConfig: { thinkingLevel: "HIGH" } } : {}) as any
+          ...(shouldEnableThinking(currentModel) ? { thinkingConfig: { thinkingLevel: "HIGH" } } : {}) as any
         }
       });
       

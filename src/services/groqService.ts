@@ -100,7 +100,7 @@ export const translateWithGroq = async (
   apiKey: string,
   model: GroqModel,
   extraInstruction?: string,
-  onProgress?: (text: string) => void,
+  onProgress?: (text: string, partialText?: string) => void,
   signal?: AbortSignal,
   legalContext?: boolean,
   customPrompt?: string,
@@ -137,7 +137,7 @@ export const translateWithGroq = async (
   const isRetry = Boolean(extraInstruction && extraInstruction.trim().length > 0);
   const systemPrompt = getGroqTranslateSystemPrompt(sourceLanguage, previousContext, legalContext ?? true, isRetry, customPrompt, model);
 
-  if (onProgress) onProgress(`Preparazione richiesta Groq (${model})...`);
+  if (onProgress) onProgress(`Preparazione richiesta (${model})`);
   log.wait(`[GROQ-TRANSLATION] Richiesta (${model})...`, {
     imageKB: Math.round(imageBytesApprox / 1024),
     systemPromptChars: systemPrompt.length,
@@ -174,8 +174,91 @@ export const translateWithGroq = async (
       response = await groqFetch(apiKey, '/chat/completions', {
         model,
         messages,
-        max_completion_tokens: getGroqMaxOutput(model)
+        max_completion_tokens: getGroqMaxOutput(model),
+        stream: true,
       }, signal);
+
+      const requestId = response.headers.get('x-request-id') || undefined;
+
+      if (!response.ok) {
+        const errorData = await response.json().catch(() => ({}));
+        const errorMsg = errorData?.error?.message || response.statusText || "Errore sconosciuto";
+        log.error("Errore API Groq", { status: response.status, message: errorMsg, body: errorData });
+        throw new Error(`Errore API Groq: ${errorMsg} (status ${response.status})`);
+      }
+
+      if (!response.body) throw new Error("Stream non disponibile nella risposta Groq");
+
+      // Parse SSE stream (OpenAI-compatible)
+      const reader = response.body.getReader();
+      const decoder = new TextDecoder();
+      let fullText = '';
+      let lastProgressAt = 0;
+      let lastNotifiedLength = 0;
+      let firstChunkAt: number | null = null;
+      const streamStartedAt = performance.now();
+      let buffer = '';
+      let usageData: any = null;
+
+      while (true) {
+        if (signal?.aborted) {
+          reader.cancel();
+          throw new Error("Operazione annullata");
+        }
+
+        const { done, value } = await reader.read();
+        if (done) break;
+
+        buffer += decoder.decode(value, { stream: true });
+        const lines = buffer.split('\n');
+        buffer = lines.pop() || '';
+
+        for (const line of lines) {
+          const trimmed = line.trim();
+          if (!trimmed || !trimmed.startsWith('data: ')) continue;
+          const dataStr = trimmed.slice(6);
+          if (dataStr === '[DONE]') continue;
+
+          try {
+            const parsed = JSON.parse(dataStr);
+            if (parsed.usage) usageData = parsed.usage;
+
+            const delta = parsed.choices?.[0]?.delta;
+            if (delta?.content) {
+              fullText += delta.content;
+
+              if (firstChunkAt === null) {
+                firstChunkAt = performance.now();
+                const ttftMs = Math.round(firstChunkAt - streamStartedAt);
+                const ttftS = Math.round((ttftMs / 1000) * 10) / 10;
+                if (onProgress) onProgress(`Prima risposta ricevuta dopo ${ttftS}s (${ttftMs}ms) [${model}]`);
+              }
+
+              if (fullText.length > 40000) {
+                log.warning(`Runaway generation (>40k caratteri) per pagina ${pageNumber}. Interruzione.`);
+                reader.cancel();
+                break;
+              }
+
+              const now = performance.now();
+              const deltaChars = fullText.length - lastNotifiedLength;
+              if (onProgress && (deltaChars >= 600 || now - lastProgressAt >= 900)) {
+                lastProgressAt = now;
+                lastNotifiedLength = fullText.length;
+                onProgress(`Streaming in corso: ${fullText.length} caratteri ricevuti`, fullText);
+              }
+            }
+          } catch { /* skip malformed SSE */ }
+        }
+      }
+
+      if (usageData) {
+        const { prompt_tokens, completion_tokens } = usageData;
+        trackUsage(model, prompt_tokens || 0, completion_tokens || 0);
+      }
+
+      if (!fullText) throw new Error("Risposta vuota");
+      return { text: fullText, requestId };
     } catch (e: any) {
       if (e?.name === 'AbortError') {
         log.warning("Richiesta Groq annullata (AbortError).");
@@ -184,27 +267,6 @@ export const translateWithGroq = async (
       log.error("Errore rete durante chiamata Groq", e);
       throw e;
     }
-
-    const requestId = response.headers.get('x-request-id') || undefined;
-    if (onProgress) onProgress(`Risposta HTTP ricevuta (status: ${response.status})`);
-
-    if (!response.ok) {
-      const errorData = await response.json().catch(() => ({}));
-      const errorMsg = errorData?.error?.message || response.statusText || "Errore sconosciuto";
-      log.error("Errore API Groq", { status: response.status, message: errorMsg, body: errorData });
-      throw new Error(`Errore API Groq: ${errorMsg} (status ${response.status})`);
-    }
-
-    const data = await response.json();
-
-    // Track usage
-    if (data.usage) {
-      const { prompt_tokens, completion_tokens } = data.usage;
-      trackUsage(model, prompt_tokens || 0, completion_tokens || 0);
-    }
-
-    const text = data.choices?.[0]?.message?.content || "";
-    return { text, requestId };
   };
 
   const baseInstruction = getGroqTranslateUserInstruction(pageNumber, sourceLanguage);
@@ -218,8 +280,8 @@ export const translateWithGroq = async (
     2,
     3000,
     (err, attempt) => {
-      if (onProgress) onProgress(`Errore temporaneo (Groq), tentativo ${attempt}/2 in corso...`);
-      log.warning(`Ritento Groq (attempt ${attempt}) causa errore transiente`, err);
+      if (onProgress) onProgress(`Errore temporaneo, tentativo ${attempt}/2 in corso...`);
+      log.warning(`Ritento ${model} (attempt ${attempt}) causa errore transiente`, err);
     },
     (err) => {
       const name = String((err as any)?.name || "");
@@ -229,8 +291,8 @@ export const translateWithGroq = async (
   );
 
   const elapsedMs = Math.round(performance.now() - startedAt);
-  log.recv(`Ricevuta traduzione Groq (${attempt1.text.length} caratteri)`, { elapsedMs, requestId: attempt1.requestId });
-  if (onProgress) onProgress(`Output pronto: ${attempt1.text.length} caratteri (tempo: ${elapsedMs}ms)`);
+  log.recv(`Ricevuta traduzione ${model} (${attempt1.text.length} caratteri)`, { elapsedMs, requestId: attempt1.requestId });
+  if (onProgress) onProgress(`Completato: ${attempt1.text.length} caratteri (tempo: ${elapsedMs}ms)`);
 
   if (skipPostProcessing) {
     return { text: attempt1.text || "", annotations: [], modelUsed: model, diagnosticPrompt: systemPrompt, diagnosticUserInstruction: effectiveInstruction };

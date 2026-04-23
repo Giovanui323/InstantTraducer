@@ -87,6 +87,15 @@ export const executePageTranslation = async (
     : aiSettings.provider === 'custom' ? 'Custom'
     : 'OpenAI';
 
+  const modelLabel = aiSettings.provider === 'gemini' ? aiSettings.gemini.model
+    : aiSettings.provider === 'claude' ? aiSettings.claude?.model
+    : aiSettings.provider === 'groq' ? aiSettings.groq?.model
+    : aiSettings.provider === 'modal' ? 'GLM-5.1'
+    : aiSettings.provider === 'zai' ? aiSettings.zai?.model
+    : aiSettings.provider === 'openrouter' ? aiSettings.openrouter?.model
+    : aiSettings.provider === 'custom' ? aiSettings.customProviders?.find(cp => cp.id === aiSettings.activeCustomProviderId)?.model
+    : aiSettings.openai.model;
+
   let imageData: string | undefined;
   let prevContext = '';
 
@@ -397,7 +406,7 @@ export const executePageTranslation = async (
     if (aiSettings.fullResolutionMode) {
       services.appendPageConsole(targetPage, `Modalità alta risoluzione attiva: immagine originale ~${Math.round(estimateBytesFromBase64(imageData) / 1024)}KB`);
     } else {
-      setters.updatePageStatus(targetPage, { loading: `Ottimizzazione immagini per ${providerLabel}...` });
+      setters.updatePageStatus(targetPage, { loading: `Ottimizzazione immagini per ${modelLabel || providerLabel}...` });
       try {
         aiReadyImageData = await downscaleBase64ForAI(imageData, AI_IMAGE_MAX_LONG_SIDE, AI_IMAGE_JPEG_QUALITY);
         if (prevPageImageBase64) {
@@ -412,8 +421,8 @@ export const executePageTranslation = async (
       services.appendPageConsole(targetPage, `Immagine AI: ~${Math.round(estimateBytesFromBase64(aiReadyImageData) / 1024)}KB (originale: ~${Math.round(estimateBytesFromBase64(imageData) / 1024)}KB)`);
     }
 
-    setters.updatePageStatus(targetPage, { loading: `In attesa di ${providerLabel}...` });
-    services.appendPageConsole(targetPage, `Preparazione richiesta ${providerLabel} completata. Invio in corso...`);
+    setters.updatePageStatus(targetPage, { loading: `In attesa di ${modelLabel || providerLabel}...` });
+    services.appendPageConsole(targetPage, `Preparazione richiesta ${providerLabel} completata. Modello: ${modelLabel || 'auto'}. Invio in corso...`);
 
     const callTranslation = async (imgBase64: string, customInstruction?: string) => {
       return await withTimeout(
@@ -500,7 +509,7 @@ export const executePageTranslation = async (
 
     // 1. Initial Draft (Minimally cleaned)
     let normalizedText = result.text;
-    const modelLabel = result.modelUsed || (
+    const resolvedModelLabel = result.modelUsed || (
       aiSettings.provider === 'gemini' ? aiSettings.gemini.model
       : aiSettings.provider === 'claude' ? aiSettings.claude?.model
       : aiSettings.provider === 'groq' ? aiSettings.groq?.model
@@ -517,7 +526,7 @@ export const executePageTranslation = async (
         page: targetPage,
         timestamp: Date.now(),
         provider: aiSettings.provider,
-        model: modelLabel,
+        model: resolvedModelLabel,
         sourceLanguage: docInputLanguage,
         systemPrompt: result.diagnosticPrompt || '(not captured by this provider)',
         userInstruction: result.diagnosticUserInstruction || '(not captured by this provider)',
@@ -530,7 +539,7 @@ export const executePageTranslation = async (
       });
     }
     const savedAt = Date.now();
-    const metaUpdate = { model: modelLabel, savedAt };
+    const metaUpdate = { model: resolvedModelLabel, savedAt };
 
     // Update UI immediately with draft so user sees progress
     setters.setTranslationMap(prev => ({ ...prev, [targetPage]: normalizedText }));
@@ -612,7 +621,7 @@ export const executePageTranslation = async (
     if (pdfTimeout) {
       message = `Timeout Rendering PDF (${Math.round(PAGE_RENDER_TIMEOUT_MS / 1000)}s) - Pagina ${targetPage}: la renderizzazione è troppo lenta o complessa. Prova a ritagliare/sostituire la pagina o riprova.`;
     } else if (aiTimeout) {
-      message = `Timeout globale AI (${Math.round(AI_TRANSLATION_TIMEOUT_MS / 1000)}s) - Pagina ${targetPage}: ${providerLabel} non ha risposto in tempo.`;
+      message = `Timeout globale AI (${Math.round(AI_TRANSLATION_TIMEOUT_MS / 1000)}s) - Pagina ${targetPage}: ${modelLabel || providerLabel} non ha risposto in tempo.`;
     } else if (err?.name === 'AbortError' || err?.code === 'ABORTED') {
       // Standard abort (e.g., from Watchdog Timeout or user manual stop)
       log.info(`[TRANSLATION] Pagina ${targetPage}: operazione annullata.`);

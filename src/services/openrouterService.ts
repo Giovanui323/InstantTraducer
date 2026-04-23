@@ -61,7 +61,7 @@ export const translateWithOpenRouter = async (
   apiKey: string,
   model: string,
   extraInstruction?: string,
-  onProgress?: (text: string) => void,
+  onProgress?: (text: string, partialText?: string) => void,
   signal?: AbortSignal,
   legalContext?: boolean,
   customPrompt?: string,
@@ -73,7 +73,7 @@ export const translateWithOpenRouter = async (
   const isRetry = Boolean(extraInstruction && extraInstruction.trim().length > 0);
   const systemPrompt = getOpenRouterTranslateSystemPrompt(sourceLanguage, previousContext, legalContext ?? true, isRetry, customPrompt, model);
 
-  if (onProgress) onProgress(`Preparazione richiesta OpenRouter (${model})...`);
+  if (onProgress) onProgress(`Preparazione richiesta (${model})`);
   log.wait(`[OPENROUTER-TRANSLATION] Richiesta (${model})...`, {
     imageKB: Math.round(Math.floor((imageBase64.length * 3) / 4) / 1024),
     systemPromptChars: systemPrompt.length,
@@ -138,22 +138,106 @@ export const translateWithOpenRouter = async (
       const requestBody: any = {
         models: fallbackModels,
         messages,
-        max_tokens: OPENROUTER_DEFAULT_MAX_OUTPUT
+        max_tokens: OPENROUTER_DEFAULT_MAX_OUTPUT,
+        stream: true,
       };
 
       // Abilita il reasoning per i modelli Claude 4.5+ / 4.6+ via OpenRouter.
-      // - Claude 4.6: reasoning.enabled = true → Adaptive Thinking (Claude decide autonomamente)
-      // - Claude 4.5: reasoning.enabled = true + max_tokens → Budget-based Thinking
-      // - Haiku e modelli precedenti: nessun parametro reasoning (causerebbe errore API)
       if (isOpenRouterClaudeModel(model) && openRouterClaudeSupportsReasoning(model)) {
         const is46 = model.toLowerCase().includes('4.6');
         requestBody.reasoning = is46
-          ? { enabled: true }                          // Adaptive Thinking (4.6+)
-          : { enabled: true, max_tokens: 8000 };       // Budget-based Thinking (4.5)
+          ? { enabled: true }
+          : { enabled: true, max_tokens: 8000 };
         log.info(`[OPENROUTER] Reasoning abilitato per ${model} (${is46 ? 'adaptive' : 'budget 8000 tok'})`);
       }
 
       response = await openrouterFetch(apiKey, '/chat/completions', requestBody, signal);
+
+      const requestId = response.headers.get('x-request-id') || undefined;
+
+      if (!response.ok) {
+        const errorData = await response.json().catch(() => ({}));
+        const errorMsg = errorData?.error?.message || response.statusText || "Errore sconosciuto";
+        log.error("Errore API OpenRouter", { status: response.status, message: errorMsg, body: errorData });
+        throw new Error(`Errore API OpenRouter: ${errorMsg} (status ${response.status})`);
+      }
+
+      if (!response.body) throw new Error("Stream non disponibile nella risposta OpenRouter");
+
+      // Parse SSE stream (OpenAI-compatible)
+      const reader = response.body.getReader();
+      const decoder = new TextDecoder();
+      let fullText = '';
+      let lastProgressAt = 0;
+      let lastNotifiedLength = 0;
+      let firstChunkAt: number | null = null;
+      const streamStartedAt = performance.now();
+      let buffer = '';
+      let usageData: any = null;
+
+      while (true) {
+        if (signal?.aborted) {
+          reader.cancel();
+          throw new Error("Operazione annullata");
+        }
+
+        const { done, value } = await reader.read();
+        if (done) break;
+
+        buffer += decoder.decode(value, { stream: true });
+        const lines = buffer.split('\n');
+        buffer = lines.pop() || '';
+
+        for (const line of lines) {
+          const trimmed = line.trim();
+          if (!trimmed || !trimmed.startsWith('data: ')) continue;
+          const dataStr = trimmed.slice(6);
+          if (dataStr === '[DONE]') continue;
+
+          try {
+            const parsed = JSON.parse(dataStr);
+            if (parsed.usage) usageData = parsed.usage;
+
+            const delta = parsed.choices?.[0]?.delta;
+            if (delta?.content) {
+              fullText += delta.content;
+
+              if (firstChunkAt === null) {
+                firstChunkAt = performance.now();
+                const ttftMs = Math.round(firstChunkAt - streamStartedAt);
+                const ttftS = Math.round((ttftMs / 1000) * 10) / 10;
+                if (onProgress) onProgress(`Prima risposta ricevuta dopo ${ttftS}s (${ttftMs}ms) [${model}]`);
+              }
+
+              if (fullText.length > 40000) {
+                log.warning(`Runaway generation (>40k caratteri) per pagina ${pageNumber}. Interruzione.`);
+                reader.cancel();
+                break;
+              }
+
+              const now = performance.now();
+              const deltaChars = fullText.length - lastNotifiedLength;
+              if (onProgress && (deltaChars >= 600 || now - lastProgressAt >= 900)) {
+                lastProgressAt = now;
+                lastNotifiedLength = fullText.length;
+                onProgress(`Streaming in corso: ${fullText.length} caratteri ricevuti`, fullText);
+              }
+            }
+          } catch { /* skip malformed SSE */ }
+        }
+      }
+
+      if (usageData) {
+        const { prompt_tokens, completion_tokens } = usageData;
+        trackUsage(model, prompt_tokens || 0, completion_tokens || 0);
+      }
+
+      if (!fullText.trim()) {
+        log.warning(`[OPENROUTER] Ricevuta risposta vuota (stream) da ${model}`);
+        throw new Error(`Ricevuta risposta vuota dal modello ${model} (OpenRouter)`);
+      }
+
+      return { text: fullText, requestId };
     } catch (e: any) {
       if (e?.name === 'AbortError') {
         log.warning("Richiesta OpenRouter annullata (AbortError).");
@@ -162,34 +246,6 @@ export const translateWithOpenRouter = async (
       log.error("Errore rete durante chiamata OpenRouter", e);
       throw e;
     }
-
-    const requestId = response.headers.get('x-request-id') || undefined;
-    if (onProgress) onProgress(`Risposta HTTP ricevuta (status: ${response.status})`);
-
-    if (!response.ok) {
-      const errorData = await response.json().catch(() => ({}));
-      const errorMsg = errorData?.error?.message || response.statusText || "Errore sconosciuto";
-      log.error("Errore API OpenRouter", { status: response.status, message: errorMsg, body: errorData });
-      throw new Error(`Errore API OpenRouter: ${errorMsg} (status ${response.status})`);
-    }
-
-    const data = await response.json();
-
-    // Track usage
-    if (data.usage) {
-      const { prompt_tokens, completion_tokens } = data.usage;
-      trackUsage(model, prompt_tokens || 0, completion_tokens || 0);
-    }
-
-    const content = data.choices?.[0]?.message?.content || "";
-    
-    // Se la risposta è vuota nonostante lo status 200, è un errore del modello/provider
-    if (content.trim().length === 0) {
-      log.warning(`[OPENROUTER] Ricevuta risposta vuota (status 200) da ${model}. Richiesta ID: ${requestId}`);
-      throw new Error(`Ricevuta risposta vuota dal modello ${model} (OpenRouter)`);
-    }
-
-    return { text: content, requestId };
   };
 
   // Usa la user instruction specifica per Claude (con etichette [PAGINA TARGET]) o quella universale
@@ -206,8 +262,8 @@ export const translateWithOpenRouter = async (
     2,
     3000,
     (err, attempt) => {
-      if (onProgress) onProgress(`Errore temporaneo (OpenRouter), tentativo ${attempt}/2 in corso...`);
-      log.warning(`Ritento OpenRouter (attempt ${attempt}) causa errore transiente`, err);
+      if (onProgress) onProgress(`Errore temporaneo, tentativo ${attempt}/2 in corso...`);
+      log.warning(`Ritento ${model} (attempt ${attempt}) causa errore transiente`, err);
     },
     (err) => {
       const name = String((err as any)?.name || "");
@@ -217,8 +273,8 @@ export const translateWithOpenRouter = async (
   );
 
   const elapsedMs = Math.round(performance.now() - startedAt);
-  log.recv(`Ricevuta traduzione OpenRouter (${attempt1.text.length} caratteri)`, { elapsedMs, requestId: attempt1.requestId });
-  if (onProgress) onProgress(`Output pronto: ${attempt1.text.length} caratteri (tempo: ${elapsedMs}ms)`);
+  log.recv(`Ricevuta traduzione ${model} (${attempt1.text.length} caratteri)`, { elapsedMs, requestId: attempt1.requestId });
+  if (onProgress) onProgress(`Completato: ${attempt1.text.length} caratteri (tempo: ${elapsedMs}ms)`);
 
   if (skipPostProcessing) {
     return { text: attempt1.text || "", annotations: [], modelUsed: model, diagnosticPrompt: systemPrompt, diagnosticUserInstruction: effectiveInstruction };

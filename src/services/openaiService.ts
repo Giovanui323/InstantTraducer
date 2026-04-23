@@ -34,7 +34,7 @@ export const translateWithOpenAI = async (
   effort: ReasoningEffort,
   verbosity: VerbosityLevel,
   extraInstruction?: string,
-  onProgress?: (text: string) => void,
+  onProgress?: (text: string, partialText?: string) => void,
   signal?: AbortSignal,
   legalContext?: boolean,
   customPrompt?: string,
@@ -46,7 +46,7 @@ export const translateWithOpenAI = async (
   const isRetry = Boolean(extraInstruction && extraInstruction.trim().length > 0);
   const systemPrompt = getOpenAITranslateSystemPrompt(sourceLanguage, previousContext, legalContext ?? true, isRetry, customPrompt, model);
 
-  if (onProgress) onProgress(`Preparazione richiesta OpenAI (${model})`);
+  if (onProgress) onProgress(`Preparazione richiesta (${model})`);
   log.wait(`[OPENAI-TRANSLATION] Richiesta (${model})...`, {
     effort,
     verbosity,
@@ -57,7 +57,6 @@ export const translateWithOpenAI = async (
   });
 
   const runAttempt = async (instruction: string): Promise<{ text: string; requestId?: string }> => {
-    let response: Response;
     try {
       const isO1 = model.startsWith('o1-') || model.startsWith('o3-');
       const messages = [
@@ -87,13 +86,14 @@ export const translateWithOpenAI = async (
       const body: any = {
         model: model,
         messages: messages,
+        stream: true,
       };
 
       if (isO1) {
         if (effort && effort !== 'none') body.reasoning_effort = effort;
       }
 
-      response = await fetch('https://api.openai.com/v1/chat/completions', {
+      const response = await fetch('https://api.openai.com/v1/chat/completions', {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
@@ -102,6 +102,94 @@ export const translateWithOpenAI = async (
         signal,
         body: JSON.stringify(body)
       });
+
+      const requestId =
+        response.headers.get('x-request-id') ||
+        response.headers.get('openai-request-id') ||
+        response.headers.get('x-openai-request-id') ||
+        undefined;
+
+      if (!response.ok) {
+        const errorData = await response.json().catch(() => ({}));
+        const errorMsg = errorData?.error?.message || response.statusText || "Errore sconosciuto";
+        log.error("Errore API OpenAI", { status: response.status, statusText: response.statusText, requestId, message: errorMsg, body: errorData });
+        throw new Error(`Errore API OpenAI: ${errorMsg} (status ${response.status})`);
+      }
+
+      if (!response.body) throw new Error("Stream non disponibile nella risposta OpenAI");
+
+      // Parse SSE stream
+      const reader = response.body.getReader();
+      const decoder = new TextDecoder();
+      let fullText = '';
+      let lastProgressAt = 0;
+      let lastNotifiedLength = 0;
+      let firstChunkAt: number | null = null;
+      const streamStartedAt = performance.now();
+      let buffer = '';
+      let usageData: any = null;
+
+      while (true) {
+        if (signal?.aborted) {
+          reader.cancel();
+          throw new Error("Operazione annullata");
+        }
+
+        const { done, value } = await reader.read();
+        if (done) break;
+
+        buffer += decoder.decode(value, { stream: true });
+        const lines = buffer.split('\n');
+        buffer = lines.pop() || '';
+
+        for (const line of lines) {
+          const trimmed = line.trim();
+          if (!trimmed || !trimmed.startsWith('data: ')) continue;
+          const dataStr = trimmed.slice(6);
+          if (dataStr === '[DONE]') continue;
+
+          try {
+            const parsed = JSON.parse(dataStr);
+
+            // Capture usage from final chunk
+            if (parsed.usage) usageData = parsed.usage;
+
+            const delta = parsed.choices?.[0]?.delta;
+            if (delta?.content) {
+              fullText += delta.content;
+
+              if (firstChunkAt === null) {
+                firstChunkAt = performance.now();
+                const ttftMs = Math.round(firstChunkAt - streamStartedAt);
+                const ttftS = Math.round((ttftMs / 1000) * 10) / 10;
+                if (onProgress) onProgress(`Prima risposta ricevuta dopo ${ttftS}s (${ttftMs}ms) [${model}]`);
+              }
+
+              if (fullText.length > 40000) {
+                log.warning(`Runaway generation rilevata (>40k caratteri) per pagina ${pageNumber}. Interruzione.`);
+                reader.cancel();
+                break;
+              }
+
+              const now = performance.now();
+              const deltaChars = fullText.length - lastNotifiedLength;
+              if (onProgress && (deltaChars >= 600 || now - lastProgressAt >= 900)) {
+                lastProgressAt = now;
+                lastNotifiedLength = fullText.length;
+                onProgress(`Streaming in corso: ${fullText.length} caratteri ricevuti`, fullText);
+              }
+            }
+          } catch { /* skip malformed SSE lines */ }
+        }
+      }
+
+      if (usageData) {
+        const { prompt_tokens, completion_tokens } = usageData;
+        trackUsage(model, prompt_tokens || 0, completion_tokens || 0);
+      }
+
+      if (!fullText) throw new Error("Risposta vuota");
+      return { text: fullText, requestId };
     } catch (e: any) {
       if (e?.name === 'AbortError') {
         log.warning("Richiesta OpenAI annullata (AbortError).");
@@ -110,38 +198,6 @@ export const translateWithOpenAI = async (
       log.error("Errore rete durante chiamata OpenAI", e);
       throw e;
     }
-
-    const requestId =
-      response.headers.get('x-request-id') ||
-      response.headers.get('openai-request-id') ||
-      response.headers.get('x-openai-request-id') ||
-      undefined;
-    if (onProgress) onProgress(`Risposta HTTP ricevuta (status: ${response.status}${requestId ? `, request_id: ${requestId}` : ''})`);
-
-    if (!response.ok) {
-      const errorData = await response.json().catch(() => ({}));
-      const errorMsg = errorData?.error?.message || response.statusText || "Errore sconosciuto";
-      log.error("Errore API OpenAI", { 
-        status: response.status, 
-        statusText: response.statusText, 
-        requestId, 
-        message: errorMsg,
-        body: errorData 
-      });
-      throw new Error(`Errore API OpenAI: ${errorMsg} (status ${response.status})`);
-    }
-
-    const data = await response.json();
-    const text = data.choices?.[0]?.message?.content || "";
-    
-    // Track usage
-    if (data.usage) {
-      const { prompt_tokens, completion_tokens } = data.usage;
-      trackUsage(model, prompt_tokens || 0, completion_tokens || 0);
-    }
-    
-    if (!text) throw new Error("Risposta vuota");
-    return { text, requestId };
   };
 
   const baseInstruction = getOpenAITranslateUserInstruction(pageNumber, sourceLanguage);
@@ -160,7 +216,7 @@ export const translateWithOpenAI = async (
       }
     );
     
-    if (onProgress) onProgress(`Output pronto: ${data.text.length} caratteri (tempo: ${Math.round(performance.now() - startedAt)}ms)`);
+    if (onProgress) onProgress(`Completato: ${data.text.length} caratteri (tempo: ${Math.round(performance.now() - startedAt)}ms)`);
 
     if (skipPostProcessing) {
       return { text: data.text || "", annotations: [], modelUsed: model, diagnosticPrompt: systemPrompt, diagnosticUserInstruction: effectiveInstruction };

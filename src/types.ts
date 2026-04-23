@@ -46,7 +46,7 @@ export interface CustomModel {
 export type OpenAIModel = string;
 export type ReasoningEffort = 'none' | 'low' | 'medium' | 'high';
 export type VerbosityLevel = 'low' | 'medium' | 'high';
-export type SettingsSection = 'aiRoles' | 'apiKeys' | 'testAi' | 'prompts' | 'translationLogic' | 'costs' | 'libraryTrash' | 'exportApp' | 'logsDiagnostic' | 'admin' | 'modelsInUse' | 'userPermissions' | 'userApiKeys';
+export type SettingsSection = 'aiRoles' | 'apiKeys' | 'testAi' | 'modelBenchmark' | 'prompts' | 'translationLogic' | 'costs' | 'libraryTrash' | 'exportApp' | 'logsDiagnostic' | 'admin' | 'modelsInUse' | 'userPermissions' | 'userApiKeys';
 
 /**
  * Permessi che l'admin concede agli utenti non-admin.
@@ -153,6 +153,8 @@ export interface AISettings {
   fullResolutionMode?: boolean;
   /** Opzione globale per splittare le pagine a doppia colonna */
   splitDoubleColumns?: boolean;
+  /** Numero di volumi mostrati per pagina nella home (default: 20, 0 = tutti) */
+  booksPerPage?: number;
 }
 
 export type VerificationState = 'idle' | 'verifying' | 'verified' | 'failed';

@@ -2981,6 +2981,8 @@ const App: React.FC = () => {
             isLibraryView={isHomeView}
             currentBookTitle={metadata?.name}
             showConfirm={showConfirm}
+            getPageImage={getContextImageBase64}
+            totalPages={pdfDoc?.numPages || metadata?.totalPages || 0}
           />
         )}
 
