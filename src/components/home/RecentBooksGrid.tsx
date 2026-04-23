@@ -428,23 +428,30 @@ export const RecentBooksGrid: React.FC<RecentBooksGridProps> = ({
                       <span>{new Date(book.timestamp).toLocaleDateString()}</span>
                     </div>
                     {book.groups && book.groups.length > 0 && (
-                      <div className="mt-1.5 flex items-center gap-1 overflow-hidden">
-                        {book.groups.slice(0, 2).map((groupId: string) => {
-                          const groupObj = availableGroups?.find(g => g.id === groupId);
-                          const groupName = groupObj ? groupObj.name : groupId;
-                          return (
-                            <span
-                              key={groupId}
-                              className="text-[9px] bg-accent/[0.06] text-accent/80 px-1.5 py-px rounded border border-accent/15 truncate max-w-[80px] tracking-tight"
-                            >
-                              {groupName}
-                            </span>
-                          );
-                        })}
-                        {book.groups.length > 2 && (
-                          <span className="text-[9px] text-txt-faint shrink-0">+{book.groups.length - 2}</span>
-                        )}
-                      </div>
+                      (() => {
+                        const validGroups = book.groups
+                          .map((groupId: string) => availableGroups?.find(g => g.id === groupId))
+                          .filter((g: any) => Boolean(g));
+
+                        if (validGroups.length === 0) return null;
+
+                        return (
+                          <div className="mt-1.5 flex items-center gap-1 overflow-hidden">
+                            {validGroups.slice(0, 2).map((groupObj: any) => (
+                              <span
+                                key={groupObj.id}
+                                title={groupObj.name}
+                                className="text-[9px] bg-accent/[0.06] text-accent/80 px-1.5 py-px rounded border border-accent/15 truncate max-w-[80px] tracking-tight"
+                              >
+                                {groupObj.name}
+                              </span>
+                            ))}
+                            {validGroups.length > 2 && (
+                              <span className="text-[9px] text-txt-faint shrink-0">+{validGroups.length - 2}</span>
+                            )}
+                          </div>
+                        );
+                      })()
                     )}
                     {isActive && (
                       <div className="mt-1.5" onClick={(e) => e.stopPropagation()}>
