@@ -236,9 +236,10 @@ export const useVerificationQueue = ({
             // Reset isAborting dopo un breve delay per permettere alle async task di terminare
             setTimeout(() => {
                 isAbortingRef.current = false;
+                void pumpQueue(); // Resume processing items enqueued during the abort window
             }, 100);
         }
-    }, []);
+    }, [pumpQueue]);
 
     return {
         enqueueVerification,

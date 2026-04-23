@@ -728,9 +728,10 @@ export const useTranslationQueue = ({
             // Reset isAborting dopo un breve delay per permettere alle async task di terminare
             setTimeout(() => {
                 isAbortingRef.current = false;
+                void pumpQueue(); // Resume processing items enqueued during the abort window
             }, 100);
         }
-    }, [clearQueue]);
+    }, [clearQueue, pumpQueue]);
 
     const setExtraInstruction = useCallback((page: number, extraInstruction: string | undefined) => {
         if (!Number.isFinite(page)) return;

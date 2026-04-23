@@ -44,7 +44,7 @@ export const RecentBooksGrid: React.FC<RecentBooksGridProps> = ({
   isOpeningProject,
   onCreateNewProject
 }) => {
-  const { recentBooks, selectedGroupFilters, currentProjectFileId } = useLibrary();
+  const { recentBooks, selectedGroupFilters, currentProjectFileId, availableGroups } = useLibrary();
   const [openingFileId, setOpeningFileId] = useState<string | null>(null);
   const [searchTerm, setSearchTerm] = useState('');
   const [menuPosition, setMenuPosition] = useState<{top: number; left: number} | null>(null);
@@ -429,14 +429,18 @@ export const RecentBooksGrid: React.FC<RecentBooksGridProps> = ({
                     </div>
                     {book.groups && book.groups.length > 0 && (
                       <div className="mt-1.5 flex items-center gap-1 overflow-hidden">
-                        {book.groups.slice(0, 2).map((g: string) => (
-                          <span
-                            key={g}
-                            className="text-[9px] bg-accent/[0.06] text-accent/80 px-1.5 py-px rounded border border-accent/15 truncate max-w-[80px] tracking-tight"
-                          >
-                            {g}
-                          </span>
-                        ))}
+                        {book.groups.slice(0, 2).map((groupId: string) => {
+                          const groupObj = availableGroups?.find(g => g.id === groupId);
+                          const groupName = groupObj ? groupObj.name : groupId;
+                          return (
+                            <span
+                              key={groupId}
+                              className="text-[9px] bg-accent/[0.06] text-accent/80 px-1.5 py-px rounded border border-accent/15 truncate max-w-[80px] tracking-tight"
+                            >
+                              {groupName}
+                            </span>
+                          );
+                        })}
                         {book.groups.length > 2 && (
                           <span className="text-[9px] text-txt-faint shrink-0">+{book.groups.length - 2}</span>
                         )}

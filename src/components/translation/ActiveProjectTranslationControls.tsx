@@ -114,7 +114,7 @@ export const ActiveProjectTranslationControls: React.FC<Props> = ({
             </button>
 
             {showList && queueStats?.details && queueStats.details.length > 0 && (
-              <div ref={listRef} className="absolute bottom-full mb-3 left-1/2 -translate-x-1/2 glass-panel rounded-xl p-2 min-w-[180px] max-h-[300px] overflow-y-auto z-[300] animate-fade-in-scale custom-scrollbar">
+              <div ref={listRef} className="absolute bottom-full mb-3 -right-2 glass-panel rounded-xl p-2 min-w-[180px] max-h-[300px] overflow-y-auto z-[300] animate-fade-in-scale custom-scrollbar origin-bottom-right">
                 {activeItems.length > 0 && (
                   <>
                     <div className="text-[9px] text-txt-secondary mb-1 px-2 font-bold uppercase tracking-wider flex items-center justify-between sticky top-0 bg-surface-2/95 backdrop-blur-xl pb-1 border-b border-border-muted">
