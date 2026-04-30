@@ -5,11 +5,20 @@ export const INLINE_PATTERN = '\\*\\*[\\s\\S]*?\\*\\*|\\*[\\s\\S]*?\\*|__[\\s\\S
 export const getInlineSplitRegex = () => new RegExp(`(${INLINE_PATTERN})`, 'g');
 export const getSplitRegex = () => new RegExp(`(${INLINE_PATTERN}|\\[FIGURA:.*?\\])`, 'g');
 
+export function isMarkdownTable(text: string): boolean {
+  const lines = text.trim().split('\n');
+  if (lines.length < 2) return false;
+  if (!lines[0].includes('|')) return false;
+  const separator = lines[1].trim();
+  return /^\|?(?:\s*[:-]+[-| :]*)+\|?$/.test(separator) && separator.includes('-');
+}
+
 export function buildSelectableText(text: string, preserveLayout: boolean) {
   const paragraphs = text.split(/\n\s*\n/);
   const out: string[] = [];
   for (const raw of paragraphs) {
-    const paragraphText = preserveLayout ? raw : raw.replace(/\n+/g, ' ').replace(/\s{2,}/g, ' ').trim();
+    const isTable = isMarkdownTable(raw);
+    const paragraphText = (preserveLayout || isTable) ? raw : raw.replace(/\n+/g, ' ').replace(/\s{2,}/g, ' ').trim();
     if (!paragraphText) continue;
     const plain = plainFromParagraph(paragraphText);
     // Skip paragraphs that are entirely ignored (like Figures) to match MarkdownText.tsx rendering

@@ -2,7 +2,7 @@ import React, { useRef, useEffect } from 'react';
 import { Image as ImageIcon, MessageSquare } from 'lucide-react';
 import { UserHighlight, UserNote } from '../types';
 import { computeOffsets, computeOffsetsWithContext, normalizeHighlights } from '../utils/textSelection';
-import { buildSelectableText, getInlineSplitRegex, getSplitRegex, resolveHighlightsByQuote } from '../utils/highlightSelectors';
+import { buildSelectableText, getInlineSplitRegex, getSplitRegex, resolveHighlightsByQuote, isMarkdownTable } from '../utils/highlightSelectors';
 import { normalizeTextForRendering } from '../utils/textUtils';
 import { sanitizeHTML, validateSelectionRange } from '../utils/securityUtils';
 import { debounce } from '../utils/performanceUtils';
@@ -248,12 +248,15 @@ export const MarkdownText: React.FC<MarkdownTextProps> = ({
       startOffset: number;
       partOffsets: number[];
       isFirst: boolean;
+      isTable: boolean;
+      text: string;
     }> = [];
 
     for (const paragraph of paragraphs) {
-      const paragraphText = preserveLayout ? paragraph : paragraph.replace(/\n+/g, ' ').replace(/\s{2,}/g, ' ').trim();
+      const isTable = isMarkdownTable(paragraph);
+      const paragraphText = (preserveLayout || isTable) ? paragraph : paragraph.replace(/\n+/g, ' ').replace(/\s{2,}/g, ' ').trim();
       if (!paragraphText) {
-        paragraphMeta.push({ startOffset: offset, partOffsets: [], isFirst: false });
+        paragraphMeta.push({ startOffset: offset, partOffsets: [], isFirst: false, isTable: false, text: '' });
         continue;
       }
 
@@ -269,24 +272,32 @@ export const MarkdownText: React.FC<MarkdownTextProps> = ({
         }
       }
 
-      const partOffsets: number[] = [];
-      for (const part of parts) {
-        partOffsets.push(offset);
-        const partInfo = calculateVisibleLength(part);
-        offset += partInfo.length;
-
-        // Track inline notes — must traverse the same nested markdown that
-        // renderInlineMarkdown walks, otherwise notes inside **[[..|..]]** or
-        // *[[..|..]]* are missed and downstream NoteList offsets desync.
-        if (partInfo.notesCount > 0) {
-          collectInlineNotes(part, (word, comment) => {
+      if (isTable) {
+        const info = calculateVisibleLength(paragraphText);
+        if (info.notesCount > 0) {
+          collectInlineNotes(paragraphText, (word, comment) => {
             noteNum += 1;
             inlineNotes.push({ n: noteNum, word, comment });
           });
         }
-      }
+        paragraphMeta.push({ startOffset: offset, partOffsets: [], isFirst: isFirstRendered, isTable: true, text: paragraphText });
+        offset += info.length;
+      } else {
+        const partOffsets: number[] = [];
+        for (const part of parts) {
+          partOffsets.push(offset);
+          const partInfo = calculateVisibleLength(part);
+          offset += partInfo.length;
 
-      paragraphMeta.push({ startOffset: partOffsets[0] ?? offset, partOffsets, isFirst: isFirstRendered });
+          if (partInfo.notesCount > 0) {
+            collectInlineNotes(part, (word, comment) => {
+              noteNum += 1;
+              inlineNotes.push({ n: noteNum, word, comment });
+            });
+          }
+        }
+        paragraphMeta.push({ startOffset: partOffsets[0] ?? offset, partOffsets, isFirst: isFirstRendered, isTable: false, text: paragraphText });
+      }
     }
 
     // Compute the final offset after all paragraphs (this is what globalVisibleOffset would be)
@@ -660,18 +671,33 @@ export const MarkdownText: React.FC<MarkdownTextProps> = ({
     }}>
       <div ref={bodyRef} className="flex-1">
         {paragraphs.map((paragraph, pIndex) => {
-          const paragraphText = preserveLayout ? paragraph : paragraph.replace(/\n+/g, ' ').replace(/\s{2,}/g, ' ').trim();
-          if (!paragraphText) return null;
+          const meta = precomputed.paragraphMeta[pIndex];
+          if (!meta || !meta.text) return null;
 
-          const parts = paragraphText.split(splitRegex);
+          if (meta.isTable) {
+            return renderTable(
+              meta.text,
+              pIndex,
+              renderTextWithHighlights,
+              meta.startOffset,
+              isDark,
+              isSepia,
+              registerNote,
+              searchTerm,
+              activeResultId,
+              pageNumber,
+              () => pageMatchCounter++,
+              getNoteNumber
+            );
+          }
+
+          const parts = meta.text.split(splitRegex);
           const hasBlockElements = parts.some(p => p.startsWith('[FIGURA:') && p.endsWith(']'));
           const isIgnoredParagraph = hasBlockElements && parts.length === 1;
 
-          // Use pre-computed offsets
-          const meta = precomputed.paragraphMeta[pIndex];
-          const isFirstRendered = meta?.isFirst ?? false;
+          const isFirstRendered = meta.isFirst;
 
-          const looksLikeHeading = /^\s*(\d+\.|[IVXLC]+\.|CAPITOLO\b|ART\.|Art\.)/.test(paragraphText);
+          const looksLikeHeading = /^\s*(\d+\.|[IVXLC]+\.|CAPITOLO\b|ART\.|Art\.)/.test(meta.text);
           const Container = hasBlockElements ? 'div' : 'p';
           const alignClass = align === 'left' ? 'text-left' : 'text-justify';
           const headingSpacingClass = looksLikeHeading ? (isFirstRendered ? ' mt-0' : ' mt-5') : '';
@@ -852,7 +878,7 @@ function renderInlineMarkdown(
 
 function renderPart(
   part: string,
-  key: number,
+  key: number | string,
   registerNote: (word: string, comment: string) => number,
   searchTerm?: string,
   dark?: boolean,
@@ -955,3 +981,110 @@ function renderPart(
   const startOffset = (paragraphStartOffset || 0);
   return <span key={key}>{renderTextWithHighlights ? renderTextWithHighlights(part, startOffset) : part}</span>;
 }
+
+function tokenizeTableLine(line: string) {
+  const tokens = line.split(/(\|)/); 
+  const cells: { prefix: string, content: string, suffix: string }[] = [];
+  
+  let currentPrefix = '';
+  
+  for (let i = 0; i < tokens.length; i++) {
+    const t = tokens[i];
+    if (t === '|') {
+      currentPrefix += t;
+    } else {
+      const match = t.match(/^(\s*)(.*?)(\s*)$/);
+      if (match && match[2].length > 0) {
+         cells.push({ prefix: currentPrefix + match[1], content: match[2], suffix: match[3] });
+         currentPrefix = '';
+      } else {
+         currentPrefix += t;
+      }
+    }
+  }
+  
+  if (cells.length > 0) {
+    cells[cells.length - 1].suffix += currentPrefix;
+  } else {
+    cells.push({ prefix: '', content: '', suffix: currentPrefix });
+  }
+  return cells;
+}
+
+function renderTable(
+  paragraphText: string,
+  keyPrefix: number,
+  renderTextWithHighlights: any,
+  paragraphStartOffset: number,
+  dark: boolean,
+  isSepia: boolean,
+  registerNote: (word: string, comment: string) => number,
+  searchTerm?: string,
+  activeResultId?: string | null,
+  pageNumber?: number,
+  getNextMatchIdx?: () => number,
+  getNoteNumber?: () => number
+) {
+  const rawLines = paragraphText.split('\n');
+  const lines = rawLines.map((l, i) => l + (i < rawLines.length - 1 ? '\n' : ''));
+  
+  let currentOffset = paragraphStartOffset;
+  const inlineRegex = getInlineSplitRegex();
+  
+  return (
+    <div className="overflow-x-auto my-6 custom-scrollbar shadow-elev-1 rounded-lg border border-white/[0.05]" key={`table-${keyPrefix}`}>
+      <table className="w-full text-left border-collapse text-[0.9em] m-0">
+        <tbody className="align-baseline">
+          {lines.map((line, lineIdx) => {
+            if (lineIdx === 1 && /^\|?(?:\s*[:-]+[-| :]*)+\|?\s*\n?$/.test(line)) {
+               const len = calculateVisibleLength(line).length;
+               const res = (
+                 <tr key={lineIdx} className="sr-only">
+                   <td>{renderPart(line, `${keyPrefix}-${lineIdx}`, registerNote, searchTerm, dark, renderTextWithHighlights, currentOffset, activeResultId, pageNumber, getNextMatchIdx, getNoteNumber, isSepia)}</td>
+                 </tr>
+               );
+               currentOffset += len;
+               return res;
+            }
+            
+            const cells = tokenizeTableLine(line);
+            const isHeader = lineIdx === 0;
+            
+            return (
+              <tr key={lineIdx} className={`border-b ${dark ? 'border-reader-dark-border' : (isSepia ? 'border-reader-sepia-border' : 'border-reader-light-border')} hover:bg-black/[0.02] dark:hover:bg-white/[0.02] transition-colors`}>
+                {cells.map((cell, cellIdx) => {
+                  const prefixLen = cell.prefix.length;
+                  const contentLen = calculateVisibleLength(cell.content).length;
+                  const suffixLen = cell.suffix.length;
+                  const CellTag = isHeader ? 'th' : 'td';
+                  
+                  const subParts = cell.content.split(inlineRegex);
+                  let cellInternalOffset = currentOffset + prefixLen;
+                  
+                  const contentNodes = subParts.map((sub, subIdx) => {
+                    if (!sub) return null;
+                    const res = renderPart(sub, `${keyPrefix}-${lineIdx}-${cellIdx}-${subIdx}`, registerNote, searchTerm, dark, renderTextWithHighlights, cellInternalOffset, activeResultId, pageNumber, getNextMatchIdx, getNoteNumber, isSepia);
+                    cellInternalOffset += calculateVisibleLength(sub).length;
+                    return res;
+                  });
+                  
+                  const res = (
+                    <CellTag key={cellIdx} className={`py-3 px-4 ${isHeader ? 'font-semibold bg-black/[0.03] dark:bg-white/[0.03]' : ''} align-middle`}>
+                      <span className="sr-only whitespace-pre font-mono">{cell.prefix}</span>
+                      {contentNodes}
+                      <span className="sr-only whitespace-pre font-mono">{cell.suffix}</span>
+                    </CellTag>
+                  );
+                  
+                  currentOffset += prefixLen + contentLen + suffixLen;
+                  return res;
+                })}
+              </tr>
+            );
+          })}
+        </tbody>
+      </table>
+    </div>
+  );
+}
+
