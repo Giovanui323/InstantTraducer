@@ -104,6 +104,7 @@ const App: React.FC = () => {
   // --- Core State ---
   const [pdfDoc, setPdfDoc] = useState<pdfjsLib.PDFDocumentProxy | null>(null);
   const pdfDocsCacheRef = useRef<Record<string, pdfjsLib.PDFDocumentProxy>>({});
+  const pdfSourcesRef = useRef<import('./types').SourcePdf[]>([]);
 
   // --- Refs ---
   const originalImagesRef = useRef<Record<number, string>>({});
@@ -162,6 +163,7 @@ const App: React.FC = () => {
         try { doc.destroy().catch(() => { }); } catch { }
       });
       pdfDocsCacheRef.current = {};
+      pdfSourcesRef.current = [];
 
       // RAM Optimization: Revoca tutti i Blob URL per liberare memoria
       [originalImages, croppedImages, previewThumbnails].forEach(map => {
@@ -197,24 +199,24 @@ const App: React.FC = () => {
   }, []);
 
   const getPdfDocForPage = useCallback((logicalPage: number): pdfjsLib.PDFDocumentProxy | null => {
-    const project = library.recentBooks[library.currentProjectFileId || ''];
-    if (project?.pdfSources && project.pdfSources.length > 0) {
-      const resolved = resolveSourceForPage(project.pdfSources, logicalPage);
+    const pdfSourcesInfo = pdfSourcesRef.current;
+    if (pdfSourcesInfo && pdfSourcesInfo.length > 0) {
+      const resolved = resolveSourceForPage(pdfSourcesInfo, logicalPage);
       if (resolved) return pdfDocsCacheRef.current[resolved.source.sourceId] || pdfDoc;
     }
     return pdfDoc;
-  }, [pdfDoc, library.currentProjectFileId, library.recentBooks]);
+  }, [pdfDoc]);
 
   const getDocForPage = useCallback((logicalPage: number): { doc: pdfjsLib.PDFDocumentProxy; physicalPage: number } => {
-    const project = library.recentBooks[library.currentProjectFileId || ''];
-    if (project?.pdfSources && project.pdfSources.length > 0) {
-      const resolved = resolveSourceForPage(project.pdfSources, logicalPage);
+    const pdfSourcesInfo = pdfSourcesRef.current;
+    if (pdfSourcesInfo && pdfSourcesInfo.length > 0) {
+      const resolved = resolveSourceForPage(pdfSourcesInfo, logicalPage);
       if (resolved && pdfDocsCacheRef.current[resolved.source.sourceId]) {
         return { doc: pdfDocsCacheRef.current[resolved.source.sourceId], physicalPage: resolved.physicalPage };
       }
     }
     return { doc: pdfDoc!, physicalPage: logicalPage };
-  }, [pdfDoc, library.currentProjectFileId, library.recentBooks]);
+  }, [pdfDoc]);
 
   const { aiSettings, isSettingsOpen, setIsSettingsOpen, saveSettings, isApiConfigured, settingsLoaded } = useAiSettings();
 
@@ -997,7 +999,9 @@ const App: React.FC = () => {
     currentProjectFileId: library.currentProjectFileId,
     loadReplacementPdfDoc: getCachedReplacementPdfDoc,
     renderDocPageToJpeg,
-    verificationMapRef // Pass the shared ref
+    verificationMapRef, // Pass the shared ref
+    pdfDocsCacheRef,
+    pdfSourcesRef
   });
 
   // KILL SWITCH: Log only, but do not kill adjacent pages to isolate errors.
@@ -1155,6 +1159,7 @@ const App: React.FC = () => {
     // Clearing the PDF document stops the rendering loop in useEffect
     setPdfDoc(null);
     pdfDocsCacheRef.current = {};
+    pdfSourcesRef.current = [];
     setInternalSevereError(false);
     isProjectLoadedRef.current = false;
 
@@ -1471,8 +1476,10 @@ const App: React.FC = () => {
                 }
               }
               pdfDocsCacheRef.current = cache;
+              pdfSourcesRef.current = data.pdfSources;
             } else {
               pdfDocsCacheRef.current = {};
+              pdfSourcesRef.current = [];
             }
 
             // FIX: Ensure totalPages is synced to disk if it differs from JSON

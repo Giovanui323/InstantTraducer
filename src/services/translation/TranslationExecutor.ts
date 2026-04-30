@@ -254,7 +254,18 @@ export const executePageTranslation = async (
         const jpegQuality = aiSettings.provider === 'gemini' ? 0.92 : 0.9;
 
         try {
-          const result = await renderDocPageWithFallback(pdfDoc, targetPage, {
+          // Multi-source: resolve correct PDF doc and physical page
+          let renderDoc = pdfDoc;
+          let renderPage = targetPage;
+          if (context.pdfSources && context.pdfSources.length > 0 && context.pdfDocsCache) {
+            const resolved = resolveSourceForPage(context.pdfSources, targetPage);
+            if (resolved && context.pdfDocsCache[resolved.source.sourceId]) {
+              renderDoc = context.pdfDocsCache[resolved.source.sourceId];
+              renderPage = resolved.physicalPage;
+            }
+          }
+
+          const result = await renderDocPageWithFallback(renderDoc, renderPage, {
             scale: baseRenderScale,
             jpegQuality,
             extraRotation: context.pageRotations?.[targetPage] || 0,
@@ -370,7 +381,17 @@ export const executePageTranslation = async (
       // Tentiamo SEMPRE di recuperare il testo originale per arricchire il contesto (se pagina > 1)
       if (targetPage > 1 && pdfDoc) {
         try {
-          const prevPage = await pdfDoc.getPage(targetPage - 1);
+          // Multi-source: resolve the correct PDF doc for the previous page
+          let prevDoc = pdfDoc;
+          let prevPhysicalPage = targetPage - 1;
+          if (context.pdfSources && context.pdfSources.length > 0 && context.pdfDocsCache) {
+            const resolved = resolveSourceForPage(context.pdfSources, targetPage - 1);
+            if (resolved && context.pdfDocsCache[resolved.source.sourceId]) {
+              prevDoc = context.pdfDocsCache[resolved.source.sourceId];
+              prevPhysicalPage = resolved.physicalPage;
+            }
+          }
+          const prevPage = await prevDoc.getPage(prevPhysicalPage);
           const textContent = await prevPage.getTextContent();
           prevOriginalText = textContent.items
             .map((item: any) => item.str)

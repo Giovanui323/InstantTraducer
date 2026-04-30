@@ -35,6 +35,8 @@ interface UseAppTranslationProps {
   isConsultationMode: boolean;
   currentProjectFileId: string | null;
   verificationMapRef: React.MutableRefObject<Record<number, PageVerification>>;
+  pdfDocsCacheRef?: React.MutableRefObject<Record<string, any>>;
+  pdfSourcesRef?: React.MutableRefObject<any[]>;
 }
 
 export const useAppTranslation = ({
@@ -66,7 +68,9 @@ export const useAppTranslation = ({
   isPaused,
   isConsultationMode,
   currentProjectFileId,
-  verificationMapRef
+  verificationMapRef,
+  pdfDocsCacheRef,
+  pdfSourcesRef
 }: UseAppTranslationProps) => {
   const [translationMap, _setTranslationMap] = useState<Record<number, string>>({});
   const [translationsMeta, setTranslationsMeta] = useState<Record<number, { model: string; savedAt: number }>>({});
@@ -201,7 +205,9 @@ export const useAppTranslation = ({
       pageRotations: pageRotationsRef.current,
       pageImagesIndex: pageImagesIndexRef.current,
       translationMap: translationMapRef.current,
-      verificationMap: propsRef.current.verificationMapRef.current
+      verificationMap: propsRef.current.verificationMapRef.current,
+      pdfDocsCache: pdfDocsCacheRef?.current,
+      pdfSources: pdfSourcesRef?.current
     };
 
     const setters: TranslationExecutionStateSetters = {

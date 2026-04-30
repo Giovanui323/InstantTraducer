@@ -45,6 +45,7 @@ declare global {
       copyOriginalPdf: (args: { fileId: string; sourcePath: string; fileName?: string }) => Promise<{ success: boolean; fileId?: string; path?: string; error?: string }>;
       saveOriginalPdfBuffer: (args: { fileId: string; buffer: Uint8Array; fileName?: string }) => Promise<{ success: boolean; fileId?: string; isDuplicate?: boolean; fileName?: string; path?: string; error?: string }>;
       exportOriginalPdf: (fileId: string) => Promise<{ success: boolean; path?: string; canceled?: boolean; error?: string }>;
+      appendPdfToProject: (args: { fileId: string; buffer: ArrayBuffer; fileName: string; sourceId?: string }) => Promise<{ success: boolean; fileId?: string; sourceId?: string; path?: string; pdfSources?: any[]; error?: string }>;
       getOriginalPdfPath: (fileId: string) => Promise<{ success: boolean; path?: string; error?: string }>;
       calculateFileFingerprint: (filePath: string) => Promise<string | null>;
       exportProjectPackage: (args: { fileId: string }) => Promise<{ success: boolean; path?: string; error?: string; cancelled?: boolean }>;
