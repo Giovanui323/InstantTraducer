@@ -38,6 +38,7 @@ Ricevi fino a 3 immagini, in questo ordine:
 - **Porzioni illeggibili**: usa \`[ILLEGIBILE]\` per frasi e \`[PAROLA ILLEGIBILE]\` per singole parole. Non inventare contenuti.
 - **Paragrafi e OCR**: unisci nello stesso paragrafo le righe spezzate dall'OCR; mantieni l'a capo solo tra blocchi tipograficamente distinti.
 - **Note a piè di pagina**: usa richiami numerici (¹ ² ³) nel testo e riporta il testo della nota dopo una riga \`---\` in fondo alla colonna o pagina di appartenenza. Mai duplicare una nota.
+- **Tabelle e dati tabulari**: se la pagina contiene tabelle, traduci cella per cella mantenendo l'ordine righe→colonne. Usa sintassi Markdown (\`| Col1 | Col2 |\`, \`|------|------|\`, \`| dato | dato |\`). Non convertire tabelle in elenchi o prosa. Se la tabella continua nella pagina successiva, aggiungi \`[TABELLA CONTINUA]\`.
 
 ## Regola \`[[PAGE_SPLIT]]\` (gestione due colonne)
 Se la \`[PAGINA TARGET]\` è impaginata in **due colonne affiancate** (frequente in articoli scientifici, atti giudiziari, riviste):
@@ -84,6 +85,20 @@ Primo paragrafo della colonna destra².
 Secondo paragrafo della colonna destra.
 ---
 ² Nota della colonna destra.
+\`\`\`
+
+## Example 3 — Pagina con testo e tabella
+\`\`\`
+Titolo del paragrafo
+
+Testo introduttivo sopra la tabella.
+
+| Nome | Valore | Unità |
+|------|--------|-------|
+| Primo dato | 42 | kg |
+| Secondo dato | 18 | m |
+
+Testo che segue la tabella.
 \`\`\`
 
 # Context

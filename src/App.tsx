@@ -29,6 +29,7 @@ import {
   ensureJsonExtension,
   requireUuidV4FileId
 } from './utils';
+import { resolveSourceForPage } from './utils/pdfSourceUtils';
 
 // Types
 import { AISettings, PDFMetadata, PageReplacement, PageAnnotation, PageVerification } from './types';
@@ -55,8 +56,11 @@ import {
   MainToolbar,
   PagePreviewStrip,
   GlobalLoadingOverlay,
-  SplashScreen
+  SplashScreen,
+  AddPagesModal
 } from './components';
+
+import { remapPageData } from './utils/pageRemapping';
 
 import { PAGE_RENDER_TIMEOUT_MS } from './constants';
 
@@ -99,6 +103,7 @@ const App: React.FC = () => {
 
   // --- Core State ---
   const [pdfDoc, setPdfDoc] = useState<pdfjsLib.PDFDocumentProxy | null>(null);
+  const pdfDocsCacheRef = useRef<Record<string, pdfjsLib.PDFDocumentProxy>>({});
 
   // --- Refs ---
   const originalImagesRef = useRef<Record<number, string>>({});
@@ -152,6 +157,12 @@ const App: React.FC = () => {
       });
       cachedReplacementDocsRef.current = {};
 
+      // Pulizia cache PDF multi-source
+      Object.values(pdfDocsCacheRef.current).forEach(doc => {
+        try { doc.destroy().catch(() => { }); } catch { }
+      });
+      pdfDocsCacheRef.current = {};
+
       // RAM Optimization: Revoca tutti i Blob URL per liberare memoria
       [originalImages, croppedImages, previewThumbnails].forEach(map => {
         Object.values(map).forEach(url => {
@@ -184,6 +195,27 @@ const App: React.FC = () => {
     cachedReplacementDocsRef.current[filePath] = doc;
     return doc;
   }, []);
+
+  const getPdfDocForPage = useCallback((logicalPage: number): pdfjsLib.PDFDocumentProxy | null => {
+    const project = library.recentBooks[library.currentProjectFileId || ''];
+    if (project?.pdfSources && project.pdfSources.length > 0) {
+      const resolved = resolveSourceForPage(project.pdfSources, logicalPage);
+      if (resolved) return pdfDocsCacheRef.current[resolved.source.sourceId] || pdfDoc;
+    }
+    return pdfDoc;
+  }, [pdfDoc, library.currentProjectFileId, library.recentBooks]);
+
+  const getDocForPage = useCallback((logicalPage: number): { doc: pdfjsLib.PDFDocumentProxy; physicalPage: number } => {
+    const project = library.recentBooks[library.currentProjectFileId || ''];
+    if (project?.pdfSources && project.pdfSources.length > 0) {
+      const resolved = resolveSourceForPage(project.pdfSources, logicalPage);
+      if (resolved && pdfDocsCacheRef.current[resolved.source.sourceId]) {
+        return { doc: pdfDocsCacheRef.current[resolved.source.sourceId], physicalPage: resolved.physicalPage };
+      }
+    }
+    return { doc: pdfDoc!, physicalPage: logicalPage };
+  }, [pdfDoc, library.currentProjectFileId, library.recentBooks]);
+
   const { aiSettings, isSettingsOpen, setIsSettingsOpen, saveSettings, isApiConfigured, settingsLoaded } = useAiSettings();
 
   // --- Activity Detection ---
@@ -440,6 +472,8 @@ const App: React.FC = () => {
   const [editLanguageTarget, setEditLanguageTarget] = useState<{ fileId: string, currentLang: string } | null>(null);
   const [pageSelectionModal, setPageSelectionModal] = useState<any>({ isOpen: false, total: 0, targetPage: 0 });
   const [pendingReplacement, setPendingReplacement] = useState<any>(null);
+  const [addPagesModalOpen, setAddPagesModalOpen] = useState(false);
+  const [addPagesTargetFileId, setAddPagesTargetFileId] = useState<string | null>(null);
   const [confirmModal, setConfirmModal] = useState<{
     isOpen: boolean;
     title: string;
@@ -486,7 +520,8 @@ const App: React.FC = () => {
         let changed = false;
         for (const p of priorityPages) {
           if (!currentDims[p]) {
-            const page = await pdfDoc.getPage(p);
+            const { doc: dimsDoc, physicalPage } = getDocForPage(p);
+            const page = await dimsDoc.getPage(physicalPage);
             const userRotation = pageRotations[p] || 0;
             const baseRotation = (((page?.rotate || 0) + userRotation) % 360 + 360) % 360;
             const viewport = page.getViewport({ scale: 1, rotation: baseRotation });
@@ -522,7 +557,8 @@ const App: React.FC = () => {
               for (const p of batch) {
                 if (!isMounted) return;
                 try {
-                  const page = await pdfDoc.getPage(p);
+                  const { doc: batchDoc, physicalPage: batchPhysPage } = getDocForPage(p);
+                  const page = await batchDoc.getPage(batchPhysPage);
                   const userRotation = pageRotations[p] || 0;
                   const baseRotation = (((page?.rotate || 0) + userRotation) % 360 + 360) % 360;
                   const viewport = page.getViewport({ scale: 1, rotation: baseRotation });
@@ -637,7 +673,8 @@ const App: React.FC = () => {
 
     const renderPageWithRetry = async (p: number, attempt: number = 1, opts?: { quality?: number, scale?: number }): Promise<string> => {
       if (!isMounted || signal.aborted) throw new Error('cancelled');
-      if (!pdfDoc) throw new Error('PDF document not available');
+      const { doc: pageDoc, physicalPage } = getDocForPage(p);
+      if (!pageDoc) throw new Error('PDF document not available');
 
       const startTime = Date.now();
 
@@ -655,12 +692,12 @@ const App: React.FC = () => {
 
       // First check if page might be corrupted
       try {
-        const isCorrupted = await isPageCorrupted(pdfDoc, p);
+        const isCorrupted = await isPageCorrupted(pageDoc, physicalPage);
         if (isCorrupted) {
           log.warning(`Page ${p} detected as potentially corrupted, using enhanced fallback rendering`);
           pdfRenderAnalytics.recordCorruptedPage(p);
 
-          const result = await renderDocPageSafe(pdfDoc, p, {
+          const result = await renderDocPageSafe(pageDoc, physicalPage, {
             scale: scale, // Use the calculated scale
             jpegQuality: quality, // Use the calculated quality
             maxRetries: 5
@@ -686,8 +723,8 @@ const App: React.FC = () => {
         if (!isMounted) throw new Error('cancelled');
         log.info(`Attempting to render page ${p}, attempt ${attempt}/${maxAttempts} (quality: ${quality}, scale: ${scale}, timeout: ${timeoutMs}ms)`);
 
-        const result = await renderPageToObjectURL(p, {
-          pdfDoc,
+        const result = await renderPageToObjectURL(physicalPage, {
+          pdfDoc: pageDoc,
           pageReplacementsRef,
           pageRotationsRef,
           loadReplacementPdfDoc: getCachedReplacementPdfDoc
@@ -819,13 +856,15 @@ const App: React.FC = () => {
 
   // Helper Methods
   const ensurePreviewThumbnail = useCallback(async (p: number) => {
-    if (previewThumbnails[p] || !pdfDoc) return previewThumbnails[p] || null;
+    if (previewThumbnails[p]) return previewThumbnails[p] || null;
     try {
-      const objectUrl = await renderDocPageToObjectURL(pdfDoc, p, { scale: 0.2 });
+      const { doc: pageDoc, physicalPage } = getDocForPage(p);
+      if (!pageDoc) return null;
+      const objectUrl = await renderDocPageToObjectURL(pageDoc, physicalPage, { scale: 0.2 });
       setPreviewThumbnails((prev: Record<number, string>) => ({ ...prev, [p]: objectUrl }));
       return objectUrl;
     } catch { return null; }
-  }, [pdfDoc, previewThumbnails]);
+  }, [pdfDoc, previewThumbnails, getDocForPage]);
 
   const appendPageConsole = useCallback((page: number, msg: string, data?: unknown) => {
     const trace = pageTraceRef.current[page];
@@ -1115,6 +1154,7 @@ const App: React.FC = () => {
     // TASK 39: STOP RENDERING IMMEDIATELY
     // Clearing the PDF document stops the rendering loop in useEffect
     setPdfDoc(null);
+    pdfDocsCacheRef.current = {};
     setInternalSevereError(false);
     isProjectLoadedRef.current = false;
 
@@ -1413,6 +1453,27 @@ const App: React.FC = () => {
 
             setPdfDoc(pdf);
             setMetadata({ name: data.fileName, size: 0, totalPages: pdf.numPages });
+
+            // Load additional source PDFs into cache if pdfSources exists
+            if (data.pdfSources && Array.isArray(data.pdfSources) && data.pdfSources.length > 0) {
+              const cache: Record<string, pdfjsLib.PDFDocumentProxy> = {};
+              for (const src of data.pdfSources) {
+                try {
+                  const srcBuffer = await window.electronAPI.readPdfFile(src.filePath);
+                  cache[src.sourceId] = await pdfjsLib.getDocument({
+                    data: srcBuffer,
+                    cMapUrl: './pdfjs/cmaps/',
+                    cMapPacked: true,
+                    standardFontDataUrl: './pdfjs/standard_fonts/'
+                  }).promise;
+                } catch (srcErr) {
+                  log.error(`Failed to load source PDF ${src.sourceId}: ${src.filePath}`, srcErr);
+                }
+              }
+              pdfDocsCacheRef.current = cache;
+            } else {
+              pdfDocsCacheRef.current = {};
+            }
 
             // FIX: Ensure totalPages is synced to disk if it differs from JSON
             // This prevents "8 pages" issues if the JSON was corrupted/guessed while the PDF has 20.
@@ -2487,6 +2548,100 @@ const App: React.FC = () => {
     setCurrentPage((p: any) => normalizePageNumber(p, totalPages));
   }, [totalPages, normalizePageNumber]);
 
+  // Modals Handlers
+  const handleAddPages = useCallback((fileId: string) => {
+    setAddPagesTargetFileId(fileId);
+    setAddPagesModalOpen(true);
+  }, []);
+
+  const handleAppendPdf = useCallback(async (file: File) => {
+    if (!addPagesTargetFileId) return;
+    try {
+      showToast("Aggiunta PDF in corso...", 'info');
+      const buffer = await file.arrayBuffer();
+      const res = await window.electronAPI.appendPdfToProject({
+        fileId: addPagesTargetFileId,
+        buffer,
+        fileName: file.name
+      });
+      
+      if (res.success) {
+        showToast("PDF aggiunto con successo.", 'success');
+        if (library.currentProjectFileId === addPagesTargetFileId) {
+          void handleOpenProject(addPagesTargetFileId);
+        } else {
+          await library.refreshLibrary();
+        }
+      } else {
+        throw new Error(res.error || "Errore sconosciuto");
+      }
+    } catch (e: any) {
+      log.error("Errore", e);
+      showConfirm("Errore", `Impossibile aggiungere il PDF: ${e.message}`, () => {}, 'danger');
+    }
+  }, [addPagesTargetFileId, library, showToast, showConfirm, handleOpenProject]);
+
+  const handleMergeTranslation = useCallback(async (sourceFileId: string) => {
+    if (!addPagesTargetFileId || sourceFileId === addPagesTargetFileId) return;
+    try {
+      showToast("Unione in corso...", 'info');
+      const sourceProject = await window.electronAPI.loadTranslation(sourceFileId);
+      const targetProject = await window.electronAPI.loadTranslation(addPagesTargetFileId);
+      if (!sourceProject || !targetProject) throw new Error("Caricamento fallito");
+
+      const currentPages = targetProject.totalPages || 0;
+      const sourcePagesCount = sourceProject.totalPages || 0;
+      
+      const pdfSources = Array.isArray(targetProject.pdfSources) ? [...targetProject.pdfSources] : [];
+      if (!targetProject.pdfSources || targetProject.pdfSources.length === 0) {
+        pdfSources.push({
+          sourceId: `base_${addPagesTargetFileId}`, filePath: targetProject.originalFilePath || '',
+          fileName: targetProject.fileName || 'Originale', startPage: 1, endPage: currentPages,
+          pageCount: currentPages, addedAt: targetProject.timestamp || Date.now()
+        });
+      }
+      
+      if (sourceProject.pdfSources && sourceProject.pdfSources.length > 0) {
+        for (const src of sourceProject.pdfSources) {
+          pdfSources.push({ ...src, sourceId: `m_${Date.now()}_${src.sourceId}`, startPage: src.startPage + currentPages, endPage: src.endPage + currentPages });
+        }
+      } else {
+        pdfSources.push({
+          sourceId: `m_${Date.now()}_${sourceFileId}`, filePath: sourceProject.originalFilePath || '',
+          fileName: sourceProject.fileName || 'Unito', startPage: currentPages + 1, endPage: currentPages + sourcePagesCount,
+          pageCount: sourcePagesCount, addedAt: Date.now()
+        });
+      }
+
+      const newData = {
+        totalPages: currentPages + sourcePagesCount,
+        translations: { ...targetProject.translations, ...remapPageData(sourceProject.translations, currentPages) },
+        annotations: { ...targetProject.annotations, ...remapPageData(sourceProject.annotations, currentPages) },
+        verifications: { ...targetProject.verifications, ...remapPageData(sourceProject.verifications, currentPages) },
+        userHighlights: { ...targetProject.userHighlights, ...remapPageData(sourceProject.userHighlights, currentPages) },
+        userNotes: { ...targetProject.userNotes, ...remapPageData(sourceProject.userNotes, currentPages) },
+        translationsMeta: { ...targetProject.translationsMeta, ...remapPageData(sourceProject.translationsMeta, currentPages) },
+        verificationsMeta: { ...targetProject.verificationsMeta, ...remapPageData(sourceProject.verificationsMeta, currentPages) },
+        pdfSources
+      };
+
+      const saveRes = await window.electronAPI.saveTranslation({ fileId: addPagesTargetFileId, data: newData });
+      if (!saveRes.success) throw new Error("Errore nel salvataggio");
+
+      await window.electronAPI.deleteTranslation(sourceFileId);
+      showToast("Traduzioni unite con successo.", 'success');
+      
+      if (library.currentProjectFileId === addPagesTargetFileId) {
+        void handleOpenProject(addPagesTargetFileId);
+      } else {
+        await library.refreshLibrary();
+      }
+    } catch (e: any) {
+      log.error("Errore unione", e);
+      showConfirm("Errore", `Impossibile unire: ${e.message}`, () => {}, 'danger');
+    }
+  }, [addPagesTargetFileId, library, showToast, showConfirm, handleOpenProject]);
+
   useEffect(() => {
     if (isHomeView) {
       setBottomBarHeight(24);
@@ -2771,6 +2926,7 @@ const App: React.FC = () => {
               onImportProject={handleImportProject}
               onOpenProject={handleOpenProject}
               onRenameProject={(id: string, name: string, e: any, lang?: string) => { e?.stopPropagation(); setRenameState({ fileId: id, currentName: name, currentLang: lang }); }}
+              onAddPages={handleAddPages}
               onEditLanguageProject={(id: string, lang: string) => { setEditLanguageTarget({ fileId: id, currentLang: lang }); setEditLanguagePromptOpen(true); }}
               onDeleteProject={async (id: string, e: any) => {
                 e?.stopPropagation();
@@ -3180,6 +3336,15 @@ const App: React.FC = () => {
           type={confirmModal.type}
           onConfirm={confirmModal.onConfirm}
           onClose={() => setConfirmModal(prev => ({ ...prev, isOpen: false }))}
+        />
+
+        <AddPagesModal
+          isOpen={addPagesModalOpen}
+          onClose={() => { setAddPagesModalOpen(false); setAddPagesTargetFileId(null); }}
+          onAppendPdf={handleAppendPdf}
+          onMergeTranslation={handleMergeTranslation}
+          recentBooks={library.recentBooks}
+          currentFileId={addPagesTargetFileId || ''}
         />
 
         {toast && (

@@ -1,6 +1,6 @@
 import React, { useState, useMemo, useEffect } from 'react';
 import ReactDOM from 'react-dom';
-import { AlertCircle, Pencil, Trash2, MoreHorizontal, Tag, FileDown, Loader2, Plus, Settings, Search, X, BookImage, ChevronLeft, ChevronRight } from 'lucide-react';
+import { AlertCircle, Pencil, Trash2, MoreHorizontal, Tag, FileDown, Loader2, Plus, Settings, Search, X, BookImage, ChevronLeft, ChevronRight, BookPlus } from 'lucide-react';
 import { useLibrary } from '../../contexts/LibraryContext';
 import { ReadingProgress } from '../../types';
 import { getLanguageFlag } from '../../utils/languageUtils';
@@ -16,6 +16,7 @@ interface RecentBooksGridProps {
   onEditLanguageProject?: (fileId: string, currentLang: string) => void;
   onManageGroups: (fileId: string) => void;
   onExportGpt: (fileId: string) => void;
+  onAddPages?: (fileId: string) => void;
   onManageCover: (fileId: string) => void;
   onSetOpenMenuId: (id: string | null) => void;
   openMenuId: string | null;
@@ -36,6 +37,7 @@ export const RecentBooksGrid: React.FC<RecentBooksGridProps> = ({
   onManageGroups,
   onExportGpt,
   onManageCover,
+  onAddPages,
   onSetOpenMenuId,
   openMenuId,
   isActiveProjectPaused,
@@ -414,6 +416,15 @@ export const RecentBooksGrid: React.FC<RecentBooksGridProps> = ({
                       >
                         <FileDown size={13} className="text-txt-muted" /> Esporta (.gpt)
                       </button>
+                      {onAddPages && (
+                        <button
+                          onClick={(e) => { e.stopPropagation(); onSetOpenMenuId(null); onAddPages(book.fileId || ""); }}
+                          className="flex items-center gap-2.5 w-full px-3 py-2.5 text-[11px] text-txt-secondary hover:bg-white/[0.04] hover:text-txt-primary text-left transition-colors duration-100 focus:outline-none"
+                          role="menuitem"
+                        >
+                          <BookPlus size={13} className="text-txt-muted" /> Aggiungi Pagine
+                        </button>
+                      )}
                       <div className="border-t border-border-muted" />
                       <button
                         onClick={(e) => { e.stopPropagation(); onSetOpenMenuId(null); onDeleteProject(book.fileId || "", e); }}

@@ -27,6 +27,7 @@ Sei un traduttore editoriale professionista dal {{sourceLang}} all'italiano. Tra
 - Per testo illeggibile usa \`[ILLEGIBILE]\` (frasi) o \`[PAROLA ILLEGIBILE]\` (singole parole). Non inventare.
 - Unisci nello stesso paragrafo le righe spezzate dall'OCR; mantieni l'a capo solo tra blocchi tipograficamente distinti.
 - Per le note a piè di pagina: usa richiami numerici (¹ ² ³) nel testo, e riporta il contenuto della nota dopo una riga \`---\` in fondo alla colonna o pagina di appartenenza.
+- Per le tabelle: traduci cella per cella mantenendo l'ordine righe→colonne. Usa sintassi Markdown (\`| Col1 | Col2 |\`, \`|------|------|\`, \`| dato | dato |\`). Non convertire tabelle in elenchi. Se la tabella continua, aggiungi \`[TABELLA CONTINUA]\`.
 - Output in italiano. Mai trascrivere il testo nella lingua sorgente.
 
 {{legalContext}}
@@ -74,6 +75,20 @@ Primo paragrafo della colonna sinistra che continua qui¹.
 Primo paragrafo della colonna destra².
 ---
 ² Nota della colonna destra.
+\`\`\`
+
+Esempio 3 — testo con tabella:
+\`\`\`
+Titolo del paragrafo
+
+Testo introduttivo sopra la tabella.
+
+| Nome | Valore | Unità |
+|------|--------|-------|
+| Primo dato | 42 | kg |
+| Secondo dato | 18 | m |
+
+Testo che segue la tabella.
 \`\`\`
 
 ### Final check

@@ -32,6 +32,7 @@ interface HomeViewProps {
   onOpenSettings: () => void;
   onManageGroups: (fileId: string) => void;
   onExportGpt: (fileId: string) => void;
+  onAddPages?: (fileId: string) => void;
   onManageCover: (fileId: string) => void;
   isConsultationMode?: boolean;
   isActiveProjectPaused: boolean;
@@ -68,6 +69,7 @@ export const HomeView: React.FC<HomeViewProps> = ({
   onOpenSettings,
   onManageGroups,
   onExportGpt,
+  onAddPages,
   onManageCover,
   isConsultationMode,
   isActiveProjectPaused,
@@ -257,6 +259,7 @@ export const HomeView: React.FC<HomeViewProps> = ({
                 onEditLanguageProject={onEditLanguageProject}
                 onManageGroups={onManageGroups}
                 onExportGpt={onExportGpt}
+                onAddPages={onAddPages}
                 onManageCover={onManageCover}
                 onSetOpenMenuId={onSetOpenMenuId}
                 openMenuId={openMenuId}

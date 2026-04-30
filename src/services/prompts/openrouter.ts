@@ -71,6 +71,15 @@ Esegui questi tre passaggi PRIMA di scrivere:
 7. OCR: ricomponi nello stesso paragrafo le righe spezzate; mantieni l'a capo solo tra blocchi distinti.
 </critical_rules>
 
+<table_rules>
+Se la [PAGINA TARGET] contiene tabelle o dati tabulari:
+1. IDENTIFICA ogni tabella (incluse tabelle parziali ai margini).
+2. TRADUCI cella per cella, mantenendo l'ordine righe→colonne.
+3. FORMATTAZIONE OUTPUT: usa Markdown — riga intestazione \`| Col1 | Col2 |\`, separatore \`|------|------|\`, righe dati \`| dato | dato |\`.
+4. NON convertire tabelle in elenchi o prosa. Una tabella nell'originale DEVE restare tabella.
+5. Se la tabella continua nella pagina successiva, aggiungi "[TABELLA CONTINUA]" dopo l'ultima riga.
+</table_rules>
+
 <examples>
 <example index="1">
 <scenario>Pagina a UNA colonna con una nota.</scenario>
@@ -101,6 +110,22 @@ Primo paragrafo della colonna destra².
 Secondo paragrafo della colonna destra.
 ---
 ² Nota della colonna destra.
+</output>
+</example>
+
+<example index="3">
+<scenario>Pagina con testo e una tabella.</scenario>
+<output>
+Titolo del paragrafo
+
+Testo introduttivo sopra la tabella.
+
+| Nome | Valore | Unità |
+|------|--------|-------|
+| Primo dato | 42 | kg |
+| Secondo dato | 18 | m |
+
+Testo che segue la tabella.
 </output>
 </example>
 </examples>
@@ -167,6 +192,7 @@ NON omettere [[PAGE_SPLIT]] in caso di due colonne.
 <formatting>
 - PARAGRAFI: unisci le righe spezzate dall'OCR. Mantieni "a capo" tra blocchi distinti.
 - NOTE: richiamo (¹ ² ³) nel testo, contenuto dopo "---" in fondo. Con [[PAGE_SPLIT]]: note sinistra prima del marker, destra dopo. Mai duplicare.
+- TABELLE: se la pagina contiene tabelle, traduci cella per cella. Usa Markdown (\`| Col1 | Col2 |\`, \`|------|------|\`, \`| dato | dato |\`). Non convertire in elenchi. Se la tabella continua, aggiungi "[TABELLA CONTINUA]".
 </formatting>
 
 <example>
@@ -180,6 +206,21 @@ Primo paragrafo della colonna sinistra¹.
 Primo paragrafo della colonna destra².
 ---
 ² Nota destra.
+</example>
+
+<example>
+Testo con tabella:
+
+Titolo del paragrafo
+
+Testo introduttivo sopra la tabella.
+
+| Nome | Valore | Unità |
+|------|--------|-------|
+| Primo dato | 42 | kg |
+| Secondo dato | 18 | m |
+
+Testo che segue la tabella.
 </example>
 
 <final_check>

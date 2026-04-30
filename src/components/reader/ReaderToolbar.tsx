@@ -115,7 +115,7 @@ export const ReaderToolbar: React.FC<ReaderToolbarProps> = ({
         </div>
 
         <div className="relative group">
-          <div className="absolute bottom-full mb-3 left-1/2 -translate-x-1/2 opacity-0 group-hover:opacity-100 pointer-events-none group-hover:pointer-events-auto transition-all duration-150 scale-95 group-hover:scale-100 origin-bottom z-[200]">
+          <div className="absolute bottom-full left-1/2 -translate-x-1/2 pb-2 opacity-0 group-hover:opacity-100 pointer-events-none group-hover:pointer-events-auto transition-all duration-150 scale-95 group-hover:scale-100 origin-bottom z-[200]">
             <div className="flex flex-col gap-2 bg-surface-0/95 px-3 py-2.5 rounded-xl backdrop-blur-md border border-border-muted shadow-surface-xl">
               <span className="text-[9px] font-bold text-txt-secondary uppercase tracking-wider text-center">Marker</span>
               <div className="flex gap-1.5">

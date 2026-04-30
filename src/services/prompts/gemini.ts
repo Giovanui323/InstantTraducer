@@ -42,12 +42,20 @@ Ricevi fino a 3 immagini:
 
 ## Rules
 - Output in italiano. Mai trascrivere nella lingua sorgente.
+- **NO markdown heading syntax**: non usare \`#\`, \`##\`, \`###\` per i titoli. Scrivi i titoli come testo normale, senza prefissi.
 - Completezza assoluta: ogni riga, paragrafo, didascalia e nota della \`[PAGINA TARGET]\`.
 - Solo \`[PAGINA TARGET]\`: ignora le immagini di contesto.
 - Parole spezzate a fine pagina → traduci intere; frammento iniziale residuo → ignora.
 - Illeggibili: \`[ILLEGIBILE]\` per frasi, \`[PAROLA ILLEGIBILE]\` per parole.
 - OCR: unisci righe spezzate nello stesso paragrafo; a capo solo tra blocchi tipografici distinti.
 - Note: richiami (¹ ² ³) nel testo, contenuto dopo \`---\` in fondo alla colonna/pagina. Mai duplicare.
+
+## Tables
+Se la pagina contiene tabelle o dati tabulari:
+1. Traduci cella per cella, mantenendo l'ordine righe→colonne.
+2. Usa sintassi Markdown: riga intestazione \`| Col1 | Col2 |\`, separatore \`|------|------|\`, righe dati \`| dato | dato |\`.
+3. Non convertire tabelle in elenchi o prosa. Tabella nell'originale DEVE restare tabella.
+4. Se la tabella continua nella pagina successiva, aggiungi \`[TABELLA CONTINUA]\` dopo l'ultima riga.
 
 ## Two-column layout
 Se \`[PAGINA TARGET]\` è a due colonne:
@@ -84,6 +92,20 @@ Primo paragrafo colonna destra².
 Secondo paragrafo colonna destra.
 ---
 ² Nota destra.
+\`\`\`
+
+### Example 3 — testo con tabella
+\`\`\`
+Titolo del paragrafo
+
+Testo introduttivo sopra la tabella.
+
+| Nome | Valore | Unità |
+|------|--------|-------|
+| Primo dato | 42 | kg |
+| Secondo dato | 18 | m |
+
+Testo che segue la tabella.
 \`\`\`
 
 ## Context
@@ -130,6 +152,8 @@ Ricevi fino a 3 immagini:
 - **OCR**: ricomponi nello stesso paragrafo le righe spezzate dall'OCR; mantieni l'a capo solo tra blocchi tipograficamente distinti.
 - **Note a piè di pagina**: usa richiami numerici (¹ ² ³) e riporta il testo della nota dopo \`---\` in fondo alla colonna o pagina. Mai duplicare.
 - **Zero commenti**: nessun preambolo, nessun commento sul processo. Solo traduzione.
+- **Tabelle**: se la pagina contiene tabelle o dati tabulari, traduci cella per cella mantenendo l'ordine righe→colonne. Usa sintassi Markdown (\`| Col1 | Col2 |\`, \`|------|------|\`, \`| dato | dato |\`). Non convertire tabelle in elenchi o prosa. Se la tabella continua nella pagina successiva, aggiungi \`[TABELLA CONTINUA]\`.
+- **NO markdown heading syntax**: non usare \`#\`, \`##\`, \`###\` per i titoli. Scrivi i titoli come testo normale, senza prefissi.
 
 ## Page split rule (due colonne)
 Se la \`[PAGINA TARGET]\` è impaginata in **due colonne affiancate**:
@@ -167,6 +191,20 @@ Primo paragrafo della colonna destra².
 Secondo paragrafo della colonna destra.
 ---
 ² Nota della colonna destra.
+\`\`\`
+
+### Example 3 — testo con tabella
+\`\`\`
+Titolo del paragrafo
+
+Testo introduttivo sopra la tabella.
+
+| Nome | Valore | Unità |
+|------|--------|-------|
+| Primo dato | 42 | kg |
+| Secondo dato | 18 | m |
+
+Testo che segue la tabella.
 \`\`\`
 
 ## Context (pagina precedente, solo riferimento — NON includere nell'output)
@@ -214,6 +252,8 @@ Ricevi fino a 3 immagini, in questo ordine:
 - **OCR**: ricomponi nello stesso paragrafo le righe spezzate dall'OCR; mantieni l'a capo solo tra blocchi tipograficamente distinti.
 - **Note a piè di pagina**: usa richiami numerici (¹ ² ³) nel testo e riporta il contenuto integrale della nota dopo una riga \`---\` in fondo alla colonna o pagina di appartenenza. Con \`[[PAGE_SPLIT]]\` le note della sinistra vanno PRIMA del marker, quelle della destra DOPO. Non duplicare mai.
 - **Verbosity**: nessun preambolo, nessun commento sul processo. Solo traduzione.
+- **Tabelle**: se la pagina contiene tabelle o dati tabulari, traduci cella per cella mantenendo l'ordine righe→colonne. Usa sintassi Markdown (\`| Col1 | Col2 |\`, \`|------|------|\`, \`| dato | dato |\`). Non convertire tabelle in elenchi o prosa. Tabella nell'originale DEVE restare tabella. Se la tabella continua nella pagina successiva, aggiungi \`[TABELLA CONTINUA]\`.
+- **NO markdown heading syntax**: non usare \`#\`, \`##\`, \`###\` per i titoli. Scrivi i titoli come testo normale, senza prefissi.
 
 ## Page split rule (due colonne)
 Se la \`[PAGINA TARGET]\` è impaginata in **due colonne affiancate**:
@@ -251,6 +291,20 @@ Primo paragrafo della colonna destra².
 Secondo paragrafo della colonna destra.
 ---
 ² Nota della colonna destra.
+\`\`\`
+
+### Example 3 — testo con tabella
+\`\`\`
+Titolo del paragrafo
+
+Testo introduttivo sopra la tabella.
+
+| Nome | Valore | Unità |
+|------|--------|-------|
+| Primo dato | 42 | kg |
+| Secondo dato | 18 | m |
+
+Testo che segue la tabella.
 \`\`\`
 
 ## Context (pagina precedente, solo riferimento — NON includere nell'output)

@@ -48,6 +48,7 @@ contextBridge.exposeInMainWorld('electronAPI', {
   copyOriginalPdf: (payload) => invoke('copy-original-pdf', payload),
   saveOriginalPdfBuffer: (payload) => invoke('save-original-pdf-buffer', payload),
   exportOriginalPdf: (fileId) => invoke('export-original-pdf', fileId),
+  appendPdfToProject: (payload) => invoke('append-pdf-to-project', payload),
   getOriginalPdfPath: (fileId) => invoke('get-original-pdf-path', fileId),
   calculateFileFingerprint: (filePath) => invoke('calculate-file-fingerprint', filePath),
 

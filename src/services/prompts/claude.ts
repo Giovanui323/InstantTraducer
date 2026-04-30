@@ -46,6 +46,20 @@ Esegui questi tre passaggi PRIMA di scrivere anche un solo carattere:
 7. PARAGRAFI E OCR: unisci nello stesso paragrafo le righe spezzate dall'OCR. Mantieni invece l'a capo tra blocchi tipograficamente distinti (titoli, paragrafi, note).
 </critical_rules>
 
+<table_rules>
+Quando la [PAGINA TARGET] contiene tabelle, griglie o dati strutturati in colonne e righe:
+1. IDENTIFICA ogni tabella (incluse tabelle parziali che attraversano i margini della pagina).
+2. TRADUCI cella per cella, mantenendo l'ordine righe→colonne dell'originale.
+3. FORMATTAZIONE OUTPUT: usa la sintassi Markdown per le tabelle:
+   - Riga di intestazione: | Col1 | Col2 | Col3 |
+   - Separatore:           |------|------|------|
+   - Righe dati:           | dato | dato | dato |
+4. ALLINEAMENTO: adatta la larghezza delle colonne al contenuto tradotto. Le intestazioni tradotte possono essere più lunghe o corte dell'originale.
+5. TABELLE IN MEZZO AL TESTO: traduci normalmente il testo sopra/sotto e inserisci la tabella Markdown nel punto corrispondente.
+6. NON convertire tabelle in elenchi o prosa. Una tabella nell'originale DEVE restare tabella nella traduzione.
+7. TABELLE PARZIALI: se una tabella continua nella pagina successiva, traduci le righe visibili e aggiungi "[TABELLA CONTINUA]" dopo l'ultima riga.
+</table_rules>
+
 <examples>
 <example index="1">
 <scenario>Pagina a UNA colonna con una nota a piè di pagina.</scenario>
@@ -76,6 +90,22 @@ Primo paragrafo della colonna destra².
 Secondo paragrafo della colonna destra.
 ---
 ² Nota della colonna destra.
+</output>
+</example>
+
+<example index="3">
+<scenario>Pagina con testo e una tabella.</scenario>
+<output>
+Titolo del paragrafo
+
+Testo introduttivo sopra la tabella.
+
+| Nome | Valore | Unità |
+|------|--------|-------|
+| Primo dato | 42 | kg |
+| Secondo dato | 18 | m |
+
+Testo che segue la tabella.
 </output>
 </example>
 </examples>

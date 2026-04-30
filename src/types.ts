@@ -216,6 +216,17 @@ export interface Group {
   name: string;
 }
 
+export interface SourcePdf {
+  sourceId: string;
+  filePath: string;
+  fileName: string;
+  startPage: number;
+  endPage: number;
+  pageCount: number;
+  fingerprint?: string;
+  addedAt: number;
+}
+
 export interface ReadingProgress {
   fileId?: string;
   fileName: string;
@@ -246,6 +257,7 @@ export interface ReadingProgress {
   hasCustomCover?: boolean;
   coverSource?: 'isbn' | 'custom' | 'generated' | 'firstpage';
   isbn?: string;
+  pdfSources?: SourcePdf[];
 }
 
 export interface PDFMetadata {

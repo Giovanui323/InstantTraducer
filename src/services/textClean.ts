@@ -16,5 +16,7 @@ export const cleanTranslationText = (text: string): string => {
   t = t.replace(/[ \t]+\n/g, "\n");
   t = t.replace(/\n[ \t]+/g, "\n");
   t = t.replace(/\n{3,}/g, "\n\n");
+  // Strip markdown heading syntax (### Title → Title) — AI models sometimes emit this
+  t = t.replace(/^#{1,3}[ \t]+/gm, "");
   return t;
 }

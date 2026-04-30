@@ -1696,6 +1696,83 @@ export function setupProjectHandlers(providedLogger, providedMainWindow) {
         }
     });
 
+    ipcMain.handle('append-pdf-to-project', async (event, { fileId: requestedFileId, buffer, fileName, sourceId }) => {
+        const cid = `append_pdf_${Math.random().toString(36).slice(2, 7)}`;
+        try {
+            const startedAt = Date.now();
+            if (!buffer) throw new Error('Buffer mancante.');
+
+            const id = requireUuidV4FileId(requestedFileId);
+            const sid = sourceId || `appended_${Date.now()}`;
+
+            logMain(`[${cid}] IPC append-pdf-to-project: richiesta ricevuta`, { requestedFileId: id, sourceId: sid, bytes: buffer.length });
+
+            const translationsDir = await getTranslationsDir();
+            return writeSequencer.enqueue(id, async (op) => {
+                const operationId = op?.operationId || 'unknown';
+                logMain(`[${cid}] Sequencer: avvio append PDF`, { operationId, fileId: id });
+                try {
+                    const assetsDir = await projectAssetsDirFromFileId(id);
+                    const targetPdfPath = path.join(assetsDir, `${sid}.pdf`);
+                    await fs.promises.mkdir(assetsDir, { recursive: true });
+
+                    const buf = Buffer.isBuffer(buffer) ? buffer : Buffer.from(buffer);
+                    await safeWriteFile(targetPdfPath, buf);
+
+                    const jsonPath = safeJoin(translationsDir, id);
+                    let existing = {};
+                    try {
+                        const raw = await fs.promises.readFile(jsonPath, 'utf-8');
+                        existing = JSON.parse(raw) || {};
+                    } catch { }
+
+                    const currentTotal = typeof existing.totalPages === 'number' ? existing.totalPages : 0;
+                    const name = String(fileName || '').trim();
+                    const now = Date.now();
+
+                    // Get page count from the new PDF
+                    let newPageCount = 0;
+                    try {
+                        const pdf = await import('pdf-parse/lib/pdf.js/v1.10.100/pdf.js').then(m => m.getDocument ? m : null).catch(() => null);
+                        // Fallback: use pdfjs-dist via the buffer
+                        // We'll get the page count from the renderer side instead
+                    } catch { }
+
+                    // Build SourcePdf entry
+                    const sourceEntry = {
+                        sourceId: sid,
+                        filePath: targetPdfPath,
+                        fileName: name || `appended_${sid}`,
+                        startPage: currentTotal + 1,
+                        endPage: currentTotal, // will be updated by renderer with actual pageCount
+                        pageCount: 0,
+                        addedAt: now
+                    };
+
+                    const pdfSources = Array.isArray(existing.pdfSources) ? [...existing.pdfSources] : [];
+                    pdfSources.push(sourceEntry);
+
+                    existing.pdfSources = pdfSources;
+                    existing.updatedAt = now;
+
+                    await safeWriteFile(jsonPath, JSON.stringify(existing, null, 2));
+
+                    logMain(`[${cid}] Sequencer: append PDF completato`, { operationId, fileId: id, sourceId: sid, target: targetPdfPath, elapsedMs: Date.now() - startedAt });
+                    return { success: true, fileId: id, sourceId: sid, path: targetPdfPath, pdfSources, operationId };
+                } catch (writeErr) {
+                    logError(`[${cid}] Sequencer: errore append PDF`, { fileId: id, error: writeErr.message });
+                    throw writeErr;
+                }
+            }, { priority: 'CRITICAL', debounceKey: `pdf_${id}` });
+        } catch (e) {
+            logWarn(`[${cid}] IPC append-pdf-to-project failed`, {
+                requestedFileId,
+                error: e.message
+            });
+            return { success: false, error: e?.message || String(e) };
+        }
+    });
+
     ipcMain.on('save-translation-requested', (event, payload) => {
         lastTranslationSaveRequestedAt = Date.now();
         const fileId = payload && typeof payload === 'object' ? payload.fileId : undefined;

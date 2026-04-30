@@ -5,6 +5,7 @@ import { cleanTranslationText } from '../textClean';
 import { withTimeout, sleep } from '../../utils/async';
 import { estimateBytesFromBase64, downscaleDataUrlToJpeg, buildJpegDataUrlFromBase64, downscaleBase64ForAI, splitImageVertically } from '../../utils/imageUtils';
 import { renderDocPageWithFallback } from '../../utils/pdfUtils';
+import { resolveSourceForPage } from '../../utils/pdfSourceUtils';
 import { AI_TRANSLATION_TIMEOUT_MS, PAGE_RENDER_TIMEOUT_MS, PAGE_CACHE_MAX_EDGE, PAGE_CACHE_JPEG_QUALITY, VERIFICATION_CONTEXT_TIMEOUT_MS, AI_IMAGE_MAX_LONG_SIDE, AI_IMAGE_JPEG_QUALITY } from '../../constants';
 import { ConcurrencyControl } from '../../hooks/useTranslationQueue';
 import { isDiagnosticLogEnabled, addDiagnosticEntry } from './TranslationDiagnosticLogger';
@@ -24,6 +25,8 @@ export interface TranslationExecutionServices {
 
 export interface TranslationExecutionContext {
   pdfDoc: any;
+  pdfDocsCache?: Record<string, any>;
+  pdfSources?: any[];
   metadata: PDFMetadata | null;
   currentProjectFileId: string | null;
   aiSettings: AISettings;

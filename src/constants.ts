@@ -190,6 +190,19 @@ FORMATTAZIONE:
 - Unisci le righe spezzate dall'OCR nello stesso paragrafo. Mantieni gli "a capo" tra blocchi distinti (paragrafi, titoli, note, copyright).
 - NOTE A PIÈ DI PAGINA: richiamo numerico (¹ ² ³) nel testo, contenuto integrale dopo "---" in fondo alla colonna/pagina di appartenenza. Con [[PAGE_SPLIT]]: note della colonna sinistra prima del marker, della destra dopo. Mai duplicare una nota.
 
+TABELLE E DATI TABULARI:
+Quando la pagina contiene tabelle, griglie o dati strutturati in colonne e righe:
+1. IDENTIFICA ogni tabella nella pagina (incluse tabelle parziali che attraversano i margini).
+2. TRADUCI cella per cella, mantenendo l'ordine righe→colonne dell'originale.
+3. FORMATTAZIONE OUTPUT: usa la sintassi Markdown per le tabelle:
+   - Riga di intestazione: | Col1 | Col2 | Col3 |
+   - Separatore:           |------|------|------|
+   - Righe dati:           | dato | dato | dato |
+4. ALLINEAMENTO: adatta la larghezza delle colonne al contenuto tradotto. Le intestazioni tradotte possono essere più lunghe o corte dell'originale.
+5. TABELLE IMPIEGATE IN TESTO: se la tabella è circondata da paragrafi, traduci normalmente il testo sopra/sotto e inserisci la tabella Markdown nel punto corrispondente.
+6. NON convertire tabelle in elenchi o prosa. Una tabella nell'originale DEVE restare tabella nella traduzione.
+7. TABELLE PARZIALI: se una tabella continua nella pagina successiva, traduci le righe visibili e aggiungi "[TABELLA CONTINUA]" dopo l'ultima riga.
+
 ESEMPIO (pagina a DUE COLONNE con note):
 Titolo del capitolo
 Primo paragrafo della colonna sinistra che continua qui¹.
@@ -238,6 +251,12 @@ REGOLA [[PAGE_SPLIT]] (CRITICA):
 Pagina a DUE COLONNE → traduci colonna SINISTRA, poi su riga separata scrivi esattamente [[PAGE_SPLIT]], poi colonna DESTRA.
 
 NOTE: richiamo (¹ ² ³) nel testo, contenuto dopo "---" in fondo. Con [[PAGE_SPLIT]]: note sinistra prima del marker, destra dopo. Mai duplicare.
+
+TABELLE: se la pagina contiene tabelle o dati tabulari, traduci cella per cella e usa formato Markdown:
+| Intestazione 1 | Intestazione 2 |
+|-----------------|-----------------|
+| dato tradotto   | dato tradotto   |
+NON convertire tabelle in elenchi o prosa. Tabella nell'originale DEVE restare tabella. Se la tabella continua nella pagina successiva, aggiungi "[TABELLA CONTINUA]".
 
 ESEMPIO (pagina a due colonne):
 Titolo capitolo

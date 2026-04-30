@@ -34,6 +34,11 @@ export const mergeProjectData = (existing, incoming) => {
   const nextCrops = (nextPageImages?.crops && typeof nextPageImages.crops === 'object') ? nextPageImages.crops : undefined;
 
   const merged = { ...base, ...next };
+
+  // pdfSources is an array — replace, don't merge
+  if (next.pdfSources && Array.isArray(next.pdfSources)) {
+    merged.pdfSources = next.pdfSources;
+  }
   if (nextTranslations) merged.translations = { ...baseTranslations, ...nextTranslations };
   if (nextAnnotations) merged.annotations = { ...baseAnnotations, ...nextAnnotations };
   if (nextVerifications) merged.verifications = { ...baseVerifications, ...nextVerifications };

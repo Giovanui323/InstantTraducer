@@ -1,3 +1,4 @@
+export * from './AddPagesModal';
 export * from './ControlsBar';
 export * from './CreateGroupModal';
 export * from './EnhancedErrorBoundary';
